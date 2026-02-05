@@ -1,6 +1,19 @@
 
+import { db, auth } from './firebase';
+import { 
+  doc, 
+  setDoc, 
+  getDoc, 
+  updateDoc, 
+  collection, 
+  getDocs, 
+  query, 
+  deleteDoc 
+} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
 export interface RegistrationEntry {
-  id: string;
+  uid: string;
   fullName: string;
   email: string;
   phone: string;
@@ -10,45 +23,51 @@ export interface RegistrationEntry {
   weeksToCommit: number;
   totalPrice: number;
   status: 'Pending' | 'Complete';
+  role: 'student' | 'admin';
   timestamp: number;
 }
 
-const STORAGE_KEY = 'cg_registrations';
-
 export const registrationStore = {
-  save(entry: Omit<RegistrationEntry, 'id' | 'timestamp' | 'status'>): RegistrationEntry {
-    const registrations = this.getAll();
-    const newEntry: RegistrationEntry = {
+  // NEW: Integrated Auth + Firestore Creation
+  async createAccount(entry: any, password: string): Promise<string> {
+    // 1. Create User in Firebase Auth
+    const userCredential = await createUserWithEmailAndPassword(auth, entry.email, password);
+    const user = userCredential.user;
+
+    // 2. Save Profile in Firestore using the UID
+    const profile: RegistrationEntry = {
       ...entry,
-      id: Math.random().toString(36).substr(2, 9),
+      uid: user.uid,
+      role: 'student',
       status: 'Pending',
       timestamp: Date.now()
     };
-    registrations.push(newEntry);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(registrations));
-    return newEntry;
+
+    await setDoc(doc(db, "users", user.uid), profile);
+    return user.uid;
   },
 
-  updateStatus(id: string, status: 'Pending' | 'Complete'): void {
-    const registrations = this.getAll();
-    const index = registrations.findIndex(r => r.id === id);
-    if (index !== -1) {
-      registrations[index].status = status;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(registrations));
-    }
+  async updateStatus(uid: string, status: 'Pending' | 'Complete'): Promise<void> {
+    const userRef = doc(db, "users", uid);
+    await updateDoc(userRef, { status });
   },
 
-  getAll(): RegistrationEntry[] {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
+  async getAll(): Promise<RegistrationEntry[]> {
+    const q = query(collection(db, "users"));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => doc.data() as RegistrationEntry);
   },
 
-  delete(id: string): void {
-    const registrations = this.getAll().filter(r => r.id !== id);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(registrations));
+  async delete(uid: string): Promise<void> {
+    await deleteDoc(doc(db, "users", uid));
+    // Note: This doesn't delete the Auth user, usually done via Admin SDK/Cloud Functions
   },
 
-  clearAll(): void {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+  // Fix: Added clearAll method to handle batch deletion in AdminDashboard
+  async clearAll(): Promise<void> {
+    const q = query(collection(db, "users"));
+    const querySnapshot = await getDocs(q);
+    const deletePromises = querySnapshot.docs.map(d => deleteDoc(d.ref));
+    await Promise.all(deletePromises);
   }
 };

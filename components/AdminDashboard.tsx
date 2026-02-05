@@ -15,8 +15,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate, onLogout })
   const [showConfig, setShowConfig] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('gs_webhook_url') || '');
 
+  // Fix: Added async fetcher to handle Promise from registrationStore.getAll()
+  const fetchRegistrations = async () => {
+    const data = await registrationStore.getAll();
+    setRegistrations(data);
+  };
+
   useEffect(() => {
-    setRegistrations(registrationStore.getAll());
+    fetchRegistrations();
   }, []);
 
   const handleSaveWebhook = (e: React.FormEvent) => {
@@ -57,22 +63,25 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate, onLogout })
     }
   };
 
-  const handleToggleStatus = (id: string, current: string) => {
+  // Fix: updated to use async/await and refresh data after status update
+  const handleToggleStatus = async (uid: string, current: string) => {
     const next = current === 'Pending' ? 'Complete' : 'Pending';
-    registrationStore.updateStatus(id, next as 'Pending' | 'Complete');
-    setRegistrations(registrationStore.getAll());
+    await registrationStore.updateStatus(uid, next as 'Pending' | 'Complete');
+    await fetchRegistrations();
   };
 
-  const handleDelete = (id: string) => {
+  // Fix: updated to use async/await and refresh data after deletion
+  const handleDelete = async (uid: string) => {
     if (confirm('Are you sure you want to delete this registration?')) {
-      registrationStore.delete(id);
-      setRegistrations(registrationStore.getAll());
+      await registrationStore.delete(uid);
+      await fetchRegistrations();
     }
   };
 
-  const handleClearAll = () => {
+  // Fix: updated to use async/await and call registrationStore.clearAll()
+  const handleClearAll = async () => {
     if (confirm('DANGER: This will permanently delete ALL registration records. Are you absolutely sure?')) {
-      registrationStore.clearAll();
+      await registrationStore.clearAll();
       setRegistrations([]);
     }
   };
@@ -241,7 +250,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate, onLogout })
                   </tr>
                 ) : (
                   filteredData.sort((a,b) => b.timestamp - a.timestamp).map((reg) => (
-                    <tr key={reg.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                    <tr key={reg.uid} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/30 transition-colors">
                       <td className="px-8 py-6">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-blue-900 text-white flex items-center justify-center font-black text-xs">
@@ -263,7 +272,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate, onLogout })
                       </td>
                       <td className="px-8 py-6">
                         <button 
-                          onClick={() => handleToggleStatus(reg.id, reg.status)}
+                          onClick={() => handleToggleStatus(reg.uid, reg.status)}
                           className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
                             reg.status === 'Complete' 
                             ? 'bg-teal-50 border-teal-200 text-teal-600 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-400' 
@@ -276,7 +285,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate, onLogout })
                       <td className="px-8 py-6">
                         <div className="flex items-center gap-3">
                           <button 
-                            onClick={() => handleDelete(reg.id)}
+                            onClick={() => handleDelete(reg.uid)}
                             className="p-2 text-slate-300 hover:text-red-600 transition-colors"
                             title="Delete Registration"
                           >

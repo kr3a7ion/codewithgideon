@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { View } from '../App';
 import { IMAGES } from '../assets/images';
@@ -29,7 +30,7 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
     {
       id: 'path-ai' as View,
       title: 'AI-Assisted Development',
-      duration: '4-6 Weeks',
+      duration: '4 Weeks',
       focus: 'Productivity & Flow',
       image: IMAGES.placeholders.courseAI,
       description: 'Learn to use AI tools like a senior developer. Optimize your workflow, debug faster, and build better products with AI as your co-pilot.',
@@ -38,7 +39,7 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
   ];
 
   return (
-    <div className="py-24 bg-white dark:bg-slate-900 min-h-screen transition-colors">
+    <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
       <div className="max-w-7xl mx-auto px-6">
         <div className="text-center mb-16">
           <button 
@@ -50,7 +51,7 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
           </button>
           <h1 className="text-4xl md:text-6xl font-black text-blue-900 dark:text-white mb-6">Choose Your Path.</h1>
           <p className="text-xl text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-            Each curriculum is designed to be practical, structured, and instructor-led. Select a path to see the full weekly syllabus.
+            Each curriculum is designed to be practical, structured, and instructor-led.
           </p>
         </div>
 
@@ -58,54 +59,42 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
           {paths.map((path) => (
             <div 
               key={path.id} 
-              className={`bg-gray-50 dark:bg-slate-800 rounded-3xl overflow-hidden border-2 ${path.accent} shadow-xl flex flex-col hover:translate-y-[-8px] transition-all duration-300 group`}
+              className={`bg-white dark:bg-slate-900 rounded-[2.5rem] overflow-hidden border-2 ${path.accent} shadow-2xl flex flex-col hover:translate-y-[-8px] transition-all duration-300 group`}
             >
-              <div className="h-48 overflow-hidden relative">
-                <img src={path.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={path.title} />
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-4">
-                  <span className="text-white text-xs font-bold uppercase tracking-widest">{path.focus}</span>
+              <div className="h-52 overflow-hidden relative">
+                <img src={path.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 opacity-80" alt={path.title} />
+                <div className="absolute inset-0 bg-gradient-to-t from-blue-900/80 to-transparent"></div>
+                <div className="absolute bottom-6 left-6">
+                  <span className="text-white text-[10px] font-black uppercase tracking-widest bg-blue-900/40 backdrop-blur-sm px-3 py-1 rounded-full border border-white/20">
+                    {path.focus}
+                  </span>
                 </div>
               </div>
               <div className="p-8 flex-grow">
                 <div className="flex justify-between items-start mb-4">
-                  <h2 className="text-2xl font-bold text-blue-900 dark:text-white leading-tight">{path.title}</h2>
-                  <span className="bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 text-[10px] font-black px-2 py-1 rounded-full uppercase flex-shrink-0 ml-2">
-                    {path.duration}
-                  </span>
+                  <h2 className="text-2xl font-black text-blue-900 dark:text-white leading-tight">{path.title}</h2>
                 </div>
                 <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed mb-8">
                   {path.description}
                 </p>
+                
                 <div className="flex flex-col gap-3">
                   <button 
                     onClick={() => onNavigate(path.id)}
-                    className="w-full py-4 bg-blue-900 dark:bg-slate-700 text-white dark:text-slate-100 font-bold rounded-xl shadow-md hover:bg-blue-800 dark:hover:bg-teal-600 transition-all flex items-center justify-center gap-2"
+                    className="w-full py-4 bg-blue-900 dark:bg-slate-800 text-white font-black rounded-2xl shadow-lg hover:bg-blue-800 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-2"
                   >
                     View Syllabus
                   </button>
                   <button 
                     onClick={() => onNavigate('registration', path.title)}
-                    className="w-full py-4 bg-teal-600 hover:bg-teal-500 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
+                    className="w-full py-4 bg-teal-600 hover:bg-teal-500 text-white font-black rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2"
                   >
-                    Enroll Now
+                    Enroll Now — ₦10k
                   </button>
                 </div>
               </div>
             </div>
           ))}
-        </div>
-
-        <div className="mt-20 bg-teal-50 dark:bg-slate-800/50 p-12 rounded-[2rem] border border-teal-100 dark:border-slate-700 text-center">
-          <h3 className="text-2xl font-bold text-blue-900 dark:text-white mb-4">Ready to start?</h3>
-          <p className="text-slate-600 dark:text-slate-400 mb-8 max-w-xl mx-auto">
-            Choose a path above to see the full curriculum, or click Enroll Now to secure your seat in the next cohort.
-          </p>
-          <button 
-             onClick={() => { const el = document.getElementById('pricing'); if(el) el.scrollIntoView({behavior:'smooth'}); else onNavigate('home');}}
-             className="bg-teal-600 hover:bg-teal-500 text-white px-10 py-5 rounded-2xl font-black text-lg shadow-xl transition-all"
-          >
-            View Pricing Details
-          </button>
         </div>
       </div>
     </div>

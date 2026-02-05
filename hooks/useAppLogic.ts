@@ -44,20 +44,16 @@ export const useAppLogic = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Fix: handleRegistrationSubmit now receives the fully prepared data (including uid) from the Registration component
   const handleRegistrationSubmit = (data: any) => {
-    const weeklyRate = 10000;
-    const entry = registrationStore.save({
-      ...data,
-      weeksToCommit: parseInt(data.weeksToCommit),
-      totalPrice: parseInt(data.weeksToCommit) * weeklyRate
-    });
-    setActiveRegistration(entry);
+    setActiveRegistration(data);
     navigateTo('payment');
   };
 
-  const completePayment = () => {
+  // Fix: changed activeRegistration.id to activeRegistration.uid to match RegistrationEntry type
+  const completePayment = async () => {
     if (activeRegistration) {
-      registrationStore.updateStatus(activeRegistration.id, 'Complete');
+      await registrationStore.updateStatus(activeRegistration.uid, 'Complete');
     }
   };
 
