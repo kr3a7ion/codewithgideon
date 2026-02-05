@@ -23,7 +23,7 @@ const Contact: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">Email</p>
-                  <a href="mailto:support@codewithgideon.com" className="text-blue-900 dark:text-white font-bold hover:text-teal-600 dark:hover:text-teal-400 transition-colors">support@codewithgideon.com</a>
+                  <a href="mailto:codewithgideon.learn@gmail.com" className="text-blue-900 dark:text-white font-bold hover:text-teal-600 dark:hover:text-teal-400 transition-colors">codewithgideon.learn@gmail.com</a>
                 </div>
               </div>
 
@@ -34,9 +34,19 @@ const Contact: React.FC = () => {
                 <div>
                   <p className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">Social</p>
                   <div className="space-y-1">
-                    <p className="text-blue-900 dark:text-white font-bold">Instagram: @c0dewithgideon</p>
-                    <p className="text-blue-900 dark:text-white font-bold">TikTok: @codewithgideon</p>
+                    <a href="https://www.instagram.com/c0dewithgideon" target="_blank" rel="noopener noreferrer" className="block text-blue-900 dark:text-white font-bold hover:text-teal-600 dark:hover:text-teal-400">Instagram: @c0dewithgideon</a>
+                    <a href="https://www.tiktok.com/@codewithgideon" target="_blank" rel="noopener noreferrer" className="block text-blue-900 dark:text-white font-bold hover:text-teal-600 dark:hover:text-teal-400">TikTok: @codewithgideon</a>
                   </div>
+                </div>
+              </div>
+
+              <div className="flex items-start space-x-4">
+                <div className="w-10 h-10 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.414 0 .004 5.411.001 12.045c0 2.12.554 4.188 1.597 6.004L0 24l6.135-1.61a11.822 11.822 0 005.912 1.569h.005c6.634 0 12.043-5.411 12.046-12.047a11.817 11.817 0 00-3.535-8.414z"/></svg>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">WhatsApp</p>
+                  <a href="https://api.whatsapp.com/message/NMQR2ZKNJTZBL1?autoload=1&app_absent=0" target="_blank" rel="noopener noreferrer" className="text-blue-900 dark:text-white font-bold hover:text-green-600 dark:hover:text-green-400 transition-colors">Direct Chat</a>
                 </div>
               </div>
             </div>

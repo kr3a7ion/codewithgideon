@@ -37,7 +37,7 @@ const RefundPolicy: React.FC = () => {
 
         <section className="bg-blue-50 dark:bg-blue-900/20 p-8 rounded-2xl border border-blue-100 dark:border-blue-800/50">
           <h3 className="text-xl font-bold text-blue-900 dark:text-blue-300 mb-4">How to Request a Refund</h3>
-          <p className="text-slate-600 dark:text-slate-400 mb-4">Send a formal request to: <span className="font-bold text-blue-900 dark:text-teal-400">support@codewithgideon.com</span></p>
+          <p className="text-slate-600 dark:text-slate-400 mb-4">Send a formal request to: <span className="font-bold text-blue-900 dark:text-teal-400">codewithgideon.learn@gmail.com</span></p>
           <p className="font-bold text-blue-900 dark:text-blue-300 mb-2 text-sm uppercase tracking-wide">Please include:</p>
           <ul className="list-none space-y-2 text-sm font-medium text-slate-600 dark:text-slate-400">
             <li className="flex items-center"><span className="w-1.5 h-1.5 bg-blue-400 rounded-full mr-2"></span> Your registered email address</li>

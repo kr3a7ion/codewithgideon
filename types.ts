@@ -1,4 +1,7 @@
 
+// Fix: Added React import to resolve 'Cannot find namespace React' error for ReactNode types.
+import React from 'react';
+
 export interface Step {
   id: number;
   title: string;

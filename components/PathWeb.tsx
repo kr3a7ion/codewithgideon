@@ -2,7 +2,7 @@ import React from 'react';
 import { View } from '../App';
 
 interface PathProps {
-  onNavigate: (view: View) => void;
+  onNavigate: (view: View, path?: string) => void;
 }
 
 const PathWeb: React.FC<PathProps> = ({ onNavigate }) => {
@@ -78,7 +78,7 @@ const PathWeb: React.FC<PathProps> = ({ onNavigate }) => {
              <h3 className="text-3xl font-bold mb-4">Launch your freelance career</h3>
              <p className="text-teal-50 mb-6">Our WordPress track is built for speed. Start building paid sites in weeks, not years.</p>
              <button 
-                onClick={() => { const el = document.getElementById('pricing'); if(el) el.scrollIntoView({behavior:'smooth'}); else onNavigate('home');}}
+                onClick={() => onNavigate('registration', 'Web Development & WordPress')}
                 className="px-10 py-5 bg-white text-teal-600 rounded-2xl font-black text-lg transition-all shadow-xl hover:scale-105"
              >
                 Start This Path — ₦10,000/week

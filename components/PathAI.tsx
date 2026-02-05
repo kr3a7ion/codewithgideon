@@ -2,7 +2,7 @@ import React from 'react';
 import { View } from '../App';
 
 interface PathProps {
-  onNavigate: (view: View) => void;
+  onNavigate: (view: View, path?: string) => void;
 }
 
 const PathAI: React.FC<PathProps> = ({ onNavigate }) => {
@@ -89,7 +89,7 @@ const PathAI: React.FC<PathProps> = ({ onNavigate }) => {
              <h3 className="text-3xl font-black mb-4">Become a 10x Developer</h3>
              <p className="opacity-80 mb-8 max-w-xl mx-auto font-medium">Master the tools that are reshaping the industry. Stay ahead of the curve.</p>
              <button 
-                onClick={() => { const el = document.getElementById('pricing'); if(el) el.scrollIntoView({behavior:'smooth'}); else onNavigate('home');}}
+                onClick={() => onNavigate('registration', 'AI-Assisted Development')}
                 className="px-10 py-5 bg-orange-600 dark:bg-orange-500 text-white rounded-2xl font-black text-lg transition-all shadow-xl hover:scale-105"
              >
                 Reserve Your Seat — ₦10,000/week

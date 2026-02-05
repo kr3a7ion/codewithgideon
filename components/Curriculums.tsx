@@ -3,7 +3,7 @@ import { View } from '../App';
 import { IMAGES } from '../assets/images';
 
 interface CurriculumsProps {
-  onNavigate: (view: View) => void;
+  onNavigate: (view: View, path?: string) => void;
 }
 
 const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
@@ -76,28 +76,35 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
                 <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed mb-8">
                   {path.description}
                 </p>
-                <button 
-                  onClick={() => onNavigate(path.id)}
-                  className="w-full py-4 bg-blue-900 dark:bg-slate-700 text-white dark:text-slate-100 font-bold rounded-xl shadow-md hover:bg-blue-800 dark:hover:bg-teal-600 transition-all flex items-center justify-center gap-2"
-                >
-                  View Full Syllabus
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
-                </button>
+                <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={() => onNavigate(path.id)}
+                    className="w-full py-4 bg-blue-900 dark:bg-slate-700 text-white dark:text-slate-100 font-bold rounded-xl shadow-md hover:bg-blue-800 dark:hover:bg-teal-600 transition-all flex items-center justify-center gap-2"
+                  >
+                    View Syllabus
+                  </button>
+                  <button 
+                    onClick={() => onNavigate('registration', path.title)}
+                    className="w-full py-4 bg-teal-600 hover:bg-teal-500 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
+                  >
+                    Enroll Now
+                  </button>
+                </div>
               </div>
             </div>
           ))}
         </div>
 
         <div className="mt-20 bg-teal-50 dark:bg-slate-800/50 p-12 rounded-[2rem] border border-teal-100 dark:border-slate-700 text-center">
-          <h3 className="text-2xl font-bold text-blue-900 dark:text-white mb-4">Ready to register and pay?</h3>
+          <h3 className="text-2xl font-bold text-blue-900 dark:text-white mb-4">Ready to start?</h3>
           <p className="text-slate-600 dark:text-slate-400 mb-8 max-w-xl mx-auto">
-            Once you've chosen your path, use the mobile app to securely register and make your first weekly payment of ₦10,000.
+            Choose a path above to see the full curriculum, or click Enroll Now to secure your seat in the next cohort.
           </p>
           <button 
              onClick={() => { const el = document.getElementById('pricing'); if(el) el.scrollIntoView({behavior:'smooth'}); else onNavigate('home');}}
              className="bg-teal-600 hover:bg-teal-500 text-white px-10 py-5 rounded-2xl font-black text-lg shadow-xl transition-all"
           >
-            Start Your Journey Now
+            View Pricing Details
           </button>
         </div>
       </div>

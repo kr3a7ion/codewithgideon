@@ -38,13 +38,6 @@ const InstructorBio: React.FC = () => {
                 <p className="text-sm text-blue-100/80 dark:text-slate-400 leading-relaxed">Every student is part of a lifelong network. Our alumni work at top tech firms and continue to mentor new students in our community.</p>
               </div>
             </div>
-            <div className="mt-12 pt-10 border-t border-blue-800 dark:border-slate-800 flex flex-wrap items-center gap-10 grayscale opacity-40">
-              <span className="text-xs font-bold text-blue-300 dark:text-slate-500 uppercase tracking-widest">Alumni at:</span>
-              <span className="text-2xl font-black tracking-tighter">Google</span>
-              <span className="text-2xl font-black tracking-tighter">Meta</span>
-              <span className="text-2xl font-black tracking-tighter">NETFLIX</span>
-              <span className="text-2xl font-black tracking-tighter">Airbnb</span>
-            </div>
           </div>
         </div>
       </div>

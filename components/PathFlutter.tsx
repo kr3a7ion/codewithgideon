@@ -2,7 +2,7 @@ import React from 'react';
 import { View } from '../App';
 
 interface PathProps {
-  onNavigate: (view: View) => void;
+  onNavigate: (view: View, path?: string) => void;
 }
 
 const PathFlutter: React.FC<PathProps> = ({ onNavigate }) => {
@@ -83,7 +83,7 @@ const PathFlutter: React.FC<PathProps> = ({ onNavigate }) => {
             <h3 className="text-3xl font-bold mb-4">Start your Flutter journey</h3>
             <p className="text-blue-100/80 mb-8 max-w-xl mx-auto">Pay ₦10,000 per week and learn from a pro. Join the next cohort starting March 15.</p>
             <button 
-              onClick={() => { const el = document.getElementById('pricing'); if(el) el.scrollIntoView({behavior:'smooth'}); else onNavigate('home');}}
+              onClick={() => onNavigate('registration', 'Flutter & Mobile App Development')}
               className="px-10 py-5 bg-teal-500 hover:bg-teal-400 rounded-2xl font-black text-lg transition-all shadow-lg"
             >
               Enroll Now — ₦10,000/week

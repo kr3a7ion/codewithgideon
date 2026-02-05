@@ -31,8 +31,9 @@ const Pricing: React.FC<PricingProps> = ({ onNavigate }) => {
                 </div>
                 <p className="text-sm text-blue-100/70 mb-8 leading-relaxed">
                   Get hands-on training in: <br/>
-                  <span className="font-bold text-teal-400">Flutter & Mobile App Dev</span> or <br/>
-                  <span className="font-bold text-teal-400">Web Development & WordPress</span>
+                  <span className="font-bold text-teal-400">Flutter & Mobile App Dev</span>, <br/>
+                  <span className="font-bold text-teal-400">Web Development & WordPress</span>, or <br/>
+                  <span className="font-bold text-teal-400">AI-Assisted Development</span>
                 </p>
                 <button 
                   onClick={() => onNavigate('curriculums')}
