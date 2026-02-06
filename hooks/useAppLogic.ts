@@ -1,90 +1,141 @@
+import { useEffect, useState } from "react";
+import { View } from "../App";
+import {
+  RegistrationEntry,
+  registrationStore,
+} from "../services/registrationStore";
+import { auth, db } from "../services/firebase";
 
-import { useState, useEffect } from 'react';
-import { View } from '../App';
-import { RegistrationEntry, registrationStore } from '../services/registrationStore';
-import { auth } from '../services/firebase';
-import { 
-  signInWithEmailAndPassword, 
-  signOut, 
+import {
+  signInWithEmailAndPassword,
+  signOut,
   onAuthStateChanged,
-  User 
-} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+  User,
+} from "firebase/auth";
+
+import { doc, getDoc } from "firebase/firestore";
 
 export const useAppLogic = () => {
-  const [currentView, setCurrentView] = useState<View>('home');
-  const [selectedPath, setSelectedPath] = useState<string>('');
-  const [activeRegistration, setActiveRegistration] = useState<RegistrationEntry | null>(null);
-  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
+  const [currentView, setCurrentView] = useState<View>("home");
+  const [selectedPath, setSelectedPath] = useState("");
+  const [activeRegistration, setActiveRegistration] =
+    useState<RegistrationEntry | null>(null);
+
+  // 🔐 ADMIN AUTH
   const [adminUser, setAdminUser] = useState<User | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
 
+  // 🌗 THEME STATE (✅ FIX)
+  const [isDark, setIsDark] = useState(false);
+
+  // 🔐 AUTH LISTENER
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsub = onAuthStateChanged(auth, (user) => {
       setAdminUser(user);
       setIsLoadingAuth(false);
     });
-    return () => unsubscribe();
+    return unsub;
+  }, []);
+
+  // 🌗 THEME INIT (✅ FIX)
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("theme");
+    const prefersDark = window.matchMedia(
+      "(prefers-color-scheme: dark)"
+    ).matches;
+
+    const dark =
+      savedTheme === "dark" || (!savedTheme && prefersDark);
+
+    setIsDark(dark);
+    document.documentElement.classList.toggle("dark", dark);
   }, []);
 
   const toggleTheme = () => {
-    const newTheme = !isDark;
-    setIsDark(newTheme);
-    if (newTheme) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-    }
+    setIsDark((prev) => {
+      const next = !prev;
+      document.documentElement.classList.toggle("dark", next);
+      localStorage.setItem("theme", next ? "dark" : "light");
+      return next;
+    });
   };
 
+  // 🧭 NAVIGATION
   const navigateTo = (view: View, path?: string) => {
     if (path) setSelectedPath(path);
     setCurrentView(view);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // Fix: handleRegistrationSubmit now receives the fully prepared data (including uid) from the Registration component
+  // 📝 REGISTRATION
   const handleRegistrationSubmit = (data: any) => {
     setActiveRegistration(data);
-    navigateTo('payment');
+    navigateTo("payment");
   };
 
-  // Fix: changed activeRegistration.id to activeRegistration.uid to match RegistrationEntry type
   const completePayment = async () => {
     if (activeRegistration) {
-      await registrationStore.updateStatus(activeRegistration.uid, 'Complete');
+      await registrationStore.updateStatus(
+        activeRegistration.uid,
+        "Complete"
+      );
     }
   };
 
+  // 🔐 ADMIN LOGIN WITH ROLE CHECK
   const loginAdmin = async (email: string, password: string) => {
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      navigateTo('admin-dashboard');
+      const cred = await signInWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
+      const user = cred.user;
+
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+
+      if (!userDoc.exists()) {
+        throw new Error("User profile not found");
+      }
+
+      const userData = userDoc.data();
+
+      if (userData.role !== "admin") {
+        await signOut(auth);
+        throw new Error("Access denied: Admins only");
+      }
+
+      navigateTo("admin-dashboard");
       return { success: true };
-    } catch (error: any) {
-      console.error("Auth Error:", error.message);
-      return { success: false, error: error.message };
+    } catch (err: any) {
+      return { success: false, error: err.message };
     }
   };
 
   const logoutAdmin = async () => {
     await signOut(auth);
-    navigateTo('home');
+    navigateTo("home");
   };
 
+  // ✅ RETURN CONTRACT (FIXES YOUR ERROR)
   return {
     currentView,
     selectedPath,
     activeRegistration,
+
+    // 🌗 THEME
     isDark,
+    toggleTheme,
+
+    // 🔐 ADMIN
     isAdminLoggedIn: !!adminUser,
     isLoadingAuth,
+
+    // 🧭 ACTIONS
     navigateTo,
-    toggleTheme,
     handleRegistrationSubmit,
     completePayment,
     loginAdmin,
-    logoutAdmin
+    logoutAdmin,
   };
 };

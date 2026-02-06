@@ -1,16 +1,15 @@
-
-import { db, auth } from './firebase';
-import { 
-  doc, 
-  setDoc, 
-  getDoc, 
-  updateDoc, 
-  collection, 
-  getDocs, 
-  query, 
-  deleteDoc 
-} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { db, auth } from "./firebase";
+import {
+  doc,
+  setDoc,
+  getDoc,
+  updateDoc,
+  collection,
+  getDocs,
+  query,
+  deleteDoc
+} from "firebase/firestore";
+import { createUserWithEmailAndPassword } from "firebase/auth";
 
 export interface RegistrationEntry {
   uid: string;
@@ -22,24 +21,28 @@ export interface RegistrationEntry {
   gender: string;
   weeksToCommit: number;
   totalPrice: number;
-  status: 'Pending' | 'Complete';
-  role: 'student' | 'admin';
+  status: "Pending" | "Complete";
+  role: "student" | "admin";
   timestamp: number;
 }
 
 export const registrationStore = {
-  // NEW: Integrated Auth + Firestore Creation
   async createAccount(entry: any, password: string): Promise<string> {
-    // 1. Create User in Firebase Auth
-    const userCredential = await createUserWithEmailAndPassword(auth, entry.email, password);
+    // 1. Create user in Firebase Auth
+    const userCredential = await createUserWithEmailAndPassword(
+      auth,
+      entry.email,
+      password
+    );
+
     const user = userCredential.user;
 
-    // 2. Save Profile in Firestore using the UID
+    // 2. Save user profile in Firestore
     const profile: RegistrationEntry = {
       ...entry,
       uid: user.uid,
-      role: 'student',
-      status: 'Pending',
+      role: "student",
+      status: "Pending",
       timestamp: Date.now()
     };
 
@@ -47,27 +50,23 @@ export const registrationStore = {
     return user.uid;
   },
 
-  async updateStatus(uid: string, status: 'Pending' | 'Complete'): Promise<void> {
-    const userRef = doc(db, "users", uid);
-    await updateDoc(userRef, { status });
+  async updateStatus(uid: string, status: "Pending" | "Complete") {
+    await updateDoc(doc(db, "users", uid), { status });
   },
 
   async getAll(): Promise<RegistrationEntry[]> {
     const q = query(collection(db, "users"));
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => doc.data() as RegistrationEntry);
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => d.data() as RegistrationEntry);
   },
 
-  async delete(uid: string): Promise<void> {
+  async delete(uid: string) {
     await deleteDoc(doc(db, "users", uid));
-    // Note: This doesn't delete the Auth user, usually done via Admin SDK/Cloud Functions
   },
 
-  // Fix: Added clearAll method to handle batch deletion in AdminDashboard
-  async clearAll(): Promise<void> {
+  async clearAll() {
     const q = query(collection(db, "users"));
-    const querySnapshot = await getDocs(q);
-    const deletePromises = querySnapshot.docs.map(d => deleteDoc(d.ref));
-    await Promise.all(deletePromises);
+    const snapshot = await getDocs(q);
+    await Promise.all(snapshot.docs.map(d => deleteDoc(d.ref)));
   }
 };
