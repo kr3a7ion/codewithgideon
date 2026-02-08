@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { View } from '../App';
-import { registrationStore } from '../services/registrationStore';
+import React, { useEffect, useMemo, useState } from "react";
+import { View } from "../App";
+import { registrationStore } from "../services/registrationStore";
 
 interface RegistrationProps {
   onNavigate: (view: View) => void;
@@ -8,67 +8,132 @@ interface RegistrationProps {
   onComplete: (data: any) => void;
 }
 
-const Registration: React.FC<RegistrationProps> = ({ onNavigate, selectedPath, onComplete }) => {
+type ActiveCohort = { id: string; label: string };
+
+const Registration: React.FC<RegistrationProps> = ({
+  onNavigate,
+  selectedPath,
+  onComplete,
+}) => {
   const [formData, setFormData] = useState({
-    fullName: '',
-    email: '',
-    password: '',
-    phone: '',
-    path: selectedPath || 'Flutter & Mobile App Development',
-    ageRange: '18-24',
-    gender: 'Male',
-    weeksToCommit: '4', // Default to 4 weeks
+    fullName: "",
+    email: "",
+    password: "",
+    phone: "",
+    path: selectedPath || "Flutter & Mobile App Development",
+    ageRange: "18-24",
+    gender: "Male",
+    weeksToCommit: "4",
   });
 
-  const [showPassword, setShowPassword] = useState(false); // Added
+  const [cohort, setCohort] = useState<ActiveCohort | null>(null);
+  const [cohortLoading, setCohortLoading] = useState(true);
+
+  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
+
+
+  
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadCohort = async () => {
+      setCohortLoading(true);
+      try {
+        const active = await registrationStore.getActiveCohort();
+        if (mounted) setCohort(active);
+      } catch {
+        if (mounted) setCohort({ id: "CWG-DEFAULT", label: "Current Cohort" });
+      } finally {
+        if (mounted) setCohortLoading(false);
+      }
+    };
+
+    loadCohort();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    setError('');
+    setError("");
 
     try {
       const weeklyRate = 10000;
-      const weeks = parseInt(formData.weeksToCommit);
+      const weeks = Math.max(1, parseInt(formData.weeksToCommit || "1", 10) || 1);
+
+      // ✅ NEVER store password in Firestore
+      const { password, ...rest } = formData;
+
       const data = {
-        ...formData,
+        ...rest,
         weeksToCommit: weeks,
         totalPrice: weeks * weeklyRate,
+        cohortId: cohort?.id,
+        cohortLabel: cohort?.label,
       };
 
-      // Create Firebase Auth + Firestore Doc
-      const uid = await registrationStore.createAccount(data, formData.password);
-      onComplete({ ...data, uid });
+      const uid = await registrationStore.createAccount(data as any, password);
+
+      onComplete({
+        ...data,
+        uid,
+      });
     } catch (err: any) {
-      setError(err.message || 'Registration failed');
+      setError(err?.message || "Registration failed");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
   const weeklyRate = 10000;
-  const currentTotal = parseInt(formData.weeksToCommit) * weeklyRate;
+
+  const currentTotal = useMemo(() => {
+    const weeks = Math.max(1, parseInt(formData.weeksToCommit || "1", 10) || 1);
+    return weeks * weeklyRate;
+  }, [formData.weeksToCommit]);
 
   return (
     <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
       <div className="max-w-2xl mx-auto px-6">
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-black text-blue-900 dark:text-white mb-4">Create Your Account</h1>
-          <p className="text-slate-600 dark:text-slate-400">Join the cohort and start your professional journey.</p>
+          <h1 className="text-4xl font-black text-blue-900 dark:text-white mb-4">
+            Create Your Account
+          </h1>
+          <p className="text-slate-600 dark:text-slate-400">
+            Join the cohort and start your professional journey.
+          </p>
+
+          <div className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-blue-100 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur">
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+              Cohort
+            </span>
+            <span className="text-xs font-bold text-blue-900 dark:text-teal-400">
+              {cohortLoading ? "Loading..." : cohort?.label || "Current Cohort"}
+            </span>
+          </div>
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800">
           <form onSubmit={handleSubmit} className="space-y-6">
-            {error && <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">{error}</div>}
-            
+            {error && (
+              <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
+                {error}
+              </div>
+            )}
+
             <div>
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Full Name</label>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                Full Name
+              </label>
               <input
                 required
                 name="fullName"
@@ -79,10 +144,12 @@ const Registration: React.FC<RegistrationProps> = ({ onNavigate, selectedPath, o
                 className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
               />
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Email Address</label>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                  Email Address
+                </label>
                 <input
                   required
                   name="email"
@@ -95,32 +162,27 @@ const Registration: React.FC<RegistrationProps> = ({ onNavigate, selectedPath, o
               </div>
 
               <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Password</label>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                  Password
+                </label>
                 <div className="relative">
                   <input
                     required
                     name="password"
                     value={formData.password}
                     onChange={handleChange}
-                    type={showPassword ? 'text' : 'password'}
+                    type={showPassword ? "text" : "password"}
                     placeholder="••••••••"
                     className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all pr-12"
                   />
                   <button
                     type="button"
-                    onClick={() => setShowPassword(!showPassword)}
+                    onClick={() => setShowPassword((v) => !v)}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 transition-colors"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    title={showPassword ? "Hide password" : "Show password"}
                   >
-                    {showPassword ? (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                    ) : (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.882 9.882L5.122 5.122M17.657 17.657L21 21" />
-                      </svg>
-                    )}
+                    {showPassword ? "Hide" : "Show"}
                   </button>
                 </div>
               </div>
@@ -128,7 +190,9 @@ const Registration: React.FC<RegistrationProps> = ({ onNavigate, selectedPath, o
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Phone Number</label>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                  Phone Number
+                </label>
                 <input
                   required
                   name="phone"
@@ -139,15 +203,20 @@ const Registration: React.FC<RegistrationProps> = ({ onNavigate, selectedPath, o
                   className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
                 />
               </div>
+
               <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Select Path</label>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                  Select Path
+                </label>
                 <select
                   name="path"
                   value={formData.path}
                   onChange={handleChange}
                   className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white font-bold outline-none"
                 >
-                  <option value="Flutter & Mobile App Development">Flutter & Mobile App Dev</option>
+                  <option value="Flutter & Mobile App Development">
+                    Flutter & Mobile App Dev
+                  </option>
                   <option value="Web Development & WordPress">Web & WordPress</option>
                   <option value="AI-Assisted Development">AI-Assisted Dev</option>
                 </select>
@@ -157,7 +226,9 @@ const Registration: React.FC<RegistrationProps> = ({ onNavigate, selectedPath, o
             <div className="p-6 bg-blue-50 dark:bg-blue-900/20 rounded-3xl border border-blue-100 dark:border-blue-800/50">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex-grow">
-                  <label className="block text-xs font-black text-blue-900 dark:text-teal-400 uppercase tracking-widest mb-2">Initial Commitment</label>
+                  <label className="block text-xs font-black text-blue-900 dark:text-teal-400 uppercase tracking-widest mb-2">
+                    Initial Commitment
+                  </label>
                   <select
                     name="weeksToCommit"
                     value={formData.weeksToCommit}
@@ -172,9 +243,14 @@ const Registration: React.FC<RegistrationProps> = ({ onNavigate, selectedPath, o
                     <option value="12">Full Program - 12 Weeks (₦120,000)</option>
                   </select>
                 </div>
+
                 <div className="text-right flex-shrink-0">
-                  <p className="text-[10px] font-black text-blue-900/50 dark:text-teal-400/50 uppercase tracking-widest">Total to Pay</p>
-                  <p className="text-2xl font-black text-blue-900 dark:text-white">₦{currentTotal.toLocaleString()}</p>
+                  <p className="text-[10px] font-black text-blue-900/50 dark:text-teal-400/50 uppercase tracking-widest">
+                    Total to Pay
+                  </p>
+                  <p className="text-2xl font-black text-blue-900 dark:text-white">
+                    ₦{currentTotal.toLocaleString()}
+                  </p>
                 </div>
               </div>
             </div>
@@ -184,12 +260,20 @@ const Registration: React.FC<RegistrationProps> = ({ onNavigate, selectedPath, o
               type="submit"
               className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all disabled:opacity-50 transform active:scale-95"
             >
-              {isSubmitting ? 'Processing Registration...' : 'Secure Your Seat'}
+              {isSubmitting ? "Processing Registration..." : "Secure Your Seat"}
             </button>
 
             <p className="text-center text-[10px] text-slate-400 dark:text-slate-500 px-6">
-              By clicking "Secure Your Seat", you agree to our Terms of Service and understand that your data will be synced across our web and mobile platforms.
+              By clicking "Secure Your Seat", you agree to our Terms of Service.
             </p>
+
+            <button
+              type="button"
+              onClick={() => onNavigate("home")}
+              className="w-full text-xs font-black uppercase tracking-widest text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 transition"
+            >
+              Back to Home
+            </button>
           </form>
         </div>
       </div>
