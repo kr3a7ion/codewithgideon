@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { View } from '../App';
 import { registrationStore } from '../services/registrationStore';
@@ -18,8 +17,10 @@ const Registration: React.FC<RegistrationProps> = ({ onNavigate, selectedPath, o
     path: selectedPath || 'Flutter & Mobile App Development',
     ageRange: '18-24',
     gender: 'Male',
-    weeksToCommit: '4' // Default to 4 weeks
+    weeksToCommit: '4', // Default to 4 weeks
   });
+
+  const [showPassword, setShowPassword] = useState(false); // Added
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -34,12 +35,12 @@ const Registration: React.FC<RegistrationProps> = ({ onNavigate, selectedPath, o
       const data = {
         ...formData,
         weeksToCommit: weeks,
-        totalPrice: weeks * weeklyRate
+        totalPrice: weeks * weeklyRate,
       };
-      
+
       // Create Firebase Auth + Firestore Doc
       const uid = await registrationStore.createAccount(data, formData.password);
-      onComplete({ ...data, uid: uid }); 
+      onComplete({ ...data, uid });
     } catch (err: any) {
       setError(err.message || 'Registration failed');
     } finally {
@@ -68,28 +69,84 @@ const Registration: React.FC<RegistrationProps> = ({ onNavigate, selectedPath, o
             
             <div>
               <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Full Name</label>
-              <input required name="fullName" value={formData.fullName} onChange={handleChange} type="text" placeholder="John Doe" className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all" />
+              <input
+                required
+                name="fullName"
+                value={formData.fullName}
+                onChange={handleChange}
+                type="text"
+                placeholder="John Doe"
+                className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
+              />
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Email Address</label>
-                <input required name="email" value={formData.email} onChange={handleChange} type="email" placeholder="john@example.com" className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all" />
+                <input
+                  required
+                  name="email"
+                  value={formData.email}
+                  onChange={handleChange}
+                  type="email"
+                  placeholder="john@example.com"
+                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
+                />
               </div>
+
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Password</label>
-                <input required name="password" value={formData.password} onChange={handleChange} type="password" placeholder="••••••••" className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all" />
+                <div className="relative">
+                  <input
+                    required
+                    name="password"
+                    value={formData.password}
+                    onChange={handleChange}
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all pr-12"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 transition-colors"
+                  >
+                    {showPassword ? (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.882 9.882L5.122 5.122M17.657 17.657L21 21" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-               <div>
+              <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Phone Number</label>
-                <input required name="phone" value={formData.phone} onChange={handleChange} type="tel" placeholder="080 1234 5678" className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all" />
+                <input
+                  required
+                  name="phone"
+                  value={formData.phone}
+                  onChange={handleChange}
+                  type="tel"
+                  placeholder="080 1234 5678"
+                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
+                />
               </div>
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Select Path</label>
-                <select name="path" value={formData.path} onChange={handleChange} className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white font-bold outline-none">
+                <select
+                  name="path"
+                  value={formData.path}
+                  onChange={handleChange}
+                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white font-bold outline-none"
+                >
                   <option value="Flutter & Mobile App Development">Flutter & Mobile App Dev</option>
                   <option value="Web Development & WordPress">Web & WordPress</option>
                   <option value="AI-Assisted Development">AI-Assisted Dev</option>
@@ -98,29 +155,38 @@ const Registration: React.FC<RegistrationProps> = ({ onNavigate, selectedPath, o
             </div>
 
             <div className="p-6 bg-blue-50 dark:bg-blue-900/20 rounded-3xl border border-blue-100 dark:border-blue-800/50">
-               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex-grow">
-                    <label className="block text-xs font-black text-blue-900 dark:text-teal-400 uppercase tracking-widest mb-2">Initial Commitment</label>
-                    <select name="weeksToCommit" value={formData.weeksToCommit} onChange={handleChange} className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-blue-200 dark:border-slate-700 rounded-xl text-blue-900 dark:text-white font-black outline-none">
-                      <option value="1">1 Week (₦10,000)</option>
-                      <option value="2">2 Week (₦20,000)</option>
-                      <option value="3">3 Week (₦30,000)</option>
-                      <option value="4">4 Weeks (₦40,000)</option>
-                      <option value="8">8 Weeks (₦80,000)</option>
-                      <option value="12">Full Program - 12 Weeks (₦120,000)</option>
-                    </select>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-[10px] font-black text-blue-900/50 dark:text-teal-400/50 uppercase tracking-widest">Total to Pay</p>
-                    <p className="text-2xl font-black text-blue-900 dark:text-white">₦{currentTotal.toLocaleString()}</p>
-                  </div>
-               </div>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex-grow">
+                  <label className="block text-xs font-black text-blue-900 dark:text-teal-400 uppercase tracking-widest mb-2">Initial Commitment</label>
+                  <select
+                    name="weeksToCommit"
+                    value={formData.weeksToCommit}
+                    onChange={handleChange}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-blue-200 dark:border-slate-700 rounded-xl text-blue-900 dark:text-white font-black outline-none"
+                  >
+                    <option value="1">1 Week (₦10,000)</option>
+                    <option value="2">2 Week (₦20,000)</option>
+                    <option value="3">3 Week (₦30,000)</option>
+                    <option value="4">4 Weeks (₦40,000)</option>
+                    <option value="8">8 Weeks (₦80,000)</option>
+                    <option value="12">Full Program - 12 Weeks (₦120,000)</option>
+                  </select>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-[10px] font-black text-blue-900/50 dark:text-teal-400/50 uppercase tracking-widest">Total to Pay</p>
+                  <p className="text-2xl font-black text-blue-900 dark:text-white">₦{currentTotal.toLocaleString()}</p>
+                </div>
+              </div>
             </div>
 
-            <button disabled={isSubmitting} type="submit" className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all disabled:opacity-50 transform active:scale-95">
+            <button
+              disabled={isSubmitting}
+              type="submit"
+              className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all disabled:opacity-50 transform active:scale-95"
+            >
               {isSubmitting ? 'Processing Registration...' : 'Secure Your Seat'}
             </button>
-            
+
             <p className="text-center text-[10px] text-slate-400 dark:text-slate-500 px-6">
               By clicking "Secure Your Seat", you agree to our Terms of Service and understand that your data will be synced across our web and mobile platforms.
             </p>

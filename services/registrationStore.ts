@@ -2,12 +2,13 @@ import { db, auth } from "./firebase";
 import {
   doc,
   setDoc,
-  getDoc,
   updateDoc,
   collection,
   getDocs,
   query,
-  deleteDoc
+  deleteDoc,
+  increment,
+  addDoc,
 } from "firebase/firestore";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 
@@ -26,9 +27,18 @@ export interface RegistrationEntry {
   timestamp: number;
 }
 
+// 🔑 Single source of truth
+const usersColRef = collection(db, "users");
+
+// ✅ Safer input type (prevents weird extra fields)
+type NewStudentEntry = Omit<
+  RegistrationEntry,
+  "uid" | "role" | "status" | "timestamp"
+>;
+
 export const registrationStore = {
-  async createAccount(entry: any, password: string): Promise<string> {
-    // 1. Create user in Firebase Auth
+  // 1️⃣ Create account + registration record
+  async createAccount(entry: NewStudentEntry, password: string): Promise<string> {
     const userCredential = await createUserWithEmailAndPassword(
       auth,
       entry.email,
@@ -37,36 +47,63 @@ export const registrationStore = {
 
     const user = userCredential.user;
 
-    // 2. Save user profile in Firestore
     const profile: RegistrationEntry = {
       ...entry,
       uid: user.uid,
       role: "student",
       status: "Pending",
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
 
     await setDoc(doc(db, "users", user.uid), profile);
     return user.uid;
   },
 
-  async updateStatus(uid: string, status: "Pending" | "Complete") {
+  // 2️⃣ Get all registrations (admin dashboard)
+  // ✅ Fix: guarantee uid exists (fallback to doc id)
+  async getAll(): Promise<RegistrationEntry[]> {
+    const snap = await getDocs(query(usersColRef));
+    return snap.docs.map((d) => {
+      const data = d.data() as RegistrationEntry;
+      return { ...data, uid: data.uid || d.id };
+    });
+  },
+
+  // 3️⃣ Update registration status
+  async updateStatus(uid: string, status: "Pending" | "Complete"): Promise<void> {
     await updateDoc(doc(db, "users", uid), { status });
   },
 
-  async getAll(): Promise<RegistrationEntry[]> {
-    const q = query(collection(db, "users"));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => d.data() as RegistrationEntry);
+  // 4️⃣ Record payment / top-up
+  async recordTopUp(
+    uid: string,
+    additionalWeeks: number,
+    amount: number,
+    reference: string
+  ): Promise<void> {
+    const userRef = doc(db, "users", uid);
+
+    await updateDoc(userRef, {
+      weeksToCommit: increment(additionalWeeks),
+      status: "Complete",
+    });
+
+    await addDoc(collection(db, "users", uid, "payments"), {
+      amount,
+      weeks: additionalWeeks,
+      reference,
+      timestamp: Date.now(),
+    });
   },
 
-  async delete(uid: string) {
+  // 5️⃣ Delete one registration
+  async delete(uid: string): Promise<void> {
     await deleteDoc(doc(db, "users", uid));
   },
 
-  async clearAll() {
-    const q = query(collection(db, "users"));
-    const snapshot = await getDocs(q);
-    await Promise.all(snapshot.docs.map(d => deleteDoc(d.ref)));
-  }
+  // 6️⃣ Clear all registrations (danger zone 🔥)
+  async clearAll(): Promise<void> {
+    const snap = await getDocs(usersColRef);
+    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+  },
 };
