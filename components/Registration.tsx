@@ -1,14 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { View } from "../App";
-import { registrationStore } from "../services/registrationStore";
+import { registrationStore, ActiveCohort } from "../services/registrationStore";
 
 interface RegistrationProps {
   onNavigate: (view: View) => void;
   selectedPath: string;
   onComplete: (data: any) => void;
 }
-
-type ActiveCohort = { id: string; label: string };
 
 const Registration: React.FC<RegistrationProps> = ({
   onNavigate,
@@ -33,9 +31,6 @@ const Registration: React.FC<RegistrationProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-
-  
-
   useEffect(() => {
     let mounted = true;
 
@@ -44,7 +39,8 @@ const Registration: React.FC<RegistrationProps> = ({
       try {
         const active = await registrationStore.getActiveCohort();
         if (mounted) setCohort(active);
-      } catch {
+      } catch (e) {
+        // still safe fallback if Firestore has issues
         if (mounted) setCohort({ id: "CWG-DEFAULT", label: "Current Cohort" });
       } finally {
         if (mounted) setCohortLoading(false);
@@ -63,6 +59,11 @@ const Registration: React.FC<RegistrationProps> = ({
     setError("");
 
     try {
+      // ✅ Block signup until cohort is loaded & present
+      if (cohortLoading || !cohort?.id || !cohort?.label) {
+        throw new Error("Cohort is still loading. Please try again in a moment.");
+      }
+
       const weeklyRate = 10000;
       const weeks = Math.max(1, parseInt(formData.weeksToCommit || "1", 10) || 1);
 
@@ -73,16 +74,14 @@ const Registration: React.FC<RegistrationProps> = ({
         ...rest,
         weeksToCommit: weeks,
         totalPrice: weeks * weeklyRate,
-        cohortId: cohort?.id,
-        cohortLabel: cohort?.label,
+        cohortId: cohort.id,
+        cohortLabel: cohort.label,
       };
 
+      // ✅ createAccount will NOT overwrite cohort now
       const uid = await registrationStore.createAccount(data as any, password);
 
-      onComplete({
-        ...data,
-        uid,
-      });
+      onComplete({ ...data, uid });
     } catch (err: any) {
       setError(err?.message || "Registration failed");
     } finally {
@@ -100,6 +99,8 @@ const Registration: React.FC<RegistrationProps> = ({
     const weeks = Math.max(1, parseInt(formData.weeksToCommit || "1", 10) || 1);
     return weeks * weeklyRate;
   }, [formData.weeksToCommit]);
+
+  const disableSubmit = isSubmitting || cohortLoading || !cohort?.id || !cohort?.label;
 
   return (
     <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
@@ -188,6 +189,7 @@ const Registration: React.FC<RegistrationProps> = ({
               </div>
             </div>
 
+            {/* ✅ Fixed layout: one grid, not nested grid inside another */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
@@ -202,6 +204,40 @@ const Registration: React.FC<RegistrationProps> = ({
                   placeholder="080 1234 5678"
                   className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                  Age Range
+                </label>
+                <select
+                  name="ageRange"
+                  value={formData.ageRange}
+                  onChange={handleChange}
+                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white font-bold outline-none"
+                >
+                  <option value="Under 18">Under 18</option>
+                  <option value="18-24">18–24</option>
+                  <option value="25-34">25–34</option>
+                  <option value="35-44">35–44</option>
+                  <option value="45+">45+</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                  Gender
+                </label>
+                <select
+                  name="gender"
+                  value={formData.gender}
+                  onChange={handleChange}
+                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white font-bold outline-none"
+                >
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Prefer not to say">Prefer not to say</option>
+                </select>
               </div>
 
               <div>
@@ -256,11 +292,15 @@ const Registration: React.FC<RegistrationProps> = ({
             </div>
 
             <button
-              disabled={isSubmitting}
+              disabled={disableSubmit}
               type="submit"
               className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all disabled:opacity-50 transform active:scale-95"
             >
-              {isSubmitting ? "Processing Registration..." : "Secure Your Seat"}
+              {cohortLoading
+                ? "Loading Cohort..."
+                : isSubmitting
+                ? "Processing Registration..."
+                : "Secure Your Seat"}
             </button>
 
             <p className="text-center text-[10px] text-slate-400 dark:text-slate-500 px-6">

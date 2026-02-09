@@ -151,13 +151,13 @@ const App: React.FC = () => {
 
         {/* PAYMENT */}
         {currentView === 'payment' && (
-          <Payment
-            onNavigate={navigateTo}
-            selectedPath={selectedPath}
-            userData={activeRegistration}
-            onPaymentSuccess={completePayment}
-          />
-        )}
+  <Payment
+    onNavigate={navigateTo}
+    selectedPath={(activeRegistration as any)?.path || selectedPath}
+    userData={activeRegistration as any}
+    onPaymentSuccess={completePayment}
+  />
+)}
 
         {/* ADMIN AUTH */}
         {currentView === 'admin-login' && (

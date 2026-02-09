@@ -19,7 +19,6 @@ import {
   signOut,
 } from "firebase/auth";
 
-
 export interface PendingPayment {
   kind: "initial" | "topup";
   status: "Pending";
@@ -28,7 +27,6 @@ export interface PendingPayment {
   reference: string;
   createdAt: number;
 }
-
 
 export interface RegistrationEntry {
   uid: string;
@@ -48,27 +46,48 @@ export interface RegistrationEntry {
   pendingPayment?: PendingPayment;
 }
 
-type ActiveCohort = { id: string; label: string };
+export type ActiveCohort = { id: string; label: string };
+
 const usersColRef = collection(db, "users");
 
-type NewStudentEntry = Omit<
-  RegistrationEntry,
-  "uid" | "role" | "status" | "timestamp"
->;
+type NewStudentEntry = Omit<RegistrationEntry, "uid" | "role" | "status" | "timestamp">;
 
 export const registrationStore = {
-  async getActiveCohort(): Promise<ActiveCohort> {
+  // ✅ Always pull from Firestore config/app
+async getActiveCohort(): Promise<{ id: string; label: string }> {
+  try {
     const ref = doc(db, "config", "app");
     const snap = await getDoc(ref);
-    const data = snap.exists() ? (snap.data() as any) : null;
 
-    return {
-      id: data?.activeCohortId || "CWG-DEFAULT",
-      label: data?.activeCohortLabel || "Current Cohort",
-    };
+    if (!snap.exists()) {
+      console.warn("config/app missing");
+      return { id: "CWG-DEFAULT", label: "Current Cohort" };
+    }
+
+    const data = snap.data() as any;
+
+    const id = data?.activeCohortId;
+    const label = data?.activeCohortLabel;
+
+    if (!id || !label) {
+      console.warn("config/app fields missing:", data);
+      return { id: "CWG-DEFAULT", label: "Current Cohort" };
+    }
+
+    return { id, label };
+  } catch (e) {
+    console.error("getActiveCohort failed:", e);
+    return { id: "CWG-DEFAULT", label: "Current Cohort" };
+  }
+},
+  
+
+  async updateUserCohort(uid: string, cohortId: string, cohortLabel: string) {
+    await updateDoc(doc(db, "users", uid), { cohortId, cohortLabel });
   },
 
   // ✅ Register (Auth) + profile (Firestore)
+  // IMPORTANT: do NOT overwrite cohort if UI already provided it.
   async createAccount(entry: NewStudentEntry, password: string): Promise<string> {
     const userCredential = await createUserWithEmailAndPassword(
       auth,
@@ -78,62 +97,68 @@ export const registrationStore = {
 
     const user = userCredential.user;
 
+    // ✅ Use cohort coming from Registration.
+    // If not provided (edge case), fallback to Firestore.
+    let cohortId = entry.cohortId;
+    let cohortLabel = entry.cohortLabel;
+
+    if (!cohortId || !cohortLabel) {
+      const active = await this.getActiveCohort();
+      cohortId = active.id;
+      cohortLabel = active.label;
+    }
+
     const profile: RegistrationEntry = {
       ...(entry as any),
       uid: user.uid,
       role: "student",
       status: "Pending",
       timestamp: Date.now(),
+      cohortId,
+      cohortLabel,
     };
 
     await setDoc(doc(db, "users", user.uid), profile);
     return user.uid;
   },
 
-  // ✅ Student login (Auth)
   async login(email: string, password: string): Promise<string> {
     const cred = await signInWithEmailAndPassword(auth, email, password);
     return cred.user.uid;
   },
 
+  async setPendingPayment(
+    uid: string,
+    pending: {
+      kind: "initial" | "topup";
+      weeks: number;
+      amount: number;
+      reference: string;
+    }
+  ): Promise<void> {
+    const userRef = doc(db, "users", uid);
 
-  // ✅ Save pending payment (initial or topup)
-async setPendingPayment(
-  uid: string,
-  pending: {
-    kind: "initial" | "topup";
-    weeks: number;
-    amount: number;
-    reference: string;
-  }
-): Promise<void> {
-  const userRef = doc(db, "users", uid);
+    await updateDoc(userRef, {
+      pendingPayment: {
+        kind: pending.kind,
+        status: "Pending",
+        weeks: pending.weeks,
+        amount: pending.amount,
+        reference: pending.reference,
+        createdAt: Date.now(),
+      },
+    });
+  },
 
-  await updateDoc(userRef, {
-    pendingPayment: {
-      kind: pending.kind,
-      status: "Pending",
-      weeks: pending.weeks,
-      amount: pending.amount,
-      reference: pending.reference,
-      createdAt: Date.now(),
-    },
-  });
-},
+  async clearPendingPayment(uid: string): Promise<void> {
+    const userRef = doc(db, "users", uid);
+    await updateDoc(userRef, { pendingPayment: deleteField() });
+  },
 
-// ✅ Clear pending payment when user cancels OR after success
-async clearPendingPayment(uid: string): Promise<void> {
-  const userRef = doc(db, "users", uid);
-  await updateDoc(userRef, { pendingPayment: deleteField() });
-},
-
-
-  // ✅ Forgot password
   async resetPassword(email: string): Promise<void> {
     await sendPasswordResetEmail(auth, email);
   },
 
-  // ✅ Logout
   async logout(): Promise<void> {
     await signOut(auth);
   },
@@ -151,26 +176,26 @@ async clearPendingPayment(uid: string): Promise<void> {
   },
 
   async recordTopUp(
-  uid: string,
-  additionalWeeks: number,
-  amount: number,
-  reference: string
-): Promise<void> {
-  const userRef = doc(db, "users", uid);
+    uid: string,
+    additionalWeeks: number,
+    amount: number,
+    reference: string
+  ): Promise<void> {
+    const userRef = doc(db, "users", uid);
 
-  await updateDoc(userRef, {
-    weeksToCommit: increment(additionalWeeks),
-    status: "Complete",
-    pendingPayment: deleteField(), // ✅ clear pending on success
-  });
+    await updateDoc(userRef, {
+      weeksToCommit: increment(additionalWeeks),
+      status: "Complete",
+      pendingPayment: deleteField(),
+    });
 
-  await addDoc(collection(db, "users", uid, "payments"), {
-    amount,
-    weeks: additionalWeeks,
-    reference,
-    timestamp: Date.now(),
-  });
-},
+    await addDoc(collection(db, "users", uid, "payments"), {
+      amount,
+      weeks: additionalWeeks,
+      reference,
+      timestamp: Date.now(),
+    });
+  },
 
   async delete(uid: string): Promise<void> {
     await deleteDoc(doc(db, "users", uid));

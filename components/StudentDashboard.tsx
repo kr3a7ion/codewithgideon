@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { View } from "../App";
-import { RegistrationEntry } from "../services/registrationStore";
+import { RegistrationEntry, registrationStore } from "../services/registrationStore";
+
+type ActiveCohort = { id: string; label: string };
 
 interface StudentDashboardProps {
   profile: RegistrationEntry | null;
@@ -16,6 +18,41 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const [isTopUpOpen, setIsTopUpOpen] = useState(false);
   const [topUpWeeks, setTopUpWeeks] = useState("4");
 
+  const [activeCohort, setActiveCohort] = useState<ActiveCohort | null>(null);
+  const [cohortLoading, setCohortLoading] = useState(false);
+
+  // ✅ Always attempt to load active cohort once profile exists
+  useEffect(() => {
+    let mounted = true;
+
+    const loadActive = async () => {
+      if (!profile) return;
+
+      setCohortLoading(true);
+      try {
+        const active = await registrationStore.getActiveCohort();
+        if (!mounted) return;
+
+        setActiveCohort(active);
+
+        // If user profile missing cohort, write it back
+        const missing = !profile.cohortId || !profile.cohortLabel;
+        if (missing && active?.id && active?.label) {
+          await registrationStore.updateUserCohort(profile.uid, active.id, active.label);
+        }
+      } catch (e) {
+        console.error("Failed to load active cohort:", e);
+      } finally {
+        if (mounted) setCohortLoading(false);
+      }
+    };
+
+    loadActive();
+    return () => {
+      mounted = false;
+    };
+  }, [profile?.uid]);
+
   if (!profile) return null;
 
   const weeklyRate = 10000;
@@ -27,69 +64,78 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
     : 4;
 
   const progressPercent = Math.min(
-    (profile.weeksToCommit / totalProgramWeeks) * 100,
+    (Number(profile.weeksToCommit || 0) / totalProgramWeeks) * 100,
     100
   );
 
-  // ✅ pending initial (registration not activated)
   const hasPendingInitial = profile.status === "Pending";
-
-  // ✅ pending top-up (subscription active but top-up payment not completed)
   const hasPendingTopUp =
     profile.status === "Complete" && profile.pendingPayment?.status === "Pending";
-
-  // ✅ any pending payment blocks new top-ups
   const hasAnyPending = hasPendingInitial || hasPendingTopUp;
 
-  const continuePaymentData = () => {
-    // If we have a stored pending payment, reuse it (perfect for failed/cancelled top-ups)
+  // ✅ RESOLVED COHORT (single source for UI + navigation)
+  const resolvedCohort = useMemo(() => {
+    const id = profile.cohortId || activeCohort?.id || "CWG-DEFAULT";
+    const label = profile.cohortLabel || activeCohort?.label || "Current Cohort";
+    return { id, label };
+  }, [profile.cohortId, profile.cohortLabel, activeCohort?.id, activeCohort?.label]);
+
+  const cohortId = resolvedCohort.id;
+  const cohortLabel = resolvedCohort.label;
+
+  // ✅ Build safe payload for payment
+  const buildPaymentPayload = () => {
+    const base = {
+      uid: profile.uid,
+      email: profile.email,
+      path: profile.path,
+      cohortId,
+      cohortLabel,
+    };
+
     if (profile.pendingPayment?.status === "Pending") {
       const pp = profile.pendingPayment;
       return {
         selectedPath: profile.path,
         userData: {
-          uid: profile.uid,
-          email: profile.email,
-          path: profile.path,
-          weeksToCommit: pp.weeks,
-          originalWeeks: profile.weeksToCommit,
+          ...base,
+          weeksToCommit: Number(pp.weeks) || 1,
+          originalWeeks: Number(profile.weeksToCommit) || 0,
           isTopUp: pp.kind === "topup",
-
-          // ✅ ensure cohort displays correctly
-          cohortId: profile.cohortId,
-          cohortLabel: profile.cohortLabel,
-
-          // (optional) if your Payment page wants to keep same ref:
           reference: pp.reference,
         },
       };
     }
 
-    // Otherwise it’s initial pending payment
     return {
       selectedPath: profile.path,
       userData: {
-        uid: profile.uid,
-        email: profile.email,
-        path: profile.path,
-        weeksToCommit: profile.weeksToCommit,
+        ...base,
+        weeksToCommit: Number(profile.weeksToCommit) || 1,
         isTopUp: false,
-        cohortId: profile.cohortId,
-        cohortLabel: profile.cohortLabel,
       },
     };
   };
 
   const handleContinuePayment = () => {
-    onNavigate("payment", continuePaymentData());
+    const payload = buildPaymentPayload();
+
+    // ✅ Safety: never navigate with missing userData
+    if (!payload?.userData?.uid || !payload?.userData?.email) {
+      console.error("Payment payload invalid:", payload);
+      return;
+    }
+
+    onNavigate("payment", payload);
   };
 
   const handleTopUp = () => {
-    // ✅ stop user from starting a new top-up while another payment is pending
     if (hasAnyPending) {
       setIsTopUpOpen(false);
       return;
     }
+
+    const weeks = Math.max(1, parseInt(topUpWeeks || "1", 10) || 1);
 
     onNavigate("payment", {
       selectedPath: profile.path,
@@ -97,18 +143,18 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
         uid: profile.uid,
         email: profile.email,
         path: profile.path,
-
-        weeksToCommit: topUpWeeks,
-        originalWeeks: profile.weeksToCommit,
+        weeksToCommit: weeks,
+        originalWeeks: Number(profile.weeksToCommit) || 0,
         isTopUp: true,
-
-        cohortId: profile.cohortId,
-        cohortLabel: profile.cohortLabel,
+        cohortId,
+        cohortLabel,
       },
     });
 
     setIsTopUpOpen(false);
   };
+
+  const joinedDate = new Date(profile.timestamp).toLocaleDateString();
 
   return (
     <div className="py-12 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
@@ -126,20 +172,31 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <p className="text-slate-500 dark:text-slate-400 text-sm">
                 {profile.email}
               </p>
+
+              <p className="text-[11px] text-slate-400 mt-1">
+                Cohort:{" "}
+                <span className="font-bold">
+                  {cohortLoading ? "Loading..." : cohortLabel}
+                </span>{" "}
+                {cohortId !== "CWG-DEFAULT" && (
+                  <span className="font-mono">({cohortId})</span>
+                )}
+              </p>
+
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onLogout}
-              className="px-6 py-2.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-50 hover:text-red-600 transition-all"
-            >
-              Logout
-            </button>
-          </div>
+
+          <button
+            onClick={onLogout}
+            className="px-6 py-2.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-50 hover:text-red-600 transition-all"
+          >
+            Logout
+          </button>
         </div>
 
+        {/* Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Main Card */}
+          {/* Main */}
           <div className="lg:col-span-2 space-y-8">
             <div className="bg-white dark:bg-slate-900 p-10 rounded-[2.5rem] shadow-xl border border-gray-100 dark:border-slate-800 relative overflow-hidden">
               <div className="absolute top-0 right-0 p-8">
@@ -188,7 +245,6 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 </div>
               </div>
 
-              {/* ✅ Action Area: Continue payment for initial OR top-up */}
               <div className="mt-12 p-6 bg-blue-50 dark:bg-blue-900/20 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-6">
                 <div>
                   <h4 className="font-bold text-blue-900 dark:text-white">
@@ -226,42 +282,53 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <h3 className="text-sm font-black text-blue-900 dark:text-white mb-6 uppercase tracking-widest">
                 Your Plan
               </h3>
+
               <div className="space-y-4">
-                <div className="flex justify-between text-sm">
+                <div className="grid grid-cols-[90px_1fr] items-center gap-4 text-sm">
                   <span className="text-slate-400">Joined</span>
-                  <span className="font-bold text-blue-900 dark:text-slate-200">
-                    {new Date(profile.timestamp).toLocaleDateString()}
+                  <span className="font-bold text-blue-900 dark:text-slate-200 text-right">
+                    {joinedDate}
                   </span>
                 </div>
 
-                <div className="flex justify-between text-sm">
+                <div className="grid grid-cols-[90px_1fr] items-center gap-4 text-sm">
                   <span className="text-slate-400">Phone</span>
-                  <span className="font-bold text-blue-900 dark:text-slate-200">
+                  <span className="font-bold text-blue-900 dark:text-slate-200 text-right">
                     {profile.phone}
                   </span>
                 </div>
 
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Cohort</span>
-                  <span className="font-bold text-blue-900 dark:text-slate-200">
-                    {profile.cohortLabel || "Current Cohort"}
-                    <span className="ml-2 font-mono text-[10px] text-slate-400">
-                      {profile.cohortId ? `• ${profile.cohortId}` : ""}
-                    </span>
-                  </span>
+                <div className="grid grid-cols-[90px_1fr] items-start gap-4 text-sm">
+                  <span className="text-slate-400 pt-0.5">Cohort</span>
+                  <div className="text-right">
+                    <div className="font-bold text-blue-900 dark:text-slate-200 leading-tight">
+                      {cohortLoading ? "Loading..." : cohortLabel}
+                    </div>
+                    {cohortId !== "CWG-DEFAULT" && (
+                      <div className="mt-1 text-[11px] font-mono text-slate-400">
+                        {cohortId}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {profile.pendingPayment?.status === "Pending" && (
-                  <div className="mt-4 p-4 rounded-2xl bg-orange-50 text-orange-700 border border-orange-100">
-                    <p className="text-xs font-black uppercase tracking-widest">
-                      Pending Payment
-                    </p>
-                    <p className="text-sm font-bold mt-1">
-                      {profile.pendingPayment.kind === "topup" ? "Top-up" : "Initial"} •{" "}
+                  <div className="mt-6 rounded-2xl border p-4 bg-orange-50 border-orange-100 text-orange-800 dark:bg-orange-500/10 dark:border-orange-500/20 dark:text-orange-200">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-xs font-black uppercase tracking-widest">
+                        Pending Payment
+                      </p>
+                      <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-orange-100 text-orange-800 dark:bg-orange-500/20 dark:text-orange-200">
+                        {profile.pendingPayment.kind === "topup" ? "Top-up" : "Initial"}
+                      </span>
+                    </div>
+
+                    <p className="text-sm font-bold mt-3">
                       {profile.pendingPayment.weeks} week(s) • ₦
-                      {profile.pendingPayment.amount.toLocaleString()}
+                      {Number(profile.pendingPayment.amount).toLocaleString()}
                     </p>
-                    <p className="text-[10px] font-mono mt-1 opacity-80">
+
+                    <p className="mt-2 text-[11px] font-mono opacity-90 break-all">
                       {profile.pendingPayment.reference}
                     </p>
                   </div>
@@ -278,9 +345,6 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <h3 className="text-xl font-black text-blue-900 dark:text-white mb-4">
                 Extend Your Access
               </h3>
-              <p className="text-sm text-slate-500 mb-8">
-                Select how many weeks you want to pay for today.
-              </p>
 
               <div className="space-y-4 mb-8">
                 <select
@@ -299,7 +363,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                     Total Due
                   </span>
                   <span className="text-2xl font-black text-teal-600">
-                    ₦{(parseInt(topUpWeeks) * weeklyRate).toLocaleString()}
+                    ₦{(parseInt(topUpWeeks, 10) * weeklyRate).toLocaleString()}
                   </span>
                 </div>
               </div>
@@ -316,37 +380,6 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   className="flex-1 py-4 bg-blue-900 dark:bg-teal-600 text-white font-bold rounded-2xl shadow-lg"
                 >
                   Continue
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* If user tries top-up while pending */}
-        {isTopUpOpen && hasAnyPending && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
-            <div className="bg-white dark:bg-slate-900 max-w-md w-full p-8 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 text-center">
-              <h3 className="text-xl font-black text-blue-900 dark:text-white mb-3">
-                Pending Payment
-              </h3>
-              <p className="text-sm text-slate-500 mb-6">
-                Please complete your pending payment before starting a new top-up.
-              </p>
-              <div className="flex gap-4">
-                <button
-                  onClick={() => setIsTopUpOpen(false)}
-                  className="flex-1 py-4 bg-gray-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold rounded-2xl"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={() => {
-                    setIsTopUpOpen(false);
-                    handleContinuePayment();
-                  }}
-                  className="flex-1 py-4 bg-orange-600 hover:bg-orange-500 text-white font-bold rounded-2xl shadow-lg"
-                >
-                  Continue to Payment
                 </button>
               </div>
             </div>

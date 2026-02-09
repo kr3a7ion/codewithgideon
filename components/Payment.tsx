@@ -7,19 +7,26 @@ interface UserData {
   email: string;
   path: string;
   weeksToCommit: number | string;
-  reference?: string; 
+  reference?: string;
   originalWeeks?: number;
   isTopUp?: boolean;
-
-  // ✅ add these
   cohortId?: string;
   cohortLabel?: string;
 }
 
+// ✅ Allow BOTH shapes:
+// 1) userData = UserData
+// 2) userData = { selectedPath, userData: UserData }
+type PaymentIncoming =
+  | UserData
+  | { selectedPath?: string; userData?: UserData }
+  | null
+  | undefined;
+
 interface PaymentProps {
   onNavigate: (view: View) => void;
   selectedPath: string;
-  userData: UserData;
+  userData: PaymentIncoming; // ✅ changed
   onPaymentSuccess?: (newTotalWeeks: number) => void;
 }
 
@@ -31,49 +38,104 @@ const Payment: React.FC<PaymentProps> = ({
   userData,
   onPaymentSuccess,
 }) => {
+  // ✅ Normalize payload so Payment works no matter what App stores
+  const normalized = useMemo(() => {
+    const anyData = userData as any;
+
+    // If it's wrapped: { selectedPath, userData: {...} }
+    if (anyData?.userData && anyData?.userData?.uid) {
+      return {
+        selectedPath: anyData.selectedPath || selectedPath,
+        userData: anyData.userData as UserData,
+      };
+    }
+
+    // If it's direct: {...}
+    if (anyData?.uid) {
+      return {
+        selectedPath,
+        userData: anyData as UserData,
+      };
+    }
+
+    return { selectedPath, userData: null as any };
+  }, [userData, selectedPath]);
+
+  const safePath = normalized.selectedPath || selectedPath;
+  const u = normalized.userData;
+
+  // ✅ HARD GUARD: no blank pages
+  if (!u?.uid || !u?.email) {
+    return (
+      <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 max-w-md w-full p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl">
+          <h1 className="text-2xl font-black text-blue-900 dark:text-white mb-2">
+            Payment Session Missing
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+            The payment page didn’t receive your session data. This usually happens if
+            navigation didn’t pass user details correctly.
+          </p>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => onNavigate("student-dashboard")}
+              className="flex-1 bg-blue-900 dark:bg-teal-600 text-white font-black py-4 rounded-2xl"
+            >
+              Back to Dashboard
+            </button>
+            <button
+              onClick={() => onNavigate("curriculums")}
+              className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-black py-4 rounded-2xl"
+            >
+              Start Again
+            </button>
+          </div>
+
+          <p className="mt-6 text-[11px] font-mono text-slate-400 break-all">
+            debug: userData={JSON.stringify(userData)}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const [paymentState, setPaymentState] = useState<
     "idle" | "processing" | "success" | "failed"
   >("idle");
   const [reference, setReference] = useState("");
 
-  // ✅ if Payment didn't receive cohort, fetch it
   const [fallbackCohort, setFallbackCohort] = useState<ActiveCohort | null>(null);
 
   const topUpWeeks = useMemo(() => {
-    const w =
-      typeof userData.weeksToCommit === "string"
-        ? parseInt(userData.weeksToCommit, 10)
-        : userData.weeksToCommit;
+    const w = typeof u.weeksToCommit === "string" ? parseInt(u.weeksToCommit, 10) : u.weeksToCommit;
     return Number.isFinite(w) && w > 0 ? w : 1;
-  }, [userData.weeksToCommit]);
+  }, [u.weeksToCommit]);
 
-  const originalWeeks = userData.originalWeeks ?? 0;
+  const originalWeeks = u.originalWeeks ?? 0;
   const weeklyRate = 10000;
   const totalPrice = topUpWeeks * weeklyRate;
-  const newTotalWeeks = userData.isTopUp ? originalWeeks + topUpWeeks : topUpWeeks;
+  const newTotalWeeks = u.isTopUp ? originalWeeks + topUpWeeks : topUpWeeks;
 
-  // ✅ cohort shown on payment page
-  const cohortLabel =
-    userData.cohortLabel || fallbackCohort?.label || "Current Cohort";
-  const cohortId = userData.cohortId || fallbackCohort?.id || "CWG-DEFAULT";
+  const cohortLabel = u.cohortLabel || fallbackCohort?.label || "Current Cohort";
+  const cohortId = u.cohortId || fallbackCohort?.id || "CWG-DEFAULT";
 
   useEffect(() => {
-  if (userData.reference) {
-    setReference(userData.reference);
-    return;
-  }
+    if (u.reference) {
+      setReference(u.reference);
+      return;
+    }
 
-  setReference(
-    `CWG_${Date.now().toString(36).toUpperCase()}_${Math.floor(Math.random() * 1000)}`
-  );
-}, [userData.reference]);
+    setReference(
+      `CWG_${Date.now().toString(36).toUpperCase()}_${Math.floor(Math.random() * 1000)}`
+    );
+  }, [u.reference]);
 
   useEffect(() => {
     let mounted = true;
 
     const maybeLoadCohort = async () => {
-      // only fetch if not provided
-      if (userData.cohortId && userData.cohortLabel) return;
+      if (u.cohortId && u.cohortLabel) return;
 
       try {
         const active = await registrationStore.getActiveCohort();
@@ -87,55 +149,43 @@ const Payment: React.FC<PaymentProps> = ({
     return () => {
       mounted = false;
     };
-  }, [userData.cohortId, userData.cohortLabel]);
+  }, [u.cohortId, u.cohortLabel]);
 
-const handlePayment = async () => {
-  if (!userData?.uid || !userData?.email) {
-    alert("Invalid user session. Please go back to registration.");
-    return;
-  }
+  const handlePayment = async () => {
+    const refToUse =
+      reference ||
+      u.reference ||
+      `CWG_${Date.now().toString(36).toUpperCase()}_${Math.floor(Math.random() * 1000)}`;
 
-  // Ensure reference exists (extra safety)
-  const refToUse =
-    reference ||
-    userData.reference ||
-    `CWG_${Date.now().toString(36).toUpperCase()}_${Math.floor(Math.random() * 1000)}`;
+    if (!reference) setReference(refToUse);
 
-  if (!reference) setReference(refToUse);
+    setPaymentState("processing");
 
-  setPaymentState("processing");
+    await registrationStore.setPendingPayment(u.uid, {
+      kind: u.isTopUp ? "topup" : "initial",
+      weeks: topUpWeeks,
+      amount: totalPrice,
+      reference: refToUse,
+    });
 
-  // ✅ write pending payment ONCE (dashboard can show "Continue to payment")
-  await registrationStore.setPendingPayment(userData.uid, {
-    kind: userData.isTopUp ? "topup" : "initial",
-    weeks: topUpWeeks,
-    amount: totalPrice,
-    reference: refToUse,
-  });
+    try {
+      setTimeout(async () => {
+        const isSuccessful = Math.random() > 0.1;
 
-  try {
-    setTimeout(async () => {
-      const isSuccessful = Math.random() > 0.1;
+        if (isSuccessful) {
+          await registrationStore.recordTopUp(u.uid, topUpWeeks, totalPrice, refToUse);
 
-      if (isSuccessful) {
-        await registrationStore.recordTopUp(
-          userData.uid,
-          topUpWeeks,
-          totalPrice,
-          refToUse
-        );
-
-        setPaymentState("success");
-        onPaymentSuccess?.(newTotalWeeks);
-      } else {
-        setPaymentState("failed");
-      }
-    }, 1500);
-  } catch (error) {
-    console.error("Payment error:", error);
-    setPaymentState("failed");
-  }
-};
+          setPaymentState("success");
+          onPaymentSuccess?.(newTotalWeeks);
+        } else {
+          setPaymentState("failed");
+        }
+      }, 1500);
+    } catch (error) {
+      console.error("Payment error:", error);
+      setPaymentState("failed");
+    }
+  };
 
   // SUCCESS
   if (paymentState === "success") {
@@ -211,14 +261,14 @@ const handlePayment = async () => {
               Try Again
             </button>
             <button
-  onClick={async () => {
-    await registrationStore.clearPendingPayment(userData.uid);
-    onNavigate("student-dashboard");
-  }}
-  className="w-full py-4 text-slate-400 font-bold hover:text-blue-900"
->
-  Cancel Payment
-</button>
+              onClick={async () => {
+                await registrationStore.clearPendingPayment(u.uid);
+                onNavigate("student-dashboard");
+              }}
+              className="w-full py-4 text-slate-400 font-bold hover:text-blue-900"
+            >
+              Cancel Payment
+            </button>
           </div>
         </div>
       </div>
@@ -235,7 +285,6 @@ const handlePayment = async () => {
           </h1>
           <p className="text-slate-500">Processed by Paystack</p>
 
-          {/* ✅ Cohort badge */}
           <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-blue-100 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur">
             <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
               Cohort
@@ -260,7 +309,7 @@ const handlePayment = async () => {
                 <div className="flex justify-between items-start">
                   <div className="max-w-[70%]">
                     <p className="font-bold text-blue-900 dark:text-white leading-tight mb-1">
-                      {userData?.path || selectedPath}
+                      {u.path || safePath}
                     </p>
                     <p className="text-[10px] text-slate-400 uppercase tracking-tight">
                       Access Rate: ₦{weeklyRate.toLocaleString()} / week
@@ -299,7 +348,7 @@ const handlePayment = async () => {
                   Authenticated Email
                 </p>
                 <p className="font-bold text-blue-900 dark:text-white">
-                  {userData?.email || "Student Session"}
+                  {u.email}
                 </p>
               </div>
 
