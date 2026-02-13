@@ -1,5 +1,5 @@
 import React from 'react';
-import { View } from '../App';
+import { View } from '../src/App';
 
 interface PricingProps {
   onNavigate: (view: View) => void;

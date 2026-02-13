@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { View } from "../App";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { View } from "../src/App";
 import { registrationStore } from "../services/registrationStore";
+import { usePaystackPayment } from "react-paystack";
 
 interface UserData {
   uid: string;
@@ -14,9 +15,6 @@ interface UserData {
   cohortLabel?: string;
 }
 
-// ✅ Allow BOTH shapes:
-// 1) userData = UserData
-// 2) userData = { selectedPath, userData: UserData }
 type PaymentIncoming =
   | UserData
   | { selectedPath?: string; userData?: UserData }
@@ -26,7 +24,7 @@ type PaymentIncoming =
 interface PaymentProps {
   onNavigate: (view: View) => void;
   selectedPath: string;
-  userData: PaymentIncoming; // ✅ changed
+  userData: PaymentIncoming;
   onPaymentSuccess?: (newTotalWeeks: number) => void;
 }
 
@@ -38,19 +36,20 @@ const Payment: React.FC<PaymentProps> = ({
   userData,
   onPaymentSuccess,
 }) => {
-  // ✅ Normalize payload so Payment works no matter what App stores
+  const FUNCTION_URL = import.meta.env.VITE_VERIFY_PAYSTACK_URL as string;
+  const publicKey = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY as string;
+
+  // ✅ Normalize payload
   const normalized = useMemo(() => {
     const anyData = userData as any;
 
-    // If it's wrapped: { selectedPath, userData: {...} }
-    if (anyData?.userData && anyData?.userData?.uid) {
+    if (anyData?.userData?.uid) {
       return {
         selectedPath: anyData.selectedPath || selectedPath,
         userData: anyData.userData as UserData,
       };
     }
 
-    // If it's direct: {...}
     if (anyData?.uid) {
       return {
         selectedPath,
@@ -64,210 +63,362 @@ const Payment: React.FC<PaymentProps> = ({
   const safePath = normalized.selectedPath || selectedPath;
   const u = normalized.userData;
 
-  // ✅ HARD GUARD: no blank pages
+  // ✅ Guard
   if (!u?.uid || !u?.email) {
     return (
       <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
-        <div className="bg-white dark:bg-slate-900 max-w-md w-full p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl">
+        <div className="bg-white dark:bg-slate-900 max-w-md w-full p-8 rounded-3xl shadow-xl">
           <h1 className="text-2xl font-black text-blue-900 dark:text-white mb-2">
             Payment Session Missing
           </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-            The payment page didn’t receive your session data. This usually happens if
-            navigation didn’t pass user details correctly.
-          </p>
-
-          <div className="flex gap-3">
-            <button
-              onClick={() => onNavigate("student-dashboard")}
-              className="flex-1 bg-blue-900 dark:bg-teal-600 text-white font-black py-4 rounded-2xl"
-            >
-              Back to Dashboard
-            </button>
-            <button
-              onClick={() => onNavigate("curriculums")}
-              className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-black py-4 rounded-2xl"
-            >
-              Start Again
-            </button>
-          </div>
-
-          <p className="mt-6 text-[11px] font-mono text-slate-400 break-all">
-            debug: userData={JSON.stringify(userData)}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const [paymentState, setPaymentState] = useState<
-    "idle" | "processing" | "success" | "failed"
-  >("idle");
-  const [reference, setReference] = useState("");
-
-  const [fallbackCohort, setFallbackCohort] = useState<ActiveCohort | null>(null);
-
-  const topUpWeeks = useMemo(() => {
-    const w = typeof u.weeksToCommit === "string" ? parseInt(u.weeksToCommit, 10) : u.weeksToCommit;
-    return Number.isFinite(w) && w > 0 ? w : 1;
-  }, [u.weeksToCommit]);
-
-  const originalWeeks = u.originalWeeks ?? 0;
-  const weeklyRate = 10000;
-  const totalPrice = topUpWeeks * weeklyRate;
-  const newTotalWeeks = u.isTopUp ? originalWeeks + topUpWeeks : topUpWeeks;
-
-  const cohortLabel = u.cohortLabel || fallbackCohort?.label || "Current Cohort";
-  const cohortId = u.cohortId || fallbackCohort?.id || "CWG-DEFAULT";
-
-  useEffect(() => {
-    if (u.reference) {
-      setReference(u.reference);
-      return;
-    }
-
-    setReference(
-      `CWG_${Date.now().toString(36).toUpperCase()}_${Math.floor(Math.random() * 1000)}`
-    );
-  }, [u.reference]);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const maybeLoadCohort = async () => {
-      if (u.cohortId && u.cohortLabel) return;
-
-      try {
-        const active = await registrationStore.getActiveCohort();
-        if (mounted) setFallbackCohort(active);
-      } catch {
-        if (mounted) setFallbackCohort({ id: "CWG-DEFAULT", label: "Current Cohort" });
-      }
-    };
-
-    maybeLoadCohort();
-    return () => {
-      mounted = false;
-    };
-  }, [u.cohortId, u.cohortLabel]);
-
-  const handlePayment = async () => {
-    const refToUse =
-      reference ||
-      u.reference ||
-      `CWG_${Date.now().toString(36).toUpperCase()}_${Math.floor(Math.random() * 1000)}`;
-
-    if (!reference) setReference(refToUse);
-
-    setPaymentState("processing");
-
-    await registrationStore.setPendingPayment(u.uid, {
-      kind: u.isTopUp ? "topup" : "initial",
-      weeks: topUpWeeks,
-      amount: totalPrice,
-      reference: refToUse,
-    });
-
-    try {
-      setTimeout(async () => {
-        const isSuccessful = Math.random() > 0.1;
-
-        if (isSuccessful) {
-          await registrationStore.recordTopUp(u.uid, topUpWeeks, totalPrice, refToUse);
-
-          setPaymentState("success");
-          onPaymentSuccess?.(newTotalWeeks);
-        } else {
-          setPaymentState("failed");
-        }
-      }, 1500);
-    } catch (error) {
-      console.error("Payment error:", error);
-      setPaymentState("failed");
-    }
-  };
-
-  // SUCCESS
-  if (paymentState === "success") {
-    return (
-      <div className="py-24 bg-white dark:bg-slate-900 min-h-screen flex items-center justify-center">
-        <div className="max-w-md w-full px-6 text-center">
-          <div className="w-24 h-24 bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 rounded-full flex items-center justify-center mx-auto mb-8 animate-bounce">
-            <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-
-          <h1 className="text-4xl font-black text-blue-900 dark:text-white mb-4">
-            Payment Verified
-          </h1>
-
-          <p className="text-slate-500 dark:text-slate-400 mb-2">
-            Cohort: <span className="font-bold">{cohortLabel}</span>{" "}
-            <span className="font-mono text-xs text-slate-400">({cohortId})</span>
-          </p>
-
-          <p className="text-slate-500 dark:text-slate-400 mb-2">
-            Reference: <span className="font-mono text-xs">{reference}</span>
-          </p>
-
-          <p className="text-slate-600 dark:text-slate-400 mb-10 leading-relaxed">
-            Your access has been extended by{" "}
-            <span className="font-bold text-teal-600">
-              {topUpWeeks} week{topUpWeeks > 1 ? "s" : ""}
-            </span>
-            . Total access:{" "}
-            <span className="font-bold text-blue-900 dark:text-teal-400">
-              {newTotalWeeks} week{newTotalWeeks > 1 ? "s" : ""}
-            </span>
-            .
+          <p className="text-sm text-slate-500 mb-6">
+            The payment page didn’t receive your session data.
           </p>
 
           <button
             onClick={() => onNavigate("student-dashboard")}
-            className="w-full bg-blue-900 dark:bg-teal-600 text-white font-black py-5 rounded-2xl shadow-xl transition-all"
+            className="w-full bg-blue-900 text-white font-black py-4 rounded-2xl"
           >
-            Go to My Dashboard
+            Back to Dashboard
           </button>
         </div>
       </div>
     );
   }
 
-  // FAILED
-  if (paymentState === "failed") {
+  const [paymentState, setPaymentState] = useState<
+    "idle" | "processing" | "verifying" | "success" | "failed"
+  >("idle");
+
+  const [fallbackCohort, setFallbackCohort] = useState<ActiveCohort | null>(
+    null,
+  );
+
+  // ✅ Weeks + Price
+  const topUpWeeks = useMemo(() => {
+    const w =
+      typeof u.weeksToCommit === "string"
+        ? parseInt(u.weeksToCommit, 10)
+        : u.weeksToCommit;
+
+    return Number.isFinite(w) && w > 0 ? w : 1;
+  }, [u.weeksToCommit]);
+
+  const weeklyRate = 10000;
+  const totalPrice = topUpWeeks * weeklyRate;
+
+  const originalWeeks = u.originalWeeks ?? 0;
+  const newTotalWeeks = u.isTopUp ? originalWeeks + topUpWeeks : topUpWeeks;
+
+  // ✅ Cohort
+  const cohortLabel =
+    u.cohortLabel || fallbackCohort?.label || "Current Cohort";
+  const cohortId = u.cohortId || fallbackCohort?.id || "CWG-DEFAULT";
+
+  // ✅ Stable Reference
+  const referenceRef = useRef(
+    u.reference ||
+      `CWG_${Date.now().toString(36).toUpperCase()}_${Math.floor(
+        Math.random() * 1000,
+      )}`,
+  );
+  const reference = referenceRef.current;
+
+  // ✅ Load cohort if missing
+  useEffect(() => {
+    const loadCohort = async () => {
+      if (u.cohortId && u.cohortLabel) return;
+
+      try {
+        const active = await registrationStore.getActiveCohort();
+        setFallbackCohort(active);
+      } catch {
+        setFallbackCohort({
+          id: "CWG-DEFAULT",
+          label: "Current Cohort",
+        });
+      }
+    };
+
+    loadCohort();
+  }, [u.cohortId, u.cohortLabel]);
+
+  // ✅ Paystack Init
+  const initializePayment = usePaystackPayment({
+    reference,
+    email: u.email,
+    amount: totalPrice * 100, // kobo
+    publicKey,
+  });
+
+  // 🔄 Tiny loading component
+  const Loader = ({ label }: { label: string }) => (
+    <div className="flex flex-col items-center justify-center gap-4 py-2">
+      <div className="h-12 w-12 rounded-full border-4 border-slate-200 dark:border-slate-700 border-t-blue-900 dark:border-t-teal-400 animate-spin" />
+      <p className="text-sm text-slate-600 dark:text-slate-300 text-center">
+        {label}
+      </p>
+      <div className="flex gap-1">
+        <span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600 animate-bounce [animation-delay:-0.2s]" />
+        <span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600 animate-bounce [animation-delay:-0.1s]" />
+        <span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600 animate-bounce" />
+      </div>
+    </div>
+  );
+
+  // ✅ Verify Payment via Cloud Function
+  const verifyAndFinalize = async (paystackRef: string) => {
+    try {
+      if (!FUNCTION_URL) throw new Error("Missing VITE_VERIFY_PAYSTACK_URL");
+      if (!publicKey) throw new Error("Missing VITE_PAYSTACK_PUBLIC_KEY");
+
+      // Show pending verification screen while we verify
+      setPaymentState("verifying");
+
+      const resp = await fetch(FUNCTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reference: paystackRef,
+          uid: u.uid,
+          expectedAmount: totalPrice * 100,
+          weeks: topUpWeeks,
+          kind: u.isTopUp ? "topup" : "initial",
+          cohortId,
+          cohortLabel,
+          path: safePath,
+        }),
+      });
+
+      const raw = await resp.text();
+
+      let json: any = null;
+      try {
+        json = raw ? JSON.parse(raw) : null;
+      } catch {
+        throw new Error(
+          `Verify returned non-JSON. Status ${resp.status}. Body: ${raw.slice(
+            0,
+            250,
+          )}`,
+        );
+      }
+
+      if (!resp.ok || !json?.ok) {
+        const detail = json?.details
+          ? ` | details: ${JSON.stringify(json.details)}`
+          : "";
+        throw new Error(
+          (json?.error || `Verify failed (${resp.status})`) + detail,
+        );
+      }
+
+      setPaymentState("success");
+      onPaymentSuccess?.(newTotalWeeks);
+    } catch (err) {
+      setPaymentState("failed");
+    }
+  };
+
+  // ✅ Main Payment Handler
+  const handlePayment = async () => {
+    try {
+      setPaymentState("processing");
+
+      await registrationStore.setPendingPayment(u.uid, {
+        kind: u.isTopUp ? "topup" : "initial",
+        weeks: topUpWeeks,
+        amount: totalPrice,
+        reference, // ✅ stable
+      });
+
+      // Small pause so the UI settles (reduces quick flashes)
+      await new Promise((r) => setTimeout(r, 120));
+
+      initializePayment({
+        onSuccess: async (res: any) => {
+          // Paystack says success — now we verify on backend
+          await verifyAndFinalize(res?.reference || reference);
+        },
+        onClose: () => setPaymentState("idle"),
+      });
+    } catch {
+      setPaymentState("failed");
+    }
+  };
+
+  // ✅ SUCCESS UI
+  if (paymentState === "success") {
     return (
-      <div className="py-24 bg-white dark:bg-slate-900 min-h-screen flex items-center justify-center">
-        <div className="max-w-md w-full px-6 text-center">
-          <div className="w-24 h-24 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-full flex items-center justify-center mx-auto mb-8">
-            <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+      <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 max-w-lg w-full p-8 rounded-3xl shadow-xl border border-slate-200 dark:border-slate-800">
+          {/* Success Header */}
+          <div className="flex items-center gap-4 mb-6">
+            <div className="h-12 w-12 flex items-center justify-center rounded-2xl bg-teal-100 dark:bg-teal-500/20">
+              <span className="text-teal-600 dark:text-teal-400 text-2xl font-black">
+                ✓
+              </span>
+            </div>
+
+            <div>
+              <h1 className="text-2xl font-black text-blue-900 dark:text-white">
+                Payment Verified 🎉
+              </h1>
+              <p className="text-sm text-slate-500 dark:text-slate-300">
+                Your access has been activated successfully.
+              </p>
+            </div>
           </div>
 
-          <h1 className="text-4xl font-black text-blue-900 dark:text-white mb-4">
-            Payment Failed
-          </h1>
+          {/* Cohort Info */}
+          <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4 text-sm mb-6">
+            <p>
+              Cohort:{" "}
+              <span className="font-bold text-blue-900 dark:text-white">
+                {cohortLabel}
+              </span>
+            </p>
+            <p className="text-xs text-slate-500 mt-1">Ref: {reference}</p>
+          </div>
 
-          <p className="text-slate-600 dark:text-slate-400 mb-10 leading-relaxed">
-            The transaction was declined. No charge was made.
-          </p>
+          {/* NEW: Next Step Section */}
+          <div className="mb-6 p-5 rounded-2xl border border-teal-200 dark:border-teal-500/30 bg-teal-50 dark:bg-teal-500/10">
+            <h2 className="font-black text-blue-900 dark:text-white mb-2">
+              Next Step 🚀
+            </h2>
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              You can now log in on the{" "}
+              <span className="font-bold">Code with Gideon</span> mobile app to
+              start your live classes, recordings, and community learning.
+            </p>
+          </div>
 
-          <div className="space-y-4">
+          {/* App Download Placeholders */}
+          <div className="space-y-3 mb-6">
+            <p className="text-xs font-black uppercase tracking-widest text-slate-400">
+              Download the App
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <button
+                disabled
+                className="py-3 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-500 text-xs font-black"
+              >
+                Play Store (Soon)
+              </button>
+
+              <button
+                disabled
+                className="py-3 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-500 text-xs font-black"
+              >
+                App Store (Soon)
+              </button>
+
+              <button
+                disabled
+                className="py-3 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-500 text-xs font-black"
+              >
+                Download APK (Soon)
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-400 text-center mt-2">
+              App links will appear here once the mobile release is live.
+            </p>
+          </div>
+
+          {/* Back Button */}
+          <button
+            onClick={() => onNavigate("student-dashboard")}
+            className="w-full bg-blue-900 hover:bg-blue-800 text-white font-black py-4 rounded-2xl shadow-lg"
+          >
+            Go Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // ⏳ PENDING VERIFICATION UI
+  if (paymentState === "verifying") {
+    return (
+      <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 max-w-lg w-full p-8 rounded-3xl shadow-xl border border-slate-200 dark:border-slate-800">
+          <div className="flex items-center gap-4 mb-6">
+            <div className="h-12 w-12 flex items-center justify-center rounded-2xl bg-blue-100 dark:bg-blue-500/15">
+              <span className="text-blue-900 dark:text-teal-400 text-2xl font-black">
+                ⏳
+              </span>
+            </div>
+
+            <div>
+              <h1 className="text-2xl font-black text-blue-900 dark:text-white">
+                Pending Verification…
+              </h1>
+              <p className="text-sm text-slate-500 dark:text-slate-300">
+                Payment received. We’re confirming it securely with Paystack.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4 text-sm mb-6">
+            <p>
+              Cohort:{" "}
+              <span className="font-bold text-blue-900 dark:text-white">
+                {cohortLabel}
+              </span>
+            </p>
+            <p className="text-xs text-slate-500 mt-1">Ref: {reference}</p>
+          </div>
+
+          <Loader label="Verifying your payment… please don’t close this page." />
+
+          <button
+            onClick={() => onNavigate("student-dashboard")}
+            className="mt-6 w-full text-sm font-bold text-blue-900 dark:text-white underline"
+          >
+            I’ll come back later
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ❌ FAILED UI
+  if (paymentState === "failed") {
+    return (
+      <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 max-w-lg w-full p-8 rounded-3xl shadow-xl border border-red-200 dark:border-red-500/30">
+          <div className="flex items-center gap-4 mb-6">
+            <div className="h-12 w-12 flex items-center justify-center rounded-2xl bg-red-100 dark:bg-red-500/20">
+              <span className="text-red-600 dark:text-red-400 text-2xl font-black">
+                ✕
+              </span>
+            </div>
+
+            <div>
+              <h1 className="text-2xl font-black text-red-600 dark:text-red-400">
+                Payment Failed
+              </h1>
+              <p className="text-sm text-slate-500 dark:text-slate-300">
+                Transaction could not be verified. Please try again.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               onClick={() => setPaymentState("idle")}
-              className="w-full bg-blue-900 dark:bg-teal-600 text-white font-black py-5 rounded-2xl shadow-xl transition-all"
+              className="w-full bg-blue-900 hover:bg-blue-800 text-white font-black py-4 rounded-2xl"
             >
-              Try Again
+              Retry Payment
             </button>
+
             <button
-              onClick={async () => {
-                await registrationStore.clearPendingPayment(u.uid);
-                onNavigate("student-dashboard");
-              }}
-              className="w-full py-4 text-slate-400 font-bold hover:text-blue-900"
+              onClick={() => onNavigate("student-dashboard")}
+              className="w-full bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-blue-900 dark:text-white font-black py-4 rounded-2xl"
             >
-              Cancel Payment
+              Back to Dashboard
             </button>
           </div>
         </div>
@@ -275,99 +426,71 @@ const Payment: React.FC<PaymentProps> = ({
     );
   }
 
-  // IDLE
+  // ✅ MAIN UI
   return (
-    <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
-      <div className="max-w-4xl mx-auto px-6">
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-black text-blue-900 dark:text-white mb-4">
+    <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen px-6">
+      <div className="max-w-3xl mx-auto">
+        <div className="text-center mb-10">
+          <h1 className="text-4xl font-black text-blue-900 dark:text-white">
             Secure Checkout
           </h1>
-          <p className="text-slate-500">Processed by Paystack</p>
-
-          <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-blue-100 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur">
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-              Cohort
-            </span>
-            <span className="text-xs font-bold text-blue-900 dark:text-teal-400">
-              {cohortLabel}
-            </span>
-            <span className="text-[10px] font-mono text-slate-400">
-              • {cohortId}
-            </span>
-          </div>
+          <p className="text-slate-500 dark:text-slate-300 mt-2">
+            Complete your payment to unlock your learning access 🚀
+          </p>
+          <p className="text-slate-500 dark:text-slate-300 mt-2">
+            Registration Completed!
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-          <div>
-            <div className="bg-white dark:bg-slate-900 p-8 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800">
-              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest border-b border-gray-50 dark:border-slate-800 pb-4 mb-6">
-                Payment Summary
-              </h3>
-
-              <div className="space-y-6">
-                <div className="flex justify-between items-start">
-                  <div className="max-w-[70%]">
-                    <p className="font-bold text-blue-900 dark:text-white leading-tight mb-1">
-                      {u.path || safePath}
-                    </p>
-                    <p className="text-[10px] text-slate-400 uppercase tracking-tight">
-                      Access Rate: ₦{weeklyRate.toLocaleString()} / week
-                    </p>
-                  </div>
-                  <span className="font-bold text-blue-900 dark:text-teal-400">
-                    ₦{weeklyRate.toLocaleString()}
-                  </span>
-                </div>
-
-                <div className="flex justify-between items-center py-4 px-4 bg-gray-50 dark:bg-slate-800/50 rounded-xl">
-                  <span className="text-sm font-bold text-slate-600 dark:text-slate-300">
-                    Duration
-                  </span>
-                  <span className="text-sm font-black text-blue-900 dark:text-white">
-                    {topUpWeeks} Week{topUpWeeks > 1 ? "s" : ""}
-                  </span>
-                </div>
-
-                <div className="flex justify-between items-center pt-6 border-t-2 border-dashed border-gray-100 dark:border-slate-800">
-                  <span className="text-lg font-black text-blue-900 dark:text-white">
-                    Total Charge
-                  </span>
-                  <span className="text-2xl font-black text-teal-600">
-                    ₦{totalPrice.toLocaleString()}
-                  </span>
-                </div>
-              </div>
+        <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-slate-200 dark:border-slate-800 p-8">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <p className="text-sm text-slate-500">Cohort</p>
+              <p className="font-black text-blue-900 dark:text-white">
+                {cohortLabel}
+              </p>
             </div>
-          </div>
 
-          <div>
-            <div className="bg-white dark:bg-slate-900 p-8 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 flex flex-col items-center text-center">
-              <div className="mb-8 p-4 bg-teal-50 dark:bg-teal-900/10 rounded-2xl w-full">
-                <p className="text-[10px] font-black text-teal-600 uppercase tracking-widest mb-1">
-                  Authenticated Email
-                </p>
-                <p className="font-bold text-blue-900 dark:text-white">
-                  {u.email}
-                </p>
-              </div>
-
-              <button
-                disabled={paymentState === "processing"}
-                onClick={handlePayment}
-                className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all disabled:opacity-50"
-              >
-                {paymentState === "processing"
-                  ? "Opening Secure Gateway..."
-                  : `Pay ₦${totalPrice.toLocaleString()}`}
-              </button>
-
-              <p className="mt-6 text-[10px] text-slate-400 leading-relaxed">
-                You will be redirected to Paystack to complete payment via Card, USSD,
-                or Bank Transfer.
+            <div className="text-right">
+              <p className="text-sm text-slate-500">Total</p>
+              <p className="text-2xl font-black text-teal-600">
+                ₦{totalPrice.toLocaleString()}
               </p>
             </div>
           </div>
+
+          <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4 mb-6">
+            <p className="text-xs text-slate-500">Payment Reference</p>
+            <p className="font-mono text-sm text-blue-900 dark:text-white break-all">
+              {reference}
+            </p>
+          </div>
+
+          <button
+            disabled={paymentState === "processing"}
+            onClick={handlePayment}
+            className="w-full bg-blue-900 hover:bg-blue-800 disabled:opacity-60 text-white font-black py-5 rounded-2xl shadow-lg"
+          >
+            {paymentState === "processing" ? (
+              <div className="flex items-center justify-center gap-3">
+                <span className="h-5 w-5 rounded-full border-2 border-white/50 border-t-white animate-spin" />
+                <span>Opening Paystack…</span>
+              </div>
+            ) : (
+              `Pay ₦${totalPrice.toLocaleString()}`
+            )}
+          </button>
+
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-4 text-center">
+            Payments are processed securely via Paystack.
+          </p>
+
+          <button
+            onClick={() => onNavigate("student-dashboard")}
+            className="mt-6 w-full text-sm font-bold text-blue-900 dark:text-white underline"
+          >
+            Cancel & Return to Dashboard
+          </button>
         </div>
       </div>
     </div>

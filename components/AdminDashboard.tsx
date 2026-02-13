@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View } from "../App";
+import { View } from "../src/App";
 import { registrationStore, RegistrationEntry } from "../services/registrationStore";
 
 interface AdminDashboardProps {

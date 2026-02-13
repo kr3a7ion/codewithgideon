@@ -2,7 +2,7 @@
 import React from 'react';
 import { Course } from '../types';
 import { IMAGES } from '../assets/images';
-import { View } from '../App';
+import { View } from '../src/App';
 
 interface CoursesProps {
   onNavigate: (view: View, path?: string) => void;

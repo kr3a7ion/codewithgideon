@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View } from "../App";
+import { View } from "../src/App";
 import { RegistrationEntry, registrationStore } from "../services/registrationStore";
 import { auth, db } from "../services/firebase";
 

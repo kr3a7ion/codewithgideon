@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { View } from "../App";
+import React, { useMemo, useState } from "react";
+import { View } from "../src/App";
 import { registrationStore } from "../services/registrationStore";
 
 interface StudentLoginProps {
@@ -7,7 +7,10 @@ interface StudentLoginProps {
   onLoginSuccess?: (uid: string) => void;
 }
 
-const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLoginSuccess }) => {
+const StudentLogin: React.FC<StudentLoginProps> = ({
+  onNavigate,
+  onLoginSuccess,
+}) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -16,18 +19,73 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLoginSuccess 
   const [message, setMessage] = useState<string>("");
   const [error, setError] = useState<string>("");
 
+  const trimmedEmail = useMemo(() => email.trim(), [email]);
+
+  const isEmailValid = useMemo(() => {
+    // Simple + practical email check (keeps it lightweight)
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail);
+  }, [trimmedEmail]);
+
+  // ✅ Small loading UI helper
+  const InlineSpinner = ({ label }: { label?: string }) => (
+    <span className="inline-flex items-center gap-2 justify-center">
+      <span className="h-4 w-4 rounded-full border-2 border-white/60 border-t-white animate-spin" />
+      {label ? <span className="font-black">{label}</span> : null}
+    </span>
+  );
+
+  const humanizeAuthError = (err: any) => {
+    const code = err?.code || "";
+    const msg = String(err?.message || "");
+
+    // Firebase Auth codes (common ones)
+    if (code.includes("auth/invalid-email"))
+      return "Please enter a valid email address.";
+    if (code.includes("auth/user-not-found"))
+      return "No account found for this email. Please create an account.";
+    if (code.includes("auth/wrong-password"))
+      return "Incorrect password. Please try again.";
+    if (code.includes("auth/invalid-credential"))
+      return "Incorrect email or password. Please try again.";
+    if (code.includes("auth/too-many-requests"))
+      return "Too many attempts. Please wait a bit and try again.";
+    if (code.includes("auth/network-request-failed"))
+      return "Network error. Check your connection and try again.";
+
+    // Fallback: avoid dumping raw technical error to user
+    if (msg.toLowerCase().includes("network")) {
+      return "Network error. Please check your connection and try again.";
+    }
+
+    return "Login failed. Please try again.";
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setMessage("");
-    setLoading(true);
 
+    // ✅ Front-end validation first (faster feedback)
+    if (!trimmedEmail) {
+      setError("Please enter your email.");
+      return;
+    }
+    if (!isEmailValid) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    if (!password) {
+      setError("Please enter your password.");
+      return;
+    }
+
+    setLoading(true);
     try {
-      const uid = await registrationStore.login(email.trim(), password);
+      const uid = await registrationStore.login(trimmedEmail, password);
       onLoginSuccess?.(uid);
       onNavigate("student-dashboard");
     } catch (err: any) {
-      setError(err?.message || "Login failed");
+      setError(humanizeAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -36,17 +94,25 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLoginSuccess 
   const handleForgotPassword = async () => {
     setError("");
     setMessage("");
-    if (!email.trim()) {
+
+    if (!trimmedEmail) {
       setError("Enter your email first, then tap 'Forgot password'.");
+      return;
+    }
+    if (!isEmailValid) {
+      setError("Please enter a valid email address to receive a reset link.");
       return;
     }
 
     setLoading(true);
     try {
-      await registrationStore.resetPassword(email.trim());
-      setMessage("Password reset link sent. Check your email.");
+      await registrationStore.resetPassword(trimmedEmail);
+      setMessage(
+        "Password reset link sent. Check your email inbox (and spam).",
+      );
     } catch (err: any) {
-      setError(err?.message || "Could not send reset email");
+      // Reuse same error mapping where it makes sense
+      setError(humanizeAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -85,11 +151,18 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLoginSuccess 
               <input
                 required
                 type="email"
+                inputMode="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="john@example.com"
                 className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
               />
+              {!!trimmedEmail && !isEmailValid && (
+                <p className="mt-2 text-[11px] font-bold text-red-600">
+                  Please enter a valid email.
+                </p>
+              )}
             </div>
 
             <div>
@@ -100,6 +173,7 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLoginSuccess 
                 <input
                   required
                   type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
@@ -109,6 +183,8 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLoginSuccess 
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 transition-colors text-sm font-bold"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  title={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? "Hide" : "Show"}
                 </button>
@@ -120,7 +196,7 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLoginSuccess 
               type="submit"
               className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all disabled:opacity-50"
             >
-              {loading ? "Signing in..." : "Login"}
+              {loading ? <InlineSpinner label="Signing in…" /> : "Login"}
             </button>
 
             <div className="flex items-center justify-between gap-4">
@@ -128,15 +204,16 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLoginSuccess 
                 type="button"
                 onClick={handleForgotPassword}
                 disabled={loading}
-                className="text-xs font-black uppercase tracking-widest text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 transition"
+                className="text-xs font-black uppercase tracking-widest text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 transition disabled:opacity-60"
               >
-                Forgot password?
+                {loading ? "Please wait…" : "Forgot password?"}
               </button>
 
               <button
                 type="button"
                 onClick={() => onNavigate("registration")}
-                className="text-xs font-black uppercase tracking-widest text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 transition"
+                disabled={loading}
+                className="text-xs font-black uppercase tracking-widest text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 transition disabled:opacity-60"
               >
                 Create account
               </button>
@@ -145,7 +222,8 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLoginSuccess 
             <button
               type="button"
               onClick={() => onNavigate("home")}
-              className="w-full mt-2 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 transition"
+              disabled={loading}
+              className="w-full mt-2 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 transition disabled:opacity-60"
             >
               Back to Home
             </button>

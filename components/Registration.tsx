@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View } from "../App";
+import { View } from "../src/App";
 import { registrationStore, ActiveCohort } from "../services/registrationStore";
 
 interface RegistrationProps {
@@ -7,6 +7,9 @@ interface RegistrationProps {
   selectedPath: string;
   onComplete: (data: any) => void;
 }
+
+type FieldKey = "fullName" | "email" | "password" | "phone";
+type FieldErrors = Partial<Record<FieldKey, string>>;
 
 const Registration: React.FC<RegistrationProps> = ({
   onNavigate,
@@ -29,7 +32,12 @@ const Registration: React.FC<RegistrationProps> = ({
 
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // general (top) error
   const [error, setError] = useState("");
+
+  // ✅ per-field errors
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   useEffect(() => {
     let mounted = true;
@@ -53,34 +61,154 @@ const Registration: React.FC<RegistrationProps> = ({
     };
   }, []);
 
+  const weeklyRate = 10000;
+
+  const currentTotal = useMemo(() => {
+    const weeks = Math.max(1, parseInt(formData.weeksToCommit || "1", 10) || 1);
+    return weeks * weeklyRate;
+  }, [formData.weeksToCommit]);
+
+  const disableSubmit =
+    isSubmitting || cohortLoading || !cohort?.id || !cohort?.label;
+
+  // ✅ Small loading UI helpers
+  const Spinner = ({ size = 18 }: { size?: number }) => (
+    <span
+      className="inline-block rounded-full border-2 border-white/40 border-t-white animate-spin"
+      style={{ width: size, height: size }}
+    />
+  );
+
+  const InlineSpinner = ({ label }: { label: string }) => (
+    <span className="inline-flex items-center gap-3">
+      <span className="h-4 w-4 rounded-full border-2 border-blue-900/30 dark:border-teal-400/30 border-t-blue-900 dark:border-t-teal-400 animate-spin" />
+      <span className="text-sm font-bold">{label}</span>
+    </span>
+  );
+
+  // ✅ Validation
+  const validateField = (name: FieldKey, value: string): string => {
+    const v = (value ?? "").trim();
+
+    if (name === "fullName") {
+      if (!v) return "Full name is required.";
+      if (v.length < 3)
+        return "Please enter your full name (at least 3 characters).";
+      if (!v.includes(" ")) return "Please enter both first and last name.";
+      return "";
+    }
+
+    if (name === "email") {
+      if (!v) return "Email is required.";
+      const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+      if (!ok) return "Please enter a valid email address.";
+      return "";
+    }
+
+    if (name === "password") {
+      if (!value) return "Password is required.";
+      if (value.length < 6) return "Password must be at least 6 characters.";
+      return "";
+    }
+
+    if (name === "phone") {
+      if (!v) return "Phone number is required.";
+      const digits = v.replace(/\D/g, "");
+      // Nigeria numbers can be 11 (local) or 13/14 with +234 etc. We'll allow 10–15 digits globally.
+      if (digits.length < 10) return "Phone number is too short.";
+      if (digits.length > 15) return "Phone number is too long.";
+      if (!/^\d+$/.test(digits))
+        return "Phone number must contain only digits.";
+      return "";
+    }
+
+    return "";
+  };
+
+  const validateAll = (): FieldErrors => {
+    const next: FieldErrors = {};
+    (["fullName", "email", "password", "phone"] as FieldKey[]).forEach((k) => {
+      const msg = validateField(k, (formData as any)[k] || "");
+      if (msg) next[k] = msg;
+    });
+    return next;
+  };
+
+  const setOneFieldError = (name: FieldKey, message: string) => {
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      if (message) next[name] = message;
+      else delete next[name];
+      return next;
+    });
+  };
+
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+  ) => {
+    const { name, value } = e.target;
+
+    // ✅ phone: keep digits only (prevents text input)
+    if (name === "phone") {
+      const digitsOnly = value.replace(/[^\d]/g, "");
+      setFormData((p) => ({ ...p, phone: digitsOnly }));
+      // clear/refresh error while typing
+      setOneFieldError("phone", validateField("phone", digitsOnly));
+      return;
+    }
+
+    setFormData((p) => ({ ...p, [name]: value }));
+
+    // ✅ live validation for key fields
+    if (name === "fullName" || name === "email" || name === "password") {
+      const key = name as FieldKey;
+      setOneFieldError(key, validateField(key, value));
+    }
+  };
+
+  const handleBlur = (name: FieldKey) => {
+    const msg = validateField(name, (formData as any)[name] || "");
+    setOneFieldError(name, msg);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
     setError("");
+
+    // ✅ Validate first (before loading state)
+    const nextErrors = validateAll();
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
+    setIsSubmitting(true);
 
     try {
       // ✅ Block signup until cohort is loaded & present
       if (cohortLoading || !cohort?.id || !cohort?.label) {
-        throw new Error("Cohort is still loading. Please try again in a moment.");
+        throw new Error(
+          "Cohort is still loading. Please try again in a moment.",
+        );
       }
 
-      const weeklyRate = 10000;
-      const weeks = Math.max(1, parseInt(formData.weeksToCommit || "1", 10) || 1);
+      const weeks = Math.max(
+        1,
+        parseInt(formData.weeksToCommit || "1", 10) || 1,
+      );
 
       // ✅ NEVER store password in Firestore
       const { password, ...rest } = formData;
 
       const data = {
         ...rest,
+        // phone already digits-only; still keep as string in DB (safer than number)
+        phone: String(rest.phone || ""),
         weeksToCommit: weeks,
         totalPrice: weeks * weeklyRate,
         cohortId: cohort.id,
         cohortLabel: cohort.label,
       };
 
-      // ✅ createAccount will NOT overwrite cohort now
       const uid = await registrationStore.createAccount(data as any, password);
-
       onComplete({ ...data, uid });
     } catch (err: any) {
       setError(err?.message || "Registration failed");
@@ -89,18 +217,8 @@ const Registration: React.FC<RegistrationProps> = ({
     }
   };
 
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => setFormData({ ...formData, [e.target.name]: e.target.value });
-
-  const weeklyRate = 10000;
-
-  const currentTotal = useMemo(() => {
-    const weeks = Math.max(1, parseInt(formData.weeksToCommit || "1", 10) || 1);
-    return weeks * weeklyRate;
-  }, [formData.weeksToCommit]);
-
-  const disableSubmit = isSubmitting || cohortLoading || !cohort?.id || !cohort?.label;
+  const FieldErrorText = ({ msg }: { msg?: string }) =>
+    msg ? <p className="mt-2 text-xs font-bold text-red-600">{msg}</p> : null;
 
   return (
     <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
@@ -123,7 +241,16 @@ const Registration: React.FC<RegistrationProps> = ({
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800">
+        <div className="bg-white dark:bg-slate-900 p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 relative">
+          {/* ✅ Fullscreen-ish overlay loader while submitting */}
+          {isSubmitting && (
+            <div className="absolute inset-0 z-10 rounded-[2.5rem] bg-white/70 dark:bg-slate-950/60 backdrop-blur-sm flex items-center justify-center">
+              <div className="px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl">
+                <InlineSpinner label="Creating your account…" />
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
               <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
@@ -140,10 +267,13 @@ const Registration: React.FC<RegistrationProps> = ({
                 name="fullName"
                 value={formData.fullName}
                 onChange={handleChange}
+                onBlur={() => handleBlur("fullName")}
                 type="text"
+                autoComplete="name"
                 placeholder="John Doe"
                 className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
               />
+              <FieldErrorText msg={fieldErrors.fullName} />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -156,10 +286,13 @@ const Registration: React.FC<RegistrationProps> = ({
                   name="email"
                   value={formData.email}
                   onChange={handleChange}
+                  onBlur={() => handleBlur("email")}
                   type="email"
+                  autoComplete="email"
                   placeholder="john@example.com"
                   className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
                 />
+                <FieldErrorText msg={fieldErrors.email} />
               </div>
 
               <div>
@@ -172,7 +305,9 @@ const Registration: React.FC<RegistrationProps> = ({
                     name="password"
                     value={formData.password}
                     onChange={handleChange}
+                    onBlur={() => handleBlur("password")}
                     type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
                     placeholder="••••••••"
                     className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all pr-12"
                   />
@@ -180,12 +315,15 @@ const Registration: React.FC<RegistrationProps> = ({
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 transition-colors"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
                     title={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? "Hide" : "Show"}
                   </button>
                 </div>
+                <FieldErrorText msg={fieldErrors.password} />
               </div>
             </div>
 
@@ -200,10 +338,19 @@ const Registration: React.FC<RegistrationProps> = ({
                   name="phone"
                   value={formData.phone}
                   onChange={handleChange}
+                  onBlur={() => handleBlur("phone")}
                   type="tel"
-                  placeholder="080 1234 5678"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  placeholder="08012345678"
+                  minLength={10}
+                  maxLength={15}
                   className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
                 />
+                <p className="mt-1 text-[10px] text-slate-400">
+                  Digits only (10–15). Example: 08012345678
+                </p>
+                <FieldErrorText msg={fieldErrors.phone} />
               </div>
 
               <div>
@@ -253,8 +400,12 @@ const Registration: React.FC<RegistrationProps> = ({
                   <option value="Flutter & Mobile App Development">
                     Flutter & Mobile App Dev
                   </option>
-                  <option value="Web Development & WordPress">Web & WordPress</option>
-                  <option value="AI-Assisted Development">AI-Assisted Dev</option>
+                  <option value="Web Development & WordPress">
+                    Web & WordPress
+                  </option>
+                  <option value="AI-Assisted Development">
+                    AI-Assisted Dev
+                  </option>
                 </select>
               </div>
             </div>
@@ -276,7 +427,9 @@ const Registration: React.FC<RegistrationProps> = ({
                     <option value="3">3 Week (₦30,000)</option>
                     <option value="4">4 Weeks (₦40,000)</option>
                     <option value="8">8 Weeks (₦80,000)</option>
-                    <option value="12">Full Program - 12 Weeks (₦120,000)</option>
+                    <option value="12">
+                      Full Program - 12 Weeks (₦120,000)
+                    </option>
                   </select>
                 </div>
 
@@ -294,13 +447,21 @@ const Registration: React.FC<RegistrationProps> = ({
             <button
               disabled={disableSubmit}
               type="submit"
-              className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all disabled:opacity-50 transform active:scale-95"
+              className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all disabled:opacity-50 transform active:scale-95 flex items-center justify-center gap-3"
             >
-              {cohortLoading
-                ? "Loading Cohort..."
-                : isSubmitting
-                ? "Processing Registration..."
-                : "Secure Your Seat"}
+              {cohortLoading ? (
+                <>
+                  <span className="h-5 w-5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                  Loading Cohort...
+                </>
+              ) : isSubmitting ? (
+                <>
+                  <Spinner />
+                  Processing Registration...
+                </>
+              ) : (
+                "Secure Your Seat"
+              )}
             </button>
 
             <p className="text-center text-[10px] text-slate-400 dark:text-slate-500 px-6">

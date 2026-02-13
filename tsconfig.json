@@ -14,5 +14,6 @@
     "paths": { "@/*": ["./*"] },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "include": ["**/*.ts", "**/*.tsx", "src/vite-env.d.ts"]
 }

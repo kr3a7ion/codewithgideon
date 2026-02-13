@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { View } from '../App';
+import { View } from '../src/App';
 import { IMAGES } from '../assets/images';
 
 interface CurriculumsProps {

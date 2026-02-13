@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View } from "../App";
-import { RegistrationEntry, registrationStore } from "../services/registrationStore";
+import { View } from "../src/App";
+import {
+  RegistrationEntry,
+  registrationStore,
+} from "../services/registrationStore";
 
 type ActiveCohort = { id: string; label: string };
 
@@ -38,7 +41,11 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
         // If user profile missing cohort, write it back
         const missing = !profile.cohortId || !profile.cohortLabel;
         if (missing && active?.id && active?.label) {
-          await registrationStore.updateUserCohort(profile.uid, active.id, active.label);
+          await registrationStore.updateUserCohort(
+            profile.uid,
+            active.id,
+            active.label,
+          );
         }
       } catch (e) {
         console.error("Failed to load active cohort:", e);
@@ -60,25 +67,50 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const totalProgramWeeks = profile.path.includes("Flutter")
     ? 12
     : profile.path.includes("Web")
-    ? 8
-    : 4;
+      ? 8
+      : 4;
+
+  const paidWeeks = Math.max(0, Number(profile.weeksToCommit || 0));
+  const remainingWeeks = Math.max(0, totalProgramWeeks - paidWeeks);
 
   const progressPercent = Math.min(
     (Number(profile.weeksToCommit || 0) / totalProgramWeeks) * 100,
-    100
+    100,
   );
 
   const hasPendingInitial = profile.status === "Pending";
   const hasPendingTopUp =
-    profile.status === "Complete" && profile.pendingPayment?.status === "Pending";
+    profile.status === "Complete" &&
+    profile.pendingPayment?.status === "Pending";
   const hasAnyPending = hasPendingInitial || hasPendingTopUp;
+
+  // ✅ Only allow top up when there is room left and nothing pending
+  const canTopUp = !hasAnyPending && remainingWeeks > 0;
+
+  // ✅ Clamp topUpWeeks when modal is open + remaining changes
+  useEffect(() => {
+    if (!isTopUpOpen) return;
+
+    const current = Math.max(1, parseInt(topUpWeeks || "1", 10) || 1);
+    const clamped = Math.min(current, Math.max(1, remainingWeeks || 1));
+
+    if (String(clamped) !== topUpWeeks) {
+      setTopUpWeeks(String(clamped));
+    }
+  }, [isTopUpOpen, remainingWeeks, topUpWeeks]);
 
   // ✅ RESOLVED COHORT (single source for UI + navigation)
   const resolvedCohort = useMemo(() => {
     const id = profile.cohortId || activeCohort?.id || "CWG-DEFAULT";
-    const label = profile.cohortLabel || activeCohort?.label || "Current Cohort";
+    const label =
+      profile.cohortLabel || activeCohort?.label || "Current Cohort";
     return { id, label };
-  }, [profile.cohortId, profile.cohortLabel, activeCohort?.id, activeCohort?.label]);
+  }, [
+    profile.cohortId,
+    profile.cohortLabel,
+    activeCohort?.id,
+    activeCohort?.label,
+  ]);
 
   const cohortId = resolvedCohort.id;
   const cohortLabel = resolvedCohort.label;
@@ -130,12 +162,13 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
   };
 
   const handleTopUp = () => {
-    if (hasAnyPending) {
+    if (!canTopUp) {
       setIsTopUpOpen(false);
       return;
     }
 
-    const weeks = Math.max(1, parseInt(topUpWeeks || "1", 10) || 1);
+    const requested = Math.max(1, parseInt(topUpWeeks || "1", 10) || 1);
+    const weeks = Math.min(requested, remainingWeeks || 1);
 
     onNavigate("payment", {
       selectedPath: profile.path,
@@ -155,6 +188,27 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
   };
 
   const joinedDate = new Date(profile.timestamp).toLocaleDateString();
+
+  // ✅ Small loading UI helpers (no logic changes)
+  const InlineSpinner = ({ label }: { label?: string }) => (
+    <span className="inline-flex items-center gap-2">
+      <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300/70 dark:border-slate-600 border-t-blue-900 dark:border-t-teal-400 animate-spin" />
+      {label ? <span className="font-bold">{label}</span> : null}
+    </span>
+  );
+
+  const CohortSkeleton = () => (
+    <span className="inline-flex items-center gap-2">
+      <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300/70 dark:border-slate-600 border-t-blue-900 dark:border-t-teal-400 animate-spin" />
+      <span className="inline-block h-3 w-28 rounded bg-slate-200 dark:bg-slate-700 animate-pulse" />
+    </span>
+  );
+
+  // ✅ Clamp total due display in modal
+  const selectedWeeksClamped = Math.min(
+    Math.max(1, parseInt(topUpWeeks || "1", 10) || 1),
+    Math.max(1, remainingWeeks || 1),
+  );
 
   return (
     <div className="py-12 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
@@ -176,13 +230,12 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <p className="text-[11px] text-slate-400 mt-1">
                 Cohort:{" "}
                 <span className="font-bold">
-                  {cohortLoading ? "Loading..." : cohortLabel}
+                  {cohortLoading ? <CohortSkeleton /> : cohortLabel}
                 </span>{" "}
-                {cohortId !== "CWG-DEFAULT" && (
+                {!cohortLoading && cohortId !== "CWG-DEFAULT" && (
                   <span className="font-mono">({cohortId})</span>
                 )}
               </p>
-
             </div>
           </div>
 
@@ -248,12 +301,18 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <div className="mt-12 p-6 bg-blue-50 dark:bg-blue-900/20 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-6">
                 <div>
                   <h4 className="font-bold text-blue-900 dark:text-white">
-                    {hasAnyPending ? "Finish your payment" : "Ready for more?"}
+                    {hasAnyPending
+                      ? "Finish your payment"
+                      : canTopUp
+                        ? "Ready for more?"
+                        : "You’re fully paid"}
                   </h4>
                   <p className="text-sm text-slate-500 dark:text-slate-400">
                     {hasAnyPending
                       ? "You have an incomplete payment. Continue to checkout to complete it before starting a new top-up."
-                      : "Add more weeks to your subscription to stay in the live cohort."}
+                      : canTopUp
+                        ? "Add more weeks to your subscription to stay in the live cohort."
+                        : "You’ve reached the maximum weeks for this course."}
                   </p>
                 </div>
 
@@ -264,13 +323,18 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   >
                     Continue to Payment
                   </button>
-                ) : (
+                ) : canTopUp ? (
                   <button
                     onClick={() => setIsTopUpOpen(true)}
                     className="px-8 py-4 bg-blue-900 dark:bg-teal-600 text-white font-black rounded-2xl shadow-xl hover:scale-105 transition-transform whitespace-nowrap"
                   >
-                    Pay for More Weeks
+                    Pay Remaining {remainingWeeks === 1 ? "Week" : "Weeks"} (
+                    {remainingWeeks})
                   </button>
+                ) : (
+                  <div className="px-6 py-3 rounded-2xl bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-200 font-black text-sm whitespace-nowrap">
+                    Fully Paid ✅
+                  </div>
                 )}
               </div>
             </div>
@@ -302,9 +366,15 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   <span className="text-slate-400 pt-0.5">Cohort</span>
                   <div className="text-right">
                     <div className="font-bold text-blue-900 dark:text-slate-200 leading-tight">
-                      {cohortLoading ? "Loading..." : cohortLabel}
+                      {cohortLoading ? (
+                        <span className="inline-flex items-center justify-end gap-2">
+                          <InlineSpinner label="Loading cohort…" />
+                        </span>
+                      ) : (
+                        cohortLabel
+                      )}
                     </div>
-                    {cohortId !== "CWG-DEFAULT" && (
+                    {!cohortLoading && cohortId !== "CWG-DEFAULT" && (
                       <div className="mt-1 text-[11px] font-mono text-slate-400">
                         {cohortId}
                       </div>
@@ -319,7 +389,9 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                         Pending Payment
                       </p>
                       <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-orange-100 text-orange-800 dark:bg-orange-500/20 dark:text-orange-200">
-                        {profile.pendingPayment.kind === "topup" ? "Top-up" : "Initial"}
+                        {profile.pendingPayment.kind === "topup"
+                          ? "Top-up"
+                          : "Initial"}
                       </span>
                     </div>
 
@@ -339,7 +411,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </div>
 
         {/* Top-Up Modal */}
-        {isTopUpOpen && !hasAnyPending && (
+        {isTopUpOpen && canTopUp && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
             <div className="bg-white dark:bg-slate-900 max-w-md w-full p-8 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800">
               <h3 className="text-xl font-black text-blue-900 dark:text-white mb-4">
@@ -352,10 +424,14 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   onChange={(e) => setTopUpWeeks(e.target.value)}
                   className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white font-bold outline-none"
                 >
-                  <option value="1">1 Week (₦10,000)</option>
-                  <option value="2">2 Week (₦20,000)</option>
-                  <option value="3">3 Weeks (₦30,000)</option>
-                  <option value="4">4 Weeks (₦40,000)</option>
+                  {[1, 2, 3, 4]
+                    .filter((w) => w <= remainingWeeks)
+                    .map((w) => (
+                      <option key={w} value={String(w)}>
+                        {w} {w === 1 ? "Week" : "Weeks"} (₦
+                        {(w * weeklyRate).toLocaleString()})
+                      </option>
+                    ))}
                 </select>
 
                 <div className="flex justify-between items-center px-2">
@@ -363,9 +439,16 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                     Total Due
                   </span>
                   <span className="text-2xl font-black text-teal-600">
-                    ₦{(parseInt(topUpWeeks, 10) * weeklyRate).toLocaleString()}
+                    ₦{(selectedWeeksClamped * weeklyRate).toLocaleString()}
                   </span>
                 </div>
+
+                {remainingWeeks > 0 && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400 px-2">
+                    Remaining:{" "}
+                    <span className="font-bold">{remainingWeeks}</span> week(s)
+                  </p>
+                )}
               </div>
 
               <div className="flex gap-4">
