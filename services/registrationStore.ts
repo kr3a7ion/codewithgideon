@@ -11,6 +11,7 @@ import {
   increment,
   addDoc,
   deleteField,
+  orderBy,
 } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword,
@@ -46,41 +47,65 @@ export interface RegistrationEntry {
   pendingPayment?: PendingPayment;
 }
 
+export type CourseDoc = {
+  id: string;
+  title: string;
+  duration: string;
+  sessions: string;
+  level: string;
+  description: string;
+  priceLabel?: string;
+  imageUrl?: string;
+  syllabusView?: string;
+  createdAt: number;
+  updatedAt: number;
+  isActive: boolean;
+};
+
+type CourseInput = Omit<CourseDoc, "id" | "createdAt" | "updatedAt">;
+type CoursePatch = Partial<Omit<CourseDoc, "id" | "createdAt" | "updatedAt">>;
+
+const coursesColRef = collection(db, "courses");
+
 export type ActiveCohort = { id: string; label: string };
 
 const usersColRef = collection(db, "users");
 
-type NewStudentEntry = Omit<RegistrationEntry, "uid" | "role" | "status" | "timestamp">;
+type NewStudentEntry = Omit<
+  RegistrationEntry,
+  "uid" | "role" | "status" | "timestamp"
+>;
+
+type NewCourseInput = Omit<CourseDoc, "id" | "createdAt" | "updatedAt">;
 
 export const registrationStore = {
   // ✅ Always pull from Firestore config/app
-async getActiveCohort(): Promise<{ id: string; label: string }> {
-  try {
-    const ref = doc(db, "config", "app");
-    const snap = await getDoc(ref);
+  async getActiveCohort(): Promise<{ id: string; label: string }> {
+    try {
+      const ref = doc(db, "config", "app");
+      const snap = await getDoc(ref);
 
-    if (!snap.exists()) {
-      console.warn("config/app missing");
+      if (!snap.exists()) {
+        console.warn("config/app missing");
+        return { id: "CWG-DEFAULT", label: "Current Cohort" };
+      }
+
+      const data = snap.data() as any;
+
+      const id = data?.activeCohortId;
+      const label = data?.activeCohortLabel;
+
+      if (!id || !label) {
+        console.warn("config/app fields missing:", data);
+        return { id: "CWG-DEFAULT", label: "Current Cohort" };
+      }
+
+      return { id, label };
+    } catch (e) {
+      console.error("getActiveCohort failed:", e);
       return { id: "CWG-DEFAULT", label: "Current Cohort" };
     }
-
-    const data = snap.data() as any;
-
-    const id = data?.activeCohortId;
-    const label = data?.activeCohortLabel;
-
-    if (!id || !label) {
-      console.warn("config/app fields missing:", data);
-      return { id: "CWG-DEFAULT", label: "Current Cohort" };
-    }
-
-    return { id, label };
-  } catch (e) {
-    console.error("getActiveCohort failed:", e);
-    return { id: "CWG-DEFAULT", label: "Current Cohort" };
-  }
-},
-  
+  },
 
   async updateUserCohort(uid: string, cohortId: string, cohortLabel: string) {
     await updateDoc(doc(db, "users", uid), { cohortId, cohortLabel });
@@ -88,11 +113,14 @@ async getActiveCohort(): Promise<{ id: string; label: string }> {
 
   // ✅ Register (Auth) + profile (Firestore)
   // IMPORTANT: do NOT overwrite cohort if UI already provided it.
-  async createAccount(entry: NewStudentEntry, password: string): Promise<string> {
+  async createAccount(
+    entry: NewStudentEntry,
+    password: string,
+  ): Promise<string> {
     const userCredential = await createUserWithEmailAndPassword(
       auth,
       entry.email,
-      password
+      password,
     );
 
     const user = userCredential.user;
@@ -134,7 +162,7 @@ async getActiveCohort(): Promise<{ id: string; label: string }> {
       weeks: number;
       amount: number;
       reference: string;
-    }
+    },
   ): Promise<void> {
     const userRef = doc(db, "users", uid);
 
@@ -171,7 +199,10 @@ async getActiveCohort(): Promise<{ id: string; label: string }> {
     });
   },
 
-  async updateStatus(uid: string, status: "Pending" | "Complete"): Promise<void> {
+  async updateStatus(
+    uid: string,
+    status: "Pending" | "Complete",
+  ): Promise<void> {
     await updateDoc(doc(db, "users", uid), { status });
   },
 
@@ -179,7 +210,7 @@ async getActiveCohort(): Promise<{ id: string; label: string }> {
     uid: string,
     additionalWeeks: number,
     amount: number,
-    reference: string
+    reference: string,
   ): Promise<void> {
     const userRef = doc(db, "users", uid);
 
@@ -204,5 +235,72 @@ async getActiveCohort(): Promise<{ id: string; label: string }> {
   async clearAll(): Promise<void> {
     const snap = await getDocs(usersColRef);
     await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+  },
+
+  // =========================
+  // COURSES (Admin-managed)
+  // =========================
+  async getCourses(): Promise<CourseDoc[]> {
+    const snap = await getDocs(
+      query(coursesColRef, orderBy("createdAt", "asc")),
+    );
+    return snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as any),
+    })) as CourseDoc[];
+  },
+
+  async addCourse(input: CourseInput): Promise<string> {
+    const cleanPayload = {
+      title: String(input.title || "").trim(),
+      duration: String(input.duration || "").trim(),
+      sessions: String(input.sessions || "").trim(),
+      level: String(input.level || "").trim(),
+      description: String(input.description || "").trim(),
+      priceLabel: String(input.priceLabel || ""),
+      imageUrl: String(input.imageUrl || ""),
+      syllabusView: String(input.syllabusView || ""),
+      isActive: input.isActive ?? true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    console.log("createdAt int?", Number.isInteger(cleanPayload.createdAt));
+    console.log("updatedAt int?", Number.isInteger(cleanPayload.updatedAt));
+    console.log("COURSE PAYLOAD KEYS:", Object.keys(cleanPayload));
+    console.log("COURSE PAYLOAD FULL:", cleanPayload);
+
+    const ref = await addDoc(collection(db, "courses"), cleanPayload);
+    return ref.id;
+  },
+
+  async updateCourse(courseId: string, patch: CoursePatch): Promise<void> {
+    // ✅ sanitize + block illegal fields implicitly by type
+    const cleanPatch: any = {
+      updatedAt: Date.now(),
+    };
+
+    if (patch.title !== undefined)
+      cleanPatch.title = String(patch.title).trim();
+    if (patch.duration !== undefined)
+      cleanPatch.duration = String(patch.duration).trim();
+    if (patch.sessions !== undefined)
+      cleanPatch.sessions = String(patch.sessions).trim();
+    if (patch.level !== undefined)
+      cleanPatch.level = String(patch.level).trim();
+    if (patch.description !== undefined)
+      cleanPatch.description = String(patch.description).trim();
+    if (patch.priceLabel !== undefined)
+      cleanPatch.priceLabel = String(patch.priceLabel);
+    if (patch.imageUrl !== undefined)
+      cleanPatch.imageUrl = String(patch.imageUrl);
+    if (patch.syllabusView !== undefined)
+      cleanPatch.syllabusView = String(patch.syllabusView);
+    if (patch.isActive !== undefined) cleanPatch.isActive = !!patch.isActive;
+
+    await updateDoc(doc(db, "courses", courseId), cleanPatch);
+  },
+
+  async deleteCourse(courseId: string): Promise<void> {
+    await deleteDoc(doc(db, "courses", courseId));
   },
 };
