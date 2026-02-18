@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { View } from "../src/App";
-import { registrationStore, ActiveCohort } from "../services/registrationStore";
+import {
+  registrationStore,
+  ActiveCohort,
+  CourseDoc,
+} from "../services/registrationStore";
 
 interface RegistrationProps {
   onNavigate: (view: View) => void;
@@ -10,6 +14,52 @@ interface RegistrationProps {
 
 type FieldKey = "fullName" | "email" | "password" | "phone";
 type FieldErrors = Partial<Record<FieldKey, string>>;
+
+type CourseOption = {
+  title: string;
+  durationWeeks: number;
+  weeklyRate: number;
+  source: "pinned" | "firestore";
+};
+
+const PINNED_COURSES: CourseOption[] = [
+  {
+    title: "Flutter & Mobile App Development",
+    durationWeeks: 12,
+    weeklyRate: 10000,
+    source: "pinned",
+  },
+  {
+    title: "Web Development & WordPress",
+    durationWeeks: 8,
+    weeklyRate: 10000,
+    source: "pinned",
+  },
+  {
+    title: "AI-Assisted Development",
+    durationWeeks: 4,
+    weeklyRate: 10000,
+    source: "pinned",
+  },
+];
+
+// Helpers
+const parseWeeksFromDuration = (duration: string, fallback = 4) => {
+  const n = parseInt(String(duration || "").replace(/[^\d]/g, ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+const parsePricePerWeek = (label: string, fallback = 10000) => {
+  // Accepts: "₦10k/wk", "₦15,000/wk", "10000", "10k"
+  const s = String(label || "").toLowerCase();
+  const hasK = s.includes("k");
+  const num = parseInt(s.replace(/[^\d]/g, ""), 10);
+  if (!Number.isFinite(num) || num <= 0) return fallback;
+  return hasK ? num * 1000 : num;
+};
+
+const clamp = (n: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, n));
 
 const Registration: React.FC<RegistrationProps> = ({
   onNavigate,
@@ -33,12 +83,15 @@ const Registration: React.FC<RegistrationProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // general (top) error
   const [error, setError] = useState("");
-
-  // ✅ per-field errors
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
+  // ✅ NEW: Course catalog loaded (Firestore + pinned)
+  const [courseOptions, setCourseOptions] =
+    useState<CourseOption[]>(PINNED_COURSES);
+  const [coursesLoading, setCoursesLoading] = useState(true);
+
+  // ---- Load cohort ----
   useEffect(() => {
     let mounted = true;
 
@@ -48,7 +101,6 @@ const Registration: React.FC<RegistrationProps> = ({
         const active = await registrationStore.getActiveCohort();
         if (mounted) setCohort(active);
       } catch (e) {
-        // still safe fallback if Firestore has issues
         if (mounted) setCohort({ id: "CWG-DEFAULT", label: "Current Cohort" });
       } finally {
         if (mounted) setCohortLoading(false);
@@ -61,17 +113,100 @@ const Registration: React.FC<RegistrationProps> = ({
     };
   }, []);
 
-  const weeklyRate = 10000;
+  // ---- Load courses ----
+  useEffect(() => {
+    let mounted = true;
+
+    const loadCourses = async () => {
+      setCoursesLoading(true);
+      try {
+        const list: CourseDoc[] = await registrationStore.getCourses();
+        const active = (list || []).filter((c) => c.isActive !== false);
+
+        // avoid duplicates with pinned by title
+        const pinnedSet = new Set(
+          PINNED_COURSES.map((p) => p.title.trim().toLowerCase()),
+        );
+
+        const firestoreOptions: CourseOption[] = active
+          .filter(
+            (c) =>
+              !pinnedSet.has(
+                String(c.title || "")
+                  .trim()
+                  .toLowerCase(),
+              ),
+          )
+          .map((c) => ({
+            title: c.title,
+            durationWeeks: parseWeeksFromDuration(c.duration, 4),
+            weeklyRate: parsePricePerWeek(c.priceLabel || "₦10k/wk", 10000),
+            source: "firestore",
+          }));
+
+        const merged = [...PINNED_COURSES, ...firestoreOptions];
+
+        if (mounted) setCourseOptions(merged);
+      } catch (e) {
+        console.error("Failed to load courses:", e);
+        if (mounted) setCourseOptions(PINNED_COURSES);
+      } finally {
+        if (mounted) setCoursesLoading(false);
+      }
+    };
+
+    loadCourses();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // ✅ Find selected course config (max weeks + weekly rate)
+  const selectedCourse = useMemo(() => {
+    const key = String(formData.path || "")
+      .trim()
+      .toLowerCase();
+    return (
+      courseOptions.find((c) => c.title.trim().toLowerCase() === key) ||
+        // fallback: keep app stable even if title not found
+        {
+          title: formData.path || "Course",
+          durationWeeks: 4,
+          weeklyRate: 10000,
+          source: "pinned" as const,
+        }
+    );
+  }, [courseOptions, formData.path]);
+
+  const maxWeeks = selectedCourse.durationWeeks || 4;
+  const weeklyRate = selectedCourse.weeklyRate || 10000;
+
+  // ✅ Clamp weeksToCommit anytime course/path changes
+  useEffect(() => {
+    const current = parseInt(formData.weeksToCommit || "1", 10) || 1;
+    const safe = clamp(current, 1, maxWeeks);
+    if (String(safe) !== String(current)) {
+      setFormData((p) => ({ ...p, weeksToCommit: String(safe) }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maxWeeks, formData.path]);
 
   const currentTotal = useMemo(() => {
-    const weeks = Math.max(1, parseInt(formData.weeksToCommit || "1", 10) || 1);
+    const weeks = clamp(
+      parseInt(formData.weeksToCommit || "1", 10) || 1,
+      1,
+      maxWeeks,
+    );
     return weeks * weeklyRate;
-  }, [formData.weeksToCommit]);
+  }, [formData.weeksToCommit, weeklyRate, maxWeeks]);
 
   const disableSubmit =
-    isSubmitting || cohortLoading || !cohort?.id || !cohort?.label;
+    isSubmitting ||
+    cohortLoading ||
+    !cohort?.id ||
+    !cohort?.label ||
+    coursesLoading;
 
-  // ✅ Small loading UI helpers
   const Spinner = ({ size = 18 }: { size?: number }) => (
     <span
       className="inline-block rounded-full border-2 border-white/40 border-t-white animate-spin"
@@ -114,7 +249,6 @@ const Registration: React.FC<RegistrationProps> = ({
     if (name === "phone") {
       if (!v) return "Phone number is required.";
       const digits = v.replace(/\D/g, "");
-      // Nigeria numbers can be 11 (local) or 13/14 with +234 etc. We'll allow 10–15 digits globally.
       if (digits.length < 10) return "Phone number is too short.";
       if (digits.length > 15) return "Phone number is too long.";
       if (!/^\d+$/.test(digits))
@@ -148,18 +282,22 @@ const Registration: React.FC<RegistrationProps> = ({
   ) => {
     const { name, value } = e.target;
 
-    // ✅ phone: keep digits only (prevents text input)
     if (name === "phone") {
       const digitsOnly = value.replace(/[^\d]/g, "");
       setFormData((p) => ({ ...p, phone: digitsOnly }));
-      // clear/refresh error while typing
       setOneFieldError("phone", validateField("phone", digitsOnly));
+      return;
+    }
+
+    // ✅ clamp weeks instantly (so UI never shows invalid values)
+    if (name === "weeksToCommit") {
+      const w = clamp(parseInt(value || "1", 10) || 1, 1, maxWeeks);
+      setFormData((p) => ({ ...p, weeksToCommit: String(w) }));
       return;
     }
 
     setFormData((p) => ({ ...p, [name]: value }));
 
-    // ✅ live validation for key fields
     if (name === "fullName" || name === "email" || name === "password") {
       const key = name as FieldKey;
       setOneFieldError(key, validateField(key, value));
@@ -175,7 +313,6 @@ const Registration: React.FC<RegistrationProps> = ({
     e.preventDefault();
     setError("");
 
-    // ✅ Validate first (before loading state)
     const nextErrors = validateAll();
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
@@ -183,29 +320,31 @@ const Registration: React.FC<RegistrationProps> = ({
     setIsSubmitting(true);
 
     try {
-      // ✅ Block signup until cohort is loaded & present
       if (cohortLoading || !cohort?.id || !cohort?.label) {
         throw new Error(
           "Cohort is still loading. Please try again in a moment.",
         );
       }
 
-      const weeks = Math.max(
-        1,
+      const weeks = clamp(
         parseInt(formData.weeksToCommit || "1", 10) || 1,
+        1,
+        maxWeeks,
       );
 
-      // ✅ NEVER store password in Firestore
       const { password, ...rest } = formData;
 
       const data = {
         ...rest,
-        // phone already digits-only; still keep as string in DB (safer than number)
         phone: String(rest.phone || ""),
         weeksToCommit: weeks,
-        totalPrice: weeks * weeklyRate,
+        totalPrice: weeks * weeklyRate, // ✅ per-course rate
         cohortId: cohort.id,
         cohortLabel: cohort.label,
+
+        // ✅ optional but useful later
+        courseDurationWeeks: maxWeeks,
+        weeklyRate,
       };
 
       const uid = await registrationStore.createAccount(data as any, password);
@@ -219,6 +358,13 @@ const Registration: React.FC<RegistrationProps> = ({
 
   const FieldErrorText = ({ msg }: { msg?: string }) =>
     msg ? <p className="mt-2 text-xs font-bold text-red-600">{msg}</p> : null;
+
+  // ✅ build weeks options based on course duration
+  const weeksOptions = useMemo(() => {
+    const arr = [];
+    for (let w = 1; w <= maxWeeks; w++) arr.push(w);
+    return arr;
+  }, [maxWeeks]);
 
   return (
     <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
@@ -242,7 +388,6 @@ const Registration: React.FC<RegistrationProps> = ({
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 relative">
-          {/* ✅ Fullscreen-ish overlay loader while submitting */}
           {isSubmitting && (
             <div className="absolute inset-0 z-10 rounded-[2.5rem] bg-white/70 dark:bg-slate-950/60 backdrop-blur-sm flex items-center justify-center">
               <div className="px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl">
@@ -327,7 +472,6 @@ const Registration: React.FC<RegistrationProps> = ({
               </div>
             </div>
 
-            {/* ✅ Fixed layout: one grid, not nested grid inside another */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
@@ -387,6 +531,7 @@ const Registration: React.FC<RegistrationProps> = ({
                 </select>
               </div>
 
+              {/* ✅ UPDATED: Select Path now includes Firestore courses too */}
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
                   Select Path
@@ -397,16 +542,18 @@ const Registration: React.FC<RegistrationProps> = ({
                   onChange={handleChange}
                   className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white font-bold outline-none"
                 >
-                  <option value="Flutter & Mobile App Development">
-                    Flutter & Mobile App Dev
-                  </option>
-                  <option value="Web Development & WordPress">
-                    Web & WordPress
-                  </option>
-                  <option value="AI-Assisted Development">
-                    AI-Assisted Dev
-                  </option>
+                  {courseOptions.map((c) => (
+                    <option key={`${c.source}-${c.title}`} value={c.title}>
+                      {c.title}
+                    </option>
+                  ))}
                 </select>
+
+                {coursesLoading && (
+                  <p className="mt-2 text-[10px] text-slate-400">
+                    Loading available courses…
+                  </p>
+                )}
               </div>
             </div>
 
@@ -416,21 +563,25 @@ const Registration: React.FC<RegistrationProps> = ({
                   <label className="block text-xs font-black text-blue-900 dark:text-teal-400 uppercase tracking-widest mb-2">
                     Initial Commitment
                   </label>
+
+                  {/* ✅ UPDATED: weeks options capped by course duration */}
                   <select
                     name="weeksToCommit"
                     value={formData.weeksToCommit}
                     onChange={handleChange}
                     className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-blue-200 dark:border-slate-700 rounded-xl text-blue-900 dark:text-white font-black outline-none"
                   >
-                    <option value="1">1 Week (₦10,000)</option>
-                    <option value="2">2 Week (₦20,000)</option>
-                    <option value="3">3 Week (₦30,000)</option>
-                    <option value="4">4 Weeks (₦40,000)</option>
-                    <option value="8">8 Weeks (₦80,000)</option>
-                    <option value="12">
-                      Full Program - 12 Weeks (₦120,000)
-                    </option>
+                    {weeksOptions.map((w) => (
+                      <option key={w} value={String(w)}>
+                        {w} {w === 1 ? "Week" : "Weeks"} (₦
+                        {(w * weeklyRate).toLocaleString()})
+                      </option>
+                    ))}
                   </select>
+
+                  <p className="mt-2 text-[10px] text-slate-400">
+                    Max: {maxWeeks} weeks for this course.
+                  </p>
                 </div>
 
                 <div className="text-right flex-shrink-0">
@@ -449,10 +600,10 @@ const Registration: React.FC<RegistrationProps> = ({
               type="submit"
               className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all disabled:opacity-50 transform active:scale-95 flex items-center justify-center gap-3"
             >
-              {cohortLoading ? (
+              {cohortLoading || coursesLoading ? (
                 <>
                   <span className="h-5 w-5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                  Loading Cohort...
+                  Loading…
                 </>
               ) : isSubmitting ? (
                 <>

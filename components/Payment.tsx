@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View } from "../src/App";
-import { registrationStore } from "../services/registrationStore";
+import { registrationStore, CourseDoc } from "../services/registrationStore";
 import { usePaystackPayment } from "react-paystack";
 
 interface UserData {
@@ -13,6 +13,10 @@ interface UserData {
   isTopUp?: boolean;
   cohortId?: string;
   cohortLabel?: string;
+
+  // optional (if registration passed it)
+  courseDurationWeeks?: number;
+  weeklyRate?: number;
 }
 
 type PaymentIncoming =
@@ -30,6 +34,28 @@ interface PaymentProps {
 
 type ActiveCohort = { id: string; label: string };
 
+const PINNED = [
+  { title: "Flutter & Mobile App Development", weeks: 12, rate: 10000 },
+  { title: "Web Development & WordPress", weeks: 8, rate: 10000 },
+  { title: "AI-Assisted Development", weeks: 4, rate: 10000 },
+];
+
+const parseWeeksFromDuration = (duration: string, fallback = 4) => {
+  const n = parseInt(String(duration || "").replace(/[^\d]/g, ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+const parsePricePerWeek = (label: string, fallback = 10000) => {
+  const s = String(label || "").toLowerCase();
+  const hasK = s.includes("k");
+  const num = parseInt(s.replace(/[^\d]/g, ""), 10);
+  if (!Number.isFinite(num) || num <= 0) return fallback;
+  return hasK ? num * 1000 : num;
+};
+
+const clamp = (n: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, n));
+
 const Payment: React.FC<PaymentProps> = ({
   onNavigate,
   selectedPath,
@@ -39,7 +65,6 @@ const Payment: React.FC<PaymentProps> = ({
   const FUNCTION_URL = import.meta.env.VITE_VERIFY_PAYSTACK_URL as string;
   const publicKey = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY as string;
 
-  // ✅ Normalize payload
   const normalized = useMemo(() => {
     const anyData = userData as any;
 
@@ -63,7 +88,6 @@ const Payment: React.FC<PaymentProps> = ({
   const safePath = normalized.selectedPath || selectedPath;
   const u = normalized.userData;
 
-  // ✅ Guard
   if (!u?.uid || !u?.email) {
     return (
       <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
@@ -94,28 +118,102 @@ const Payment: React.FC<PaymentProps> = ({
     null,
   );
 
-  // ✅ Weeks + Price
-  const topUpWeeks = useMemo(() => {
+  // ✅ course config in Payment too
+  const [courseMaxWeeks, setCourseMaxWeeks] = useState<number>(
+    u.courseDurationWeeks || 4,
+  );
+  const [courseWeeklyRate, setCourseWeeklyRate] = useState<number>(
+    u.weeklyRate || 10000,
+  );
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadCourseConfig = async () => {
+      // if registration already passed weeklyRate & duration, use them
+      if (u.courseDurationWeeks && u.weeklyRate) return;
+
+      const pinned = PINNED.find(
+        (p) =>
+          p.title.trim().toLowerCase() ===
+          String(safePath).trim().toLowerCase(),
+      );
+      if (pinned) {
+        if (!mounted) return;
+        setCourseMaxWeeks(pinned.weeks);
+        setCourseWeeklyRate(pinned.rate);
+        return;
+      }
+
+      try {
+        const list: CourseDoc[] = await registrationStore.getCourses();
+        const active = (list || []).filter((c) => c.isActive !== false);
+        const found = active.find(
+          (c) =>
+            String(c.title || "")
+              .trim()
+              .toLowerCase() === String(safePath).trim().toLowerCase(),
+        );
+
+        if (!mounted) return;
+
+        if (found) {
+          setCourseMaxWeeks(parseWeeksFromDuration(found.duration, 4));
+          setCourseWeeklyRate(
+            parsePricePerWeek(found.priceLabel || "₦10k/wk", 10000),
+          );
+        } else {
+          // fallback
+          setCourseMaxWeeks(4);
+          setCourseWeeklyRate(10000);
+        }
+      } catch (e) {
+        console.error("Failed to load course config:", e);
+        if (!mounted) return;
+        setCourseMaxWeeks(4);
+        setCourseWeeklyRate(10000);
+      }
+    };
+
+    loadCourseConfig();
+    return () => {
+      mounted = false;
+    };
+  }, [safePath, u.courseDurationWeeks, u.weeklyRate]);
+
+  // ✅ Weeks requested
+  const requestedWeeks = useMemo(() => {
     const w =
       typeof u.weeksToCommit === "string"
         ? parseInt(u.weeksToCommit, 10)
         : u.weeksToCommit;
-
     return Number.isFinite(w) && w > 0 ? w : 1;
   }, [u.weeksToCommit]);
 
-  const weeklyRate = 10000;
+  const originalWeeks = u.originalWeeks ?? 0;
+
+  // ✅ FIX #1: correct cap logic (allow 0 remaining for topup)
+  const maxAllowedWeeks = useMemo(() => {
+    if (!u.isTopUp) return Math.max(1, courseMaxWeeks);
+    const remaining = Math.max(0, courseMaxWeeks - originalWeeks);
+    return remaining;
+  }, [u.isTopUp, courseMaxWeeks, originalWeeks]);
+
+  // ✅ FIX #1 continued: if maxAllowedWeeks is 0, topUpWeeks becomes 0
+  const topUpWeeks = useMemo(() => {
+    if (maxAllowedWeeks <= 0) return 0;
+    return clamp(requestedWeeks, 1, maxAllowedWeeks);
+  }, [requestedWeeks, maxAllowedWeeks]);
+
+  const weeklyRate = courseWeeklyRate || 10000;
   const totalPrice = topUpWeeks * weeklyRate;
 
-  const originalWeeks = u.originalWeeks ?? 0;
   const newTotalWeeks = u.isTopUp ? originalWeeks + topUpWeeks : topUpWeeks;
 
-  // ✅ Cohort
   const cohortLabel =
     u.cohortLabel || fallbackCohort?.label || "Current Cohort";
   const cohortId = u.cohortId || fallbackCohort?.id || "CWG-DEFAULT";
 
-  // ✅ Stable Reference
   const referenceRef = useRef(
     u.reference ||
       `CWG_${Date.now().toString(36).toUpperCase()}_${Math.floor(
@@ -124,34 +222,26 @@ const Payment: React.FC<PaymentProps> = ({
   );
   const reference = referenceRef.current;
 
-  // ✅ Load cohort if missing
   useEffect(() => {
     const loadCohort = async () => {
       if (u.cohortId && u.cohortLabel) return;
-
       try {
         const active = await registrationStore.getActiveCohort();
         setFallbackCohort(active);
       } catch {
-        setFallbackCohort({
-          id: "CWG-DEFAULT",
-          label: "Current Cohort",
-        });
+        setFallbackCohort({ id: "CWG-DEFAULT", label: "Current Cohort" });
       }
     };
-
     loadCohort();
   }, [u.cohortId, u.cohortLabel]);
 
-  // ✅ Paystack Init
   const initializePayment = usePaystackPayment({
     reference,
     email: u.email,
-    amount: totalPrice * 100, // kobo
+    amount: totalPrice * 100,
     publicKey,
   });
 
-  // 🔄 Tiny loading component
   const Loader = ({ label }: { label: string }) => (
     <div className="flex flex-col items-center justify-center gap-4 py-2">
       <div className="h-12 w-12 rounded-full border-4 border-slate-200 dark:border-slate-700 border-t-blue-900 dark:border-t-teal-400 animate-spin" />
@@ -166,13 +256,18 @@ const Payment: React.FC<PaymentProps> = ({
     </div>
   );
 
-  // ✅ Verify Payment via Cloud Function
+  // ✅ FIX #2: one disable flag (prevents pay if no remaining weeks)
+  const disablePay =
+    paymentState === "processing" ||
+    paymentState === "verifying" ||
+    totalPrice <= 0 ||
+    (u.isTopUp && maxAllowedWeeks <= 0);
+
   const verifyAndFinalize = async (paystackRef: string) => {
     try {
       if (!FUNCTION_URL) throw new Error("Missing VITE_VERIFY_PAYSTACK_URL");
       if (!publicKey) throw new Error("Missing VITE_PAYSTACK_PUBLIC_KEY");
 
-      // Show pending verification screen while we verify
       setPaymentState("verifying");
 
       const resp = await fetch(FUNCTION_URL, {
@@ -187,6 +282,10 @@ const Payment: React.FC<PaymentProps> = ({
           cohortId,
           cohortLabel,
           path: safePath,
+
+          // helpful metadata
+          courseMaxWeeks,
+          weeklyRate,
         }),
       });
 
@@ -220,24 +319,24 @@ const Payment: React.FC<PaymentProps> = ({
     }
   };
 
-  // ✅ Main Payment Handler
   const handlePayment = async () => {
     try {
+      // ✅ FIX #2 continued: hard block
+      if (disablePay) return;
+
       setPaymentState("processing");
 
       await registrationStore.setPendingPayment(u.uid, {
         kind: u.isTopUp ? "topup" : "initial",
         weeks: topUpWeeks,
         amount: totalPrice,
-        reference, // ✅ stable
+        reference,
       });
 
-      // Small pause so the UI settles (reduces quick flashes)
       await new Promise((r) => setTimeout(r, 120));
 
       initializePayment({
         onSuccess: async (res: any) => {
-          // Paystack says success — now we verify on backend
           await verifyAndFinalize(res?.reference || reference);
         },
         onClose: () => setPaymentState("idle"),
@@ -247,12 +346,11 @@ const Payment: React.FC<PaymentProps> = ({
     }
   };
 
-  // ✅ SUCCESS UI
+  // SUCCESS
   if (paymentState === "success") {
     return (
       <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
         <div className="bg-white dark:bg-slate-900 max-w-lg w-full p-8 rounded-3xl shadow-xl border border-slate-200 dark:border-slate-800">
-          {/* Success Header */}
           <div className="flex items-center gap-4 mb-6">
             <div className="h-12 w-12 flex items-center justify-center rounded-2xl bg-teal-100 dark:bg-teal-500/20">
               <span className="text-teal-600 dark:text-teal-400 text-2xl font-black">
@@ -270,7 +368,6 @@ const Payment: React.FC<PaymentProps> = ({
             </div>
           </div>
 
-          {/* Cohort Info */}
           <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4 text-sm mb-6">
             <p>
               Cohort:{" "}
@@ -281,7 +378,6 @@ const Payment: React.FC<PaymentProps> = ({
             <p className="text-xs text-slate-500 mt-1">Ref: {reference}</p>
           </div>
 
-          {/* NEW: Next Step Section */}
           <div className="mb-6 p-5 rounded-2xl border border-teal-200 dark:border-teal-500/30 bg-teal-50 dark:bg-teal-500/10">
             <h2 className="font-black text-blue-900 dark:text-white mb-2">
               Next Step 🚀
@@ -293,7 +389,6 @@ const Payment: React.FC<PaymentProps> = ({
             </p>
           </div>
 
-          {/* App Download Placeholders */}
           <div className="space-y-3 mb-6">
             <p className="text-xs font-black uppercase tracking-widest text-slate-400">
               Download the App
@@ -327,7 +422,6 @@ const Payment: React.FC<PaymentProps> = ({
             </p>
           </div>
 
-          {/* Back Button */}
           <button
             onClick={() => onNavigate("student-dashboard")}
             className="w-full bg-blue-900 hover:bg-blue-800 text-white font-black py-4 rounded-2xl shadow-lg"
@@ -337,9 +431,9 @@ const Payment: React.FC<PaymentProps> = ({
         </div>
       </div>
     );
-  };
+  }
 
-  // ⏳ PENDING VERIFICATION UI
+  // VERIFYING
   if (paymentState === "verifying") {
     return (
       <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
@@ -384,7 +478,7 @@ const Payment: React.FC<PaymentProps> = ({
     );
   }
 
-  // ❌ FAILED UI
+  // FAILED
   if (paymentState === "failed") {
     return (
       <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
@@ -426,7 +520,7 @@ const Payment: React.FC<PaymentProps> = ({
     );
   }
 
-  // ✅ MAIN UI
+  // MAIN UI
   return (
     <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen px-6">
       <div className="max-w-3xl mx-auto">
@@ -439,6 +533,10 @@ const Payment: React.FC<PaymentProps> = ({
           </p>
           <p className="text-slate-500 dark:text-slate-300 mt-2">
             Registration Completed!
+          </p>
+
+          <p className="text-[11px] text-slate-400 mt-2">
+            Weeks selected: {topUpWeeks} / Max allowed: {maxAllowedWeeks}
           </p>
         </div>
 
@@ -466,8 +564,16 @@ const Payment: React.FC<PaymentProps> = ({
             </p>
           </div>
 
+          {/* ✅ FIX #3: clean message when topup not possible (no layout change) */}
+          {u.isTopUp && maxAllowedWeeks <= 0 && (
+            <div className="mb-6 p-4 rounded-2xl border border-orange-200 dark:border-orange-500/30 bg-orange-50 dark:bg-orange-500/10 text-orange-800 dark:text-orange-200 text-sm font-bold">
+              You’ve already completed the full course duration (
+              {courseMaxWeeks} weeks). No top-up is needed.
+            </div>
+          )}
+
           <button
-            disabled={paymentState === "processing"}
+            disabled={disablePay}
             onClick={handlePayment}
             className="w-full bg-blue-900 hover:bg-blue-800 disabled:opacity-60 text-white font-black py-5 rounded-2xl shadow-lg"
           >

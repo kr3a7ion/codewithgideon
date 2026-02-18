@@ -7,11 +7,24 @@ admin.initializeApp();
 
 const corsHandler = cors({origin: true});
 
+const parseWeeksFromDuration = (duration: string, fallback = 4) => {
+  const n = parseInt(String(duration || "").replace(/[^\d]/g, ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+const clamp = (n: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, n));
+
+const PINNED_MAX_WEEKS: Record<string, number> = {
+  "flutter & mobile app development": 12,
+  "web development & wordpress": 8,
+  "ai-assisted development": 4,
+};
+
 export const verifyPaystackPayment = onRequest(
   {secrets: ["PAYSTACK_SECRET_KEY"]},
   (req, res) => {
     corsHandler(req, res, async () => {
-      // ✅ Handle preflight
       if (req.method === "OPTIONS") {
         res.status(204).send("");
         return;
@@ -28,9 +41,10 @@ export const verifyPaystackPayment = onRequest(
         const uid = body.uid;
         const expectedAmountRaw = body.expectedAmount;
         const weeks = body.weeks;
-        const kind = body.kind;
+        const kind = body.kind; // "initial" | "topup"
         const cohortId = body.cohortId;
         const cohortLabel = body.cohortLabel;
+        const path = body.path; // ✅ IMPORTANT for duration cap
 
         if (!reference || !uid) {
           res
@@ -111,14 +125,61 @@ export const verifyPaystackPayment = onRequest(
           return;
         }
 
-        const safeWeeks =
+        const userData = userSnap.data() || {};
+        const originalWeeks = Number(userData.weeksToCommit || 0) || 0;
+
+        // ✅ Parse requested weeks (still untrusted)
+        const requestedWeeks =
           Number.isFinite(Number(weeks)) && Number(weeks) > 0 ?
             Number(weeks) :
             1;
 
+        // ✅ Get course max weeks from pinned OR Firestore
+        let maxWeeks = 4;
+        const normalizedPath = String(path || userData.path || "")
+          .trim()
+          .toLowerCase();
+
+        // 1) pinned
+        if (PINNED_MAX_WEEKS[normalizedPath]) {
+          maxWeeks = PINNED_MAX_WEEKS[normalizedPath];
+        } else {
+          // 2) Firestore courses lookup by title
+          if (normalizedPath) {
+            const coursesSnap = await admin
+              .firestore()
+              .collection("courses")
+              .get();
+            const found = coursesSnap.docs.find((d) => {
+              const t = String(d.data()?.title || "")
+                .trim()
+                .toLowerCase();
+              return t === normalizedPath;
+            });
+
+            if (found) {
+              maxWeeks = parseWeeksFromDuration(
+                String(found.data()?.duration || "4"),
+                4,
+              );
+            }
+          }
+        }
+
+        // ✅ Enforce cap
+        // initial: 1..maxWeeks
+        // topup: 1..(maxWeeks - originalWeeks)  (at least 1)
+        const maxAllowed =
+          kind === "topup" ?
+            Math.max(1, maxWeeks - originalWeeks) :
+            Math.max(1, maxWeeks);
+
+        const safeWeeks = clamp(requestedWeeks, 1, maxAllowed);
+
         const updates: Record<string, unknown> = {
           status: "Complete",
           pendingPayment: admin.firestore.FieldValue.delete(),
+          path: String(path || userData.path || ""), // ✅ keep path consistent
         };
 
         if (kind === "topup") {
@@ -128,12 +189,8 @@ export const verifyPaystackPayment = onRequest(
           updates.weeksToCommit = safeWeeks;
         }
 
-        if (cohortId) {
-          updates.cohortId = String(cohortId);
-        }
-        if (cohortLabel) {
-          updates.cohortLabel = String(cohortLabel);
-        }
+        if (cohortId) updates.cohortId = String(cohortId);
+        if (cohortLabel) updates.cohortLabel = String(cohortLabel);
 
         await userRef.update(updates);
 
@@ -142,12 +199,14 @@ export const verifyPaystackPayment = onRequest(
           .collection("users/" + String(uid) + "/payments")
           .add({
             reference: String(reference),
-            amountKobo: amountKobo,
+            amountKobo,
             email: (data.customer && data.customer.email) || null,
-            weeks: safeWeeks,
+            weeks: safeWeeks, // ✅ store enforced weeks
             kind: kind || "initial",
             cohortId: cohortId || null,
             cohortLabel: cohortLabel || null,
+            path: String(path || userData.path || ""),
+            maxWeeks,
             verifiedAt: Date.now(),
             paystack: {
               id: data.id || null,
@@ -158,7 +217,7 @@ export const verifyPaystackPayment = onRequest(
             },
           });
 
-        res.json({ok: true});
+        res.json({ok: true, safeWeeks, maxWeeks});
       } catch (e: unknown) {
         const err = e as { response?: { data?: unknown }; message?: string };
         const axiosData = err.response?.data;

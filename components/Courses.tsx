@@ -152,15 +152,8 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
               path.
             </p>
           </div>
-
-          {/* ✅ FIX: Explore All Paths should show everything (Firestore + pinned 3)
-              Your curriculums page is hardcoded to the pinned 3, so we scroll to this section instead. */}
           <button
-            onClick={() => {
-              // keep UI unchanged, but ensure the user sees ALL courses that we merged here
-              const el = document.getElementById("courses");
-              if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
+            onClick={() => onNavigate("curriculums")}
             className="text-teal-600 dark:text-teal-400 font-bold flex items-center hover:text-teal-700 dark:hover:text-teal-300 transition-colors mx-auto md:mx-0"
           >
             Explore All Paths

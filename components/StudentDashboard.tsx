@@ -3,6 +3,8 @@ import { View } from "../src/App";
 import {
   RegistrationEntry,
   registrationStore,
+  CourseDoc,
+  SessionDoc,
 } from "../services/registrationStore";
 
 type ActiveCohort = { id: string; label: string };
@@ -23,6 +25,14 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   const [activeCohort, setActiveCohort] = useState<ActiveCohort | null>(null);
   const [cohortLoading, setCohortLoading] = useState(false);
+
+  // ✅ NEW: course truth fields
+  const [course, setCourse] = useState<CourseDoc | null>(null);
+  const [courseLoading, setCourseLoading] = useState(false);
+
+  // ✅ NEW: sessions (unlocked)
+  const [sessions, setSessions] = useState<SessionDoc[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
 
   // ✅ Always attempt to load active cohort once profile exists
   useEffect(() => {
@@ -62,21 +72,106 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   if (!profile) return null;
 
-  const weeklyRate = 10000;
+  // ✅ RESOLVED COHORT (single source for UI + navigation)
+  const resolvedCohort = useMemo(() => {
+    const id = profile.cohortId || activeCohort?.id || "CWG-DEFAULT";
+    const label =
+      profile.cohortLabel || activeCohort?.label || "Current Cohort";
+    return { id, label };
+  }, [
+    profile.cohortId,
+    profile.cohortLabel,
+    activeCohort?.id,
+    activeCohort?.label,
+  ]);
 
-  const totalProgramWeeks = profile.path.includes("Flutter")
-    ? 12
-    : profile.path.includes("Web")
-      ? 8
-      : 4;
+  const cohortId = resolvedCohort.id;
+  const cohortLabel = resolvedCohort.label;
+
+  // ✅ Load course truth fields (weeks + pricePerWeek)
+  useEffect(() => {
+    let mounted = true;
+
+    const loadCourse = async () => {
+      if (!profile?.path) return;
+      setCourseLoading(true);
+
+      try {
+        const list = await registrationStore.getCourses();
+        if (!mounted) return;
+
+        // Match by title OR label (since your CourseDoc has both)
+        const found =
+          (list || []).find(
+            (c: any) =>
+              String(c.title || "").trim() === String(profile.path).trim() ||
+              String(c.label || "").trim() === String(profile.path).trim(),
+          ) || null;
+
+        setCourse(found);
+      } catch (e) {
+        console.error("Failed to load courses:", e);
+        setCourse(null);
+      } finally {
+        if (mounted) setCourseLoading(false);
+      }
+    };
+
+    loadCourse();
+    return () => {
+      mounted = false;
+    };
+  }, [profile?.path]);
+
+  // ✅ Load unlocked sessions (published only + <= paid weeks)
+  useEffect(() => {
+    let mounted = true;
+
+    const loadSessions = async () => {
+      if (!profile) return;
+
+      setSessionsLoading(true);
+      try {
+        const unlocked =
+          await registrationStore.getUnlockedSessionsForStudent(profile);
+        if (!mounted) return;
+        setSessions(unlocked || []);
+      } catch (e) {
+        console.error("Failed to load unlocked sessions:", e);
+        if (mounted) setSessions([]);
+      } finally {
+        if (mounted) setSessionsLoading(false);
+      }
+    };
+
+    loadSessions();
+    return () => {
+      mounted = false;
+    };
+  }, [profile?.uid, profile?.weeksToCommit, profile?.cohortId, profile?.path]);
+
+  // ✅ Truth fields (fallback if course not found)
+  const weeklyRate = useMemo(() => {
+    const v = Number((course as any)?.pricePerWeek);
+    return Number.isFinite(v) && v > 0 ? v : 10000;
+  }, [course]);
+
+  const totalProgramWeeks = useMemo(() => {
+    const w = Number((course as any)?.weeks);
+    if (Number.isFinite(w) && w > 0) return Math.floor(w);
+
+    // fallback (your old heuristic)
+    return profile.path.includes("Flutter")
+      ? 12
+      : profile.path.includes("Web")
+        ? 8
+        : 4;
+  }, [course, profile.path]);
 
   const paidWeeks = Math.max(0, Number(profile.weeksToCommit || 0));
   const remainingWeeks = Math.max(0, totalProgramWeeks - paidWeeks);
 
-  const progressPercent = Math.min(
-    (Number(profile.weeksToCommit || 0) / totalProgramWeeks) * 100,
-    100,
-  );
+  const progressPercent = Math.min((paidWeeks / totalProgramWeeks) * 100, 100);
 
   const hasPendingInitial = profile.status === "Pending";
   const hasPendingTopUp =
@@ -98,22 +193,6 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
       setTopUpWeeks(String(clamped));
     }
   }, [isTopUpOpen, remainingWeeks, topUpWeeks]);
-
-  // ✅ RESOLVED COHORT (single source for UI + navigation)
-  const resolvedCohort = useMemo(() => {
-    const id = profile.cohortId || activeCohort?.id || "CWG-DEFAULT";
-    const label =
-      profile.cohortLabel || activeCohort?.label || "Current Cohort";
-    return { id, label };
-  }, [
-    profile.cohortId,
-    profile.cohortLabel,
-    activeCohort?.id,
-    activeCohort?.label,
-  ]);
-
-  const cohortId = resolvedCohort.id;
-  const cohortLabel = resolvedCohort.label;
 
   // ✅ Build safe payload for payment
   const buildPaymentPayload = () => {
@@ -151,13 +230,10 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   const handleContinuePayment = () => {
     const payload = buildPaymentPayload();
-
-    // ✅ Safety: never navigate with missing userData
     if (!payload?.userData?.uid || !payload?.userData?.email) {
       console.error("Payment payload invalid:", payload);
       return;
     }
-
     onNavigate("payment", payload);
   };
 
@@ -189,7 +265,46 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   const joinedDate = new Date(profile.timestamp).toLocaleDateString();
 
-  // ✅ Small loading UI helpers (no logic changes)
+  // ✅ Next session card helpers
+  const nowMs = Date.now();
+
+  const nextSession = useMemo(() => {
+    // sessions are Firestore Timestamps -> toMillis()
+    const upcoming = (sessions || [])
+      .map((s) => ({
+        ...s,
+        _ms:
+          typeof (s as any)?.startsAt?.toMillis === "function"
+            ? (s as any).startsAt.toMillis()
+            : NaN,
+      }))
+      .filter((s) => Number.isFinite(s._ms))
+      .filter((s) => (s._ms as number) >= nowMs)
+      .sort((a, b) => (a._ms as number) - (b._ms as number));
+
+    return upcoming[0] || null;
+  }, [sessions, nowMs]);
+
+  const formatSessionTime = (s: SessionDoc) => {
+    const ms =
+      typeof (s as any)?.startsAt?.toMillis === "function"
+        ? (s as any).startsAt.toMillis()
+        : null;
+    if (!ms) return "TBD";
+
+    const d = new Date(ms);
+    return `${d.toLocaleDateString()} • ${d.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    })}`;
+  };
+
+  const openJoin = (url?: string) => {
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  // ✅ Small loading UI helpers
   const InlineSpinner = ({ label }: { label?: string }) => (
     <span className="inline-flex items-center gap-2">
       <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300/70 dark:border-slate-600 border-t-blue-900 dark:border-t-teal-400 animate-spin" />
@@ -236,6 +351,20 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   <span className="font-mono">({cohortId})</span>
                 )}
               </p>
+
+              <p className="text-[11px] text-slate-400 mt-1">
+                Plan:{" "}
+                <span className="font-bold">
+                  {courseLoading ? (
+                    <InlineSpinner label="Loading course…" />
+                  ) : (
+                    <>
+                      {totalProgramWeeks} weeks • ₦{weeklyRate.toLocaleString()}
+                      /wk
+                    </>
+                  )}
+                </span>
+              </p>
             </div>
           </div>
 
@@ -251,6 +380,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Main */}
           <div className="lg:col-span-2 space-y-8">
+            {/* Enrollment */}
             <div className="bg-white dark:bg-slate-900 p-10 rounded-[2.5rem] shadow-xl border border-gray-100 dark:border-slate-800 relative overflow-hidden">
               <div className="absolute top-0 right-0 p-8">
                 <span
@@ -282,7 +412,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                       Weekly Access Paid
                     </p>
                     <p className="text-2xl font-black text-blue-900 dark:text-teal-400">
-                      {profile.weeksToCommit} / {totalProgramWeeks} Weeks
+                      {paidWeeks} / {totalProgramWeeks} Weeks
                     </p>
                   </div>
                   <p className="text-sm font-bold text-blue-900 dark:text-white">
@@ -334,6 +464,115 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 ) : (
                   <div className="px-6 py-3 rounded-2xl bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-200 font-black text-sm whitespace-nowrap">
                     Fully Paid ✅
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ✅ NEW: Next Live Session */}
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] shadow-xl border border-gray-100 dark:border-slate-800">
+              <div className="flex items-start justify-between gap-6">
+                <div>
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+                    Next Live Session
+                  </p>
+
+                  {sessionsLoading ? (
+                    <div className="text-slate-500 dark:text-slate-300">
+                      <InlineSpinner label="Loading sessions…" />
+                    </div>
+                  ) : nextSession ? (
+                    <>
+                      <h3 className="text-xl font-black text-blue-900 dark:text-white">
+                        Week {nextSession.week}: {nextSession.title}
+                      </h3>
+                      <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
+                        {formatSessionTime(nextSession)}
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-2 font-bold">
+                        {nextSession.path}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="text-slate-500 dark:text-slate-400">
+                      No upcoming sessions found yet.
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col items-end gap-2">
+                  <button
+                    disabled={!nextSession?.joinUrl}
+                    onClick={() => openJoin(nextSession?.joinUrl)}
+                    className={`px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition ${
+                      nextSession?.joinUrl
+                        ? "bg-teal-600 text-white hover:bg-teal-500 shadow-lg"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
+                    }`}
+                  >
+                    Join Live Class
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      onNavigate("sessions" as View, {
+                        cohortId,
+                        cohortLabel,
+                        path: profile.path,
+                      })
+                    }
+                    className="text-xs font-black uppercase tracking-widest text-blue-900 dark:text-teal-400 hover:underline"
+                  >
+                    View all sessions
+                  </button>
+                </div>
+              </div>
+
+              {/* ✅ Unlocked list (preview) */}
+              <div className="mt-6">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
+                  Unlocked Sessions (Paid Weeks)
+                </p>
+
+                {sessionsLoading ? (
+                  <div className="text-slate-500 dark:text-slate-300">
+                    <InlineSpinner label="Loading…" />
+                  </div>
+                ) : sessions.length === 0 ? (
+                  <div className="text-sm text-slate-500 dark:text-slate-400">
+                    No unlocked sessions yet. Once sessions are published for
+                    your cohort and you’ve paid at least 1 week, they’ll show
+                    here.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {sessions.slice(0, 5).map((s) => (
+                      <div
+                        key={s.id}
+                        className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/40 border border-gray-100 dark:border-slate-800 flex items-center justify-between gap-4"
+                      >
+                        <div>
+                          <p className="text-sm font-black text-blue-900 dark:text-white">
+                            Week {s.week}: {s.title}
+                          </p>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                            {formatSessionTime(s)}
+                          </p>
+                        </div>
+
+                        <button
+                          disabled={!s.joinUrl}
+                          onClick={() => openJoin(s.joinUrl)}
+                          className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition ${
+                            s.joinUrl
+                              ? "bg-blue-900 dark:bg-teal-600 text-white hover:opacity-90"
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
+                          }`}
+                        >
+                          Join
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -424,7 +663,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   onChange={(e) => setTopUpWeeks(e.target.value)}
                   className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white font-bold outline-none"
                 >
-                  {[1, 2, 3, 4]
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12]
                     .filter((w) => w <= remainingWeeks)
                     .map((w) => (
                       <option key={w} value={String(w)}>
