@@ -1,14 +1,24 @@
+// components/Registration.tsx ✅ Option A (pathId source-of-truth, backward compatible)
 import React, { useEffect, useMemo, useState } from "react";
 import { View } from "../src/App";
 import {
   registrationStore,
-  ActiveCohort,
   CourseDoc,
+  ActiveCohortForPath,
+  PathDoc,
 } from "../services/registrationStore";
 
 interface RegistrationProps {
   onNavigate: (view: View) => void;
+
+  /**
+   * ✅ Backward compatible:
+   * - legacy: "Flutter & Mobile App Development" (title)
+   * - new:    "pid:<PATH_ID>"
+   * - new:    "cid:<COURSE_ID>"
+   */
   selectedPath: string;
+
   onComplete: (data: any) => void;
 }
 
@@ -16,26 +26,37 @@ type FieldKey = "fullName" | "email" | "password" | "phone";
 type FieldErrors = Partial<Record<FieldKey, string>>;
 
 type CourseOption = {
-  title: string;
+  id: string; // selection id (courseId or pinned id)
+  title: string; // label shown to user
   durationWeeks: number;
   weeklyRate: number;
+
+  // ✅ Option A fields
+  pathId: string; // REQUIRED for registration
+  courseId?: string; // only for firestore courses
   source: "pinned" | "firestore";
 };
 
-const PINNED_COURSES: CourseOption[] = [
+// -------------------------
+// PINNED COURSES (hydrated with real pathId by matching Paths)
+// -------------------------
+const PINNED_COURSES_RAW: Omit<CourseOption, "pathId">[] = [
   {
+    id: "flutter",
     title: "Flutter & Mobile App Development",
     durationWeeks: 12,
     weeklyRate: 10000,
     source: "pinned",
   },
   {
+    id: "wordpress",
     title: "Web Development & WordPress",
     durationWeeks: 8,
     weeklyRate: 10000,
     source: "pinned",
   },
   {
+    id: "ai",
     title: "AI-Assisted Development",
     durationWeeks: 4,
     weeklyRate: 10000,
@@ -50,7 +71,6 @@ const parseWeeksFromDuration = (duration: string, fallback = 4) => {
 };
 
 const parsePricePerWeek = (label: string, fallback = 10000) => {
-  // Accepts: "₦10k/wk", "₦15,000/wk", "10000", "10k"
   const s = String(label || "").toLowerCase();
   const hasK = s.includes("k");
   const num = parseInt(s.replace(/[^\d]/g, ""), 10);
@@ -61,23 +81,57 @@ const parsePricePerWeek = (label: string, fallback = 10000) => {
 const clamp = (n: number, min: number, max: number) =>
   Math.max(min, Math.min(max, n));
 
+const FieldError = ({ msg }: { msg?: string }) =>
+  msg ? <p className="mt-2 text-[11px] font-bold text-red-600">{msg}</p> : null;
+
+// ✅ parse selectedPath from legacy/new callers
+const parseSelectedPathInput = (selectedPath: string) => {
+  const raw = String(selectedPath || "").trim();
+  const lower = raw.toLowerCase();
+
+  if (lower.startsWith("pid:")) {
+    return { kind: "pathId" as const, value: raw.slice(4).trim() };
+  }
+
+  if (lower.startsWith("cid:")) {
+    return { kind: "courseId" as const, value: raw.slice(4).trim() };
+  }
+
+  return { kind: "title" as const, value: raw };
+};
+
 const Registration: React.FC<RegistrationProps> = ({
   onNavigate,
   selectedPath,
   onComplete,
 }) => {
+  // ✅ pathId is truth
+  const [selectedPathId, setSelectedPathId] = useState<string>("");
+
+  // ✅ track selection (courseId OR pinned id)
+  const [selectedCourseId, setSelectedCourseId] = useState<string>("");
+
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
     password: "",
     phone: "",
-    path: selectedPath || "Flutter & Mobile App Development",
     ageRange: "18-24",
     gender: "Male",
     weeksToCommit: "4",
   });
 
-  const [cohort, setCohort] = useState<ActiveCohort | null>(null);
+  // Paths + Courses
+  const [paths, setPaths] = useState<PathDoc[]>([]);
+  const [pathsLoading, setPathsLoading] = useState(true);
+  const [pathsError, setPathsError] = useState<string>("");
+
+  const [courseOptions, setCourseOptions] = useState<CourseOption[]>([]);
+  const [coursesLoading, setCoursesLoading] = useState(true);
+  const [coursesError, setCoursesError] = useState<string>("");
+
+  // Cohort (per pathId)
+  const [cohort, setCohort] = useState<ActiveCohortForPath | null>(null);
   const [cohortLoading, setCohortLoading] = useState(true);
 
   const [showPassword, setShowPassword] = useState(false);
@@ -86,22 +140,272 @@ const Registration: React.FC<RegistrationProps> = ({
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
-  // ✅ NEW: Course catalog loaded (Firestore + pinned)
-  const [courseOptions, setCourseOptions] =
-    useState<CourseOption[]>(PINNED_COURSES);
-  const [coursesLoading, setCoursesLoading] = useState(true);
+  const activePaths = useMemo(() => {
+    // ✅ Treat missing isActive as active (fixes older docs)
+    return (paths || []).filter((p) => (p as any)?.isActive !== false);
+  }, [paths]);
 
-  // ---- Load cohort ----
+  const pathsByTitle = useMemo(() => {
+    const m = new Map<string, PathDoc>();
+    (activePaths || []).forEach((p) =>
+      m.set(
+        String(p.title || "")
+          .trim()
+          .toLowerCase(),
+        p,
+      ),
+    );
+    return m;
+  }, [activePaths]);
+
+  const pathsById = useMemo(() => {
+    const m = new Map<string, PathDoc>();
+    (activePaths || []).forEach((p) => m.set(p.id, p));
+    return m;
+  }, [activePaths]);
+
+  // -------------------------
+  // Load Paths
+  // -------------------------
+  useEffect(() => {
+    let mounted = true;
+
+    const loadPaths = async () => {
+      setPathsLoading(true);
+      setPathsError("");
+
+      try {
+        /**
+         * ✅ IMPORTANT FIX:
+         * - Using getPaths(false) relies on Firestore filtering: where("isActive","==",true)
+         * - Older docs or docs missing isActive will NOT show.
+         *
+         * So we load all, then filter client-side with isActive !== false.
+         */
+        const list = await registrationStore.getPaths(true); // include inactive/missing fields
+        if (!mounted) return;
+
+        setPaths(list || []);
+      } catch (e: any) {
+        console.error("Failed to load paths:", e);
+        if (!mounted) return;
+        setPaths([]);
+        setPathsError(
+          e?.message ||
+            "Failed to load paths from Firebase. Check Firestore rules for /paths read access.",
+        );
+      } finally {
+        if (mounted) setPathsLoading(false);
+      }
+    };
+
+    loadPaths();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // -------------------------
+  // Load Courses (requires paths loaded for pinned hydration)
+  // -------------------------
+  useEffect(() => {
+    let mounted = true;
+
+    const loadCourses = async () => {
+      setCoursesLoading(true);
+      setCoursesError("");
+
+      try {
+        const list: CourseDoc[] = await registrationStore.getCourses();
+
+        const active = (list || []).filter(
+          (c: any) =>
+            c.isActive !== false &&
+            (c as any).showOnLanding !== false &&
+            String((c as any).pathId || "").trim().length > 0,
+        );
+
+        const firestoreOptions: CourseOption[] = active.map((c: any) => ({
+          id: c.id,
+          courseId: c.id,
+          pathId: String(c.pathId),
+          title: String(c.title || "Course"),
+          durationWeeks:
+            Number(c.weeks) > 0
+              ? Number(c.weeks)
+              : parseWeeksFromDuration(c.duration, 4),
+          weeklyRate:
+            Number(c.pricePerWeek) > 0
+              ? Number(c.pricePerWeek)
+              : parsePricePerWeek(c.priceLabel || "₦10k/wk", 10000),
+          source: "firestore",
+        }));
+
+        // Hydrate pinned courses with pathId by matching path title (active paths only)
+        const pinnedOptions: CourseOption[] = PINNED_COURSES_RAW.map((p) => {
+          const match = pathsByTitle.get(p.title.trim().toLowerCase());
+          return match ? ({ ...p, pathId: match.id } as CourseOption) : null;
+        }).filter(Boolean) as CourseOption[];
+
+        // Avoid duplicates by title+pathId
+        const key = (o: CourseOption) =>
+          `${o.pathId}::${o.title.trim().toLowerCase()}`;
+        const seen = new Set<string>();
+        const merged: CourseOption[] = [];
+        [...pinnedOptions, ...firestoreOptions].forEach((o) => {
+          const k = key(o);
+          if (seen.has(k)) return;
+          seen.add(k);
+          merged.push(o);
+        });
+
+        if (!mounted) return;
+        setCourseOptions(merged);
+
+        // ✅ Initialize selection using selectedPath input (pid/cid/title)
+        const parsed = parseSelectedPathInput(selectedPath);
+
+        if (parsed.kind === "courseId") {
+          const hit = merged.find(
+            (c) => c.courseId === parsed.value || c.id === parsed.value,
+          );
+          if (hit) {
+            setSelectedCourseId(hit.id);
+            setSelectedPathId(hit.pathId);
+            return;
+          }
+        }
+
+        if (parsed.kind === "pathId") {
+          const hit = merged.find((c) => c.pathId === parsed.value);
+          if (hit) {
+            setSelectedCourseId(hit.id);
+            setSelectedPathId(hit.pathId);
+            return;
+          }
+          if (pathsById.has(parsed.value)) {
+            setSelectedPathId(parsed.value);
+          }
+        }
+
+        if (parsed.kind === "title") {
+          const desiredTitle = parsed.value.trim().toLowerCase();
+          const desiredPath = desiredTitle
+            ? pathsByTitle.get(desiredTitle)
+            : null;
+
+          const firstForDesiredPath = desiredPath
+            ? merged.find((c) => c.pathId === desiredPath.id)
+            : null;
+
+          const first = merged[0] || null;
+          const chosen = firstForDesiredPath || first;
+
+          if (chosen) {
+            setSelectedCourseId(chosen.id);
+            setSelectedPathId(chosen.pathId);
+            return;
+          }
+
+          if (desiredPath) setSelectedPathId(desiredPath.id);
+        }
+
+        if (merged[0]) {
+          setSelectedCourseId(merged[0].id);
+          setSelectedPathId(merged[0].pathId);
+        }
+      } catch (e: any) {
+        console.error("Failed to load courses:", e);
+        if (!mounted) return;
+
+        setCoursesError(
+          e?.message ||
+            "Failed to load courses. Check Firestore rules for /courses read access.",
+        );
+
+        // fallback: only pinned that match active paths
+        const pinnedOptions: CourseOption[] = PINNED_COURSES_RAW.map((p) => {
+          const match = pathsByTitle.get(p.title.trim().toLowerCase());
+          return match ? ({ ...p, pathId: match.id } as CourseOption) : null;
+        }).filter(Boolean) as CourseOption[];
+
+        setCourseOptions(pinnedOptions);
+
+        const parsed = parseSelectedPathInput(selectedPath);
+
+        if (parsed.kind === "pathId") {
+          const hit = pinnedOptions.find((c) => c.pathId === parsed.value);
+          if (hit) {
+            setSelectedCourseId(hit.id);
+            setSelectedPathId(hit.pathId);
+            return;
+          }
+          if (pathsById.has(parsed.value)) setSelectedPathId(parsed.value);
+        }
+
+        if (parsed.kind === "courseId") {
+          const hit = pinnedOptions.find((c) => c.id === parsed.value);
+          if (hit) {
+            setSelectedCourseId(hit.id);
+            setSelectedPathId(hit.pathId);
+            return;
+          }
+        }
+
+        if (parsed.kind === "title") {
+          const desiredTitle = parsed.value.trim().toLowerCase();
+          const desiredPath = desiredTitle
+            ? pathsByTitle.get(desiredTitle)
+            : null;
+          const chosen =
+            (desiredPath
+              ? pinnedOptions.find((c) => c.pathId === desiredPath.id)
+              : null) || pinnedOptions[0];
+
+          if (chosen) {
+            setSelectedCourseId(chosen.id);
+            setSelectedPathId(chosen.pathId);
+            return;
+          }
+          if (desiredPath) setSelectedPathId(desiredPath.id);
+        }
+
+        if (pinnedOptions[0]) {
+          setSelectedCourseId(pinnedOptions[0].id);
+          setSelectedPathId(pinnedOptions[0].pathId);
+        }
+      } finally {
+        if (mounted) setCoursesLoading(false);
+      }
+    };
+
+    if (!pathsLoading) loadCourses();
+    return () => {
+      mounted = false;
+    };
+  }, [selectedPath, pathsLoading, pathsByTitle, pathsById]);
+
+  // -------------------------
+  // Load cohort for selectedPathId
+  // -------------------------
   useEffect(() => {
     let mounted = true;
 
     const loadCohort = async () => {
+      if (!selectedPathId) {
+        setCohort(null);
+        setCohortLoading(false);
+        return;
+      }
+
       setCohortLoading(true);
       try {
-        const active = await registrationStore.getActiveCohort();
+        const active =
+          await registrationStore.getActiveCohortForPathId(selectedPathId);
         if (mounted) setCohort(active);
       } catch (e) {
-        if (mounted) setCohort({ id: "CWG-DEFAULT", label: "Current Cohort" });
+        console.error("loadCohort failed:", e);
+        if (mounted) setCohort(null);
       } finally {
         if (mounted) setCohortLoading(false);
       }
@@ -111,85 +415,40 @@ const Registration: React.FC<RegistrationProps> = ({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [selectedPathId]);
 
-  // ---- Load courses ----
-  useEffect(() => {
-    let mounted = true;
-
-    const loadCourses = async () => {
-      setCoursesLoading(true);
-      try {
-        const list: CourseDoc[] = await registrationStore.getCourses();
-        const active = (list || []).filter((c) => c.isActive !== false);
-
-        // avoid duplicates with pinned by title
-        const pinnedSet = new Set(
-          PINNED_COURSES.map((p) => p.title.trim().toLowerCase()),
-        );
-
-        const firestoreOptions: CourseOption[] = active
-          .filter(
-            (c) =>
-              !pinnedSet.has(
-                String(c.title || "")
-                  .trim()
-                  .toLowerCase(),
-              ),
-          )
-          .map((c) => ({
-            title: c.title,
-            durationWeeks: parseWeeksFromDuration(c.duration, 4),
-            weeklyRate: parsePricePerWeek(c.priceLabel || "₦10k/wk", 10000),
-            source: "firestore",
-          }));
-
-        const merged = [...PINNED_COURSES, ...firestoreOptions];
-
-        if (mounted) setCourseOptions(merged);
-      } catch (e) {
-        console.error("Failed to load courses:", e);
-        if (mounted) setCourseOptions(PINNED_COURSES);
-      } finally {
-        if (mounted) setCoursesLoading(false);
-      }
-    };
-
-    loadCourses();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  // ✅ Find selected course config (max weeks + weekly rate)
   const selectedCourse = useMemo(() => {
-    const key = String(formData.path || "")
-      .trim()
-      .toLowerCase();
+    const byId = courseOptions.find((c) => c.id === selectedCourseId);
+    if (byId) return byId;
+
+    const firstForPath = selectedPathId
+      ? courseOptions.find((c) => c.pathId === selectedPathId)
+      : null;
+
     return (
-      courseOptions.find((c) => c.title.trim().toLowerCase() === key) ||
-        // fallback: keep app stable even if title not found
-        {
-          title: formData.path || "Course",
-          durationWeeks: 4,
-          weeklyRate: 10000,
-          source: "pinned" as const,
-        }
+      firstForPath ||
+      courseOptions[0] || {
+        id: "fallback",
+        title: "Course",
+        durationWeeks: 4,
+        weeklyRate: 10000,
+        pathId: selectedPathId || "",
+        source: "pinned" as const,
+      }
     );
-  }, [courseOptions, formData.path]);
+  }, [courseOptions, selectedCourseId, selectedPathId]);
 
   const maxWeeks = selectedCourse.durationWeeks || 4;
   const weeklyRate = selectedCourse.weeklyRate || 10000;
 
-  // ✅ Clamp weeksToCommit anytime course/path changes
+  // Keep weeksToCommit clamped to course duration
   useEffect(() => {
     const current = parseInt(formData.weeksToCommit || "1", 10) || 1;
     const safe = clamp(current, 1, maxWeeks);
     if (String(safe) !== String(current)) {
       setFormData((p) => ({ ...p, weeksToCommit: String(safe) }));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maxWeeks, formData.path]);
+  }, [maxWeeks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentTotal = useMemo(() => {
     const weeks = clamp(
@@ -202,26 +461,12 @@ const Registration: React.FC<RegistrationProps> = ({
 
   const disableSubmit =
     isSubmitting ||
+    coursesLoading ||
+    pathsLoading ||
     cohortLoading ||
-    !cohort?.id ||
-    !cohort?.label ||
-    coursesLoading;
+    !selectedPathId ||
+    !cohort?.cohortKey;
 
-  const Spinner = ({ size = 18 }: { size?: number }) => (
-    <span
-      className="inline-block rounded-full border-2 border-white/40 border-t-white animate-spin"
-      style={{ width: size, height: size }}
-    />
-  );
-
-  const InlineSpinner = ({ label }: { label: string }) => (
-    <span className="inline-flex items-center gap-3">
-      <span className="h-4 w-4 rounded-full border-2 border-blue-900/30 dark:border-teal-400/30 border-t-blue-900 dark:border-t-teal-400 animate-spin" />
-      <span className="text-sm font-bold">{label}</span>
-    </span>
-  );
-
-  // ✅ Validation
   const validateField = (name: FieldKey, value: string): string => {
     const v = (value ?? "").trim();
 
@@ -251,8 +496,6 @@ const Registration: React.FC<RegistrationProps> = ({
       const digits = v.replace(/\D/g, "");
       if (digits.length < 10) return "Phone number is too short.";
       if (digits.length > 15) return "Phone number is too long.";
-      if (!/^\d+$/.test(digits))
-        return "Phone number must contain only digits.";
       return "";
     }
 
@@ -289,7 +532,6 @@ const Registration: React.FC<RegistrationProps> = ({
       return;
     }
 
-    // ✅ clamp weeks instantly (so UI never shows invalid values)
     if (name === "weeksToCommit") {
       const w = clamp(parseInt(value || "1", 10) || 1, 1, maxWeeks);
       setFormData((p) => ({ ...p, weeksToCommit: String(w) }));
@@ -320,10 +562,9 @@ const Registration: React.FC<RegistrationProps> = ({
     setIsSubmitting(true);
 
     try {
-      if (cohortLoading || !cohort?.id || !cohort?.label) {
-        throw new Error(
-          "Cohort is still loading. Please try again in a moment.",
-        );
+      if (!selectedPathId) throw new Error("Please select a Path.");
+      if (cohortLoading || !cohort?.cohortKey) {
+        throw new Error("Cohort is still loading. Please try again.");
       }
 
       const weeks = clamp(
@@ -334,21 +575,25 @@ const Registration: React.FC<RegistrationProps> = ({
 
       const { password, ...rest } = formData;
 
-      const data = {
+      const payload = {
         ...rest,
         phone: String(rest.phone || ""),
         weeksToCommit: weeks,
-        totalPrice: weeks * weeklyRate, // ✅ per-course rate
-        cohortId: cohort.id,
-        cohortLabel: cohort.label,
+        totalPrice: weeks * weeklyRate,
 
-        // ✅ optional but useful later
+        pathId: selectedPathId,
+        courseId: selectedCourse.courseId || undefined,
+
         courseDurationWeeks: maxWeeks,
         weeklyRate,
+        selectedCourseId,
       };
 
-      const uid = await registrationStore.createAccount(data as any, password);
-      onComplete({ ...data, uid });
+      const uid = await registrationStore.createAccount(
+        payload as any,
+        password,
+      );
+      onComplete({ ...payload, uid });
     } catch (err: any) {
       setError(err?.message || "Registration failed");
     } finally {
@@ -356,15 +601,23 @@ const Registration: React.FC<RegistrationProps> = ({
     }
   };
 
-  const FieldErrorText = ({ msg }: { msg?: string }) =>
-    msg ? <p className="mt-2 text-xs font-bold text-red-600">{msg}</p> : null;
-
-  // ✅ build weeks options based on course duration
   const weeksOptions = useMemo(() => {
-    const arr = [];
+    const arr: number[] = [];
     for (let w = 1; w <= maxWeeks; w++) arr.push(w);
     return arr;
   }, [maxWeeks]);
+
+  const Spinner = ({ size = 18 }: { size?: number }) => (
+    <span
+      className="inline-block rounded-full border-2 border-white/40 border-t-white animate-spin"
+      style={{ width: size, height: size }}
+    />
+  );
+
+  const selectedPathTitle =
+    (selectedPathId ? pathsById.get(selectedPathId)?.title : "") ||
+    selectedCourse.title ||
+    "Path";
 
   return (
     <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
@@ -373,9 +626,6 @@ const Registration: React.FC<RegistrationProps> = ({
           <h1 className="text-4xl font-black text-blue-900 dark:text-white mb-4">
             Create Your Account
           </h1>
-          <p className="text-slate-600 dark:text-slate-400">
-            Join the cohort and start your professional journey.
-          </p>
 
           <div className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-blue-100 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur">
             <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
@@ -385,17 +635,34 @@ const Registration: React.FC<RegistrationProps> = ({
               {cohortLoading ? "Loading..." : cohort?.label || "Current Cohort"}
             </span>
           </div>
-        </div>
 
-        <div className="bg-white dark:bg-slate-900 p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 relative">
-          {isSubmitting && (
-            <div className="absolute inset-0 z-10 rounded-[2.5rem] bg-white/70 dark:bg-slate-950/60 backdrop-blur-sm flex items-center justify-center">
-              <div className="px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl">
-                <InlineSpinner label="Creating your account…" />
-              </div>
+          {/* ✅ Better diagnostics (no UI break) */}
+          {!pathsLoading && pathsError && (
+            <div className="mt-6 text-left max-w-xl mx-auto p-4 rounded-2xl border bg-orange-50 border-orange-100 text-orange-800 dark:bg-orange-500/10 dark:border-orange-500/20 dark:text-orange-200">
+              <p className="text-xs font-black uppercase tracking-widest">
+                Paths not loading
+              </p>
+              <p className="mt-2 text-sm font-bold">{pathsError}</p>
+              <p className="mt-2 text-[11px] opacity-90">
+                Fix: allow public read on{" "}
+                <span className="font-mono">/paths</span> and ensure paths have{" "}
+                <span className="font-mono">isActive</span> set (or leave it
+                missing — this UI now treats missing as active).
+              </p>
             </div>
           )}
 
+          {!coursesLoading && coursesError && (
+            <div className="mt-4 text-left max-w-xl mx-auto p-4 rounded-2xl border bg-orange-50 border-orange-100 text-orange-800 dark:bg-orange-500/10 dark:border-orange-500/20 dark:text-orange-200">
+              <p className="text-xs font-black uppercase tracking-widest">
+                Courses not loading
+              </p>
+              <p className="mt-2 text-sm font-bold">{coursesError}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 relative">
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
               <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
@@ -418,7 +685,7 @@ const Registration: React.FC<RegistrationProps> = ({
                 placeholder="John Doe"
                 className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
               />
-              <FieldErrorText msg={fieldErrors.fullName} />
+              <FieldError msg={fieldErrors.fullName} />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -437,7 +704,7 @@ const Registration: React.FC<RegistrationProps> = ({
                   placeholder="john@example.com"
                   className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
                 />
-                <FieldErrorText msg={fieldErrors.email} />
+                <FieldError msg={fieldErrors.email} />
               </div>
 
               <div>
@@ -468,7 +735,7 @@ const Registration: React.FC<RegistrationProps> = ({
                     {showPassword ? "Hide" : "Show"}
                   </button>
                 </div>
-                <FieldErrorText msg={fieldErrors.password} />
+                <FieldError msg={fieldErrors.password} />
               </div>
             </div>
 
@@ -494,7 +761,7 @@ const Registration: React.FC<RegistrationProps> = ({
                 <p className="mt-1 text-[10px] text-slate-400">
                   Digits only (10–15). Example: 08012345678
                 </p>
-                <FieldErrorText msg={fieldErrors.phone} />
+                <FieldError msg={fieldErrors.phone} />
               </div>
 
               <div>
@@ -531,29 +798,67 @@ const Registration: React.FC<RegistrationProps> = ({
                 </select>
               </div>
 
-              {/* ✅ UPDATED: Select Path now includes Firestore courses too */}
+              {/* ✅ Option A: Select Course (binds pathId + optional courseId) */}
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                  Select Path
+                  Select Path / Course
                 </label>
+
                 <select
-                  name="path"
-                  value={formData.path}
-                  onChange={handleChange}
+                  value={selectedCourseId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setSelectedCourseId(id);
+
+                    const found = courseOptions.find((c) => c.id === id);
+                    if (found) setSelectedPathId(found.pathId);
+                  }}
                   className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white font-bold outline-none"
+                  disabled={coursesLoading || pathsLoading}
                 >
-                  {courseOptions.map((c) => (
-                    <option key={`${c.source}-${c.title}`} value={c.title}>
-                      {c.title}
+                  {courseOptions.length === 0 ? (
+                    <option value="" disabled>
+                      {pathsLoading || coursesLoading
+                        ? "Loading options…"
+                        : activePaths.length === 0
+                          ? "No paths available yet"
+                          : "No courses available yet"}
                     </option>
-                  ))}
+                  ) : null}
+
+                  {courseOptions.map((c) => {
+                    const pTitle =
+                      pathsById.get(c.pathId)?.title || c.title || "Path";
+                    const suffix = c.source === "firestore" ? "" : " (Pinned)";
+                    return (
+                      <option key={`${c.source}-${c.id}`} value={c.id}>
+                        {pTitle} — {c.title}
+                        {suffix}
+                      </option>
+                    );
+                  })}
                 </select>
 
-                {coursesLoading && (
+                {(pathsLoading || coursesLoading) && (
                   <p className="mt-2 text-[10px] text-slate-400">
-                    Loading available courses…
+                    Loading available options…
                   </p>
                 )}
+
+                {!pathsLoading && activePaths.length === 0 ? (
+                  <p className="mt-2 text-[10px] text-orange-600 font-bold">
+                    No active paths found. Create/activate a Path in Admin.
+                  </p>
+                ) : null}
+
+                {!coursesLoading &&
+                courseOptions.length === 0 &&
+                activePaths.length > 0 ? (
+                  <p className="mt-2 text-[10px] text-orange-600 font-bold">
+                    No courses found. Add at least one Course in Admin (with
+                    pathId + showOnLanding true).
+                  </p>
+                ) : null}
               </div>
             </div>
 
@@ -564,7 +869,6 @@ const Registration: React.FC<RegistrationProps> = ({
                     Initial Commitment
                   </label>
 
-                  {/* ✅ UPDATED: weeks options capped by course duration */}
                   <select
                     name="weeksToCommit"
                     value={formData.weeksToCommit}
@@ -580,7 +884,8 @@ const Registration: React.FC<RegistrationProps> = ({
                   </select>
 
                   <p className="mt-2 text-[10px] text-slate-400">
-                    Max: {maxWeeks} weeks for this course.
+                    Max: {maxWeeks} weeks • Selected Path:{" "}
+                    <span className="font-black">{selectedPathTitle}</span>
                   </p>
                 </div>
 
@@ -600,7 +905,7 @@ const Registration: React.FC<RegistrationProps> = ({
               type="submit"
               className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all disabled:opacity-50 transform active:scale-95 flex items-center justify-center gap-3"
             >
-              {cohortLoading || coursesLoading ? (
+              {pathsLoading || coursesLoading || cohortLoading ? (
                 <>
                   <span className="h-5 w-5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
                   Loading…

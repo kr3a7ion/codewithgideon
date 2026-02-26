@@ -1,14 +1,20 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { View } from "../src/App";
 import { IMAGES } from "../assets/images";
-import { registrationStore, CourseDoc } from "../services/registrationStore";
+import {
+  registrationStore,
+  CourseDoc,
+  PathDoc,
+} from "../services/registrationStore";
 
 interface CurriculumsProps {
   onNavigate: (view: View, path?: string) => void;
 }
 
 type DisplayPath = {
-  id: View;
+  pathId?: string;
+  courseId?: string;
+
   title: string;
   duration: string;
   focus: string;
@@ -37,10 +43,20 @@ const defaultSyllabusViewByTitle = (title: string): View => {
   return "curriculums";
 };
 
+// ✅ only allow known views; fallback safely
+const safeView = (v: any): View => {
+  const allowed: View[] = [
+    "curriculums",
+    "path-flutter",
+    "path-web",
+    "path-ai",
+  ];
+  return allowed.includes(v) ? (v as View) : "curriculums";
+};
+
 const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
   const pinned: DisplayPath[] = [
     {
-      id: "path-flutter" as View,
       title: "Flutter & Mobile App Development",
       duration: "12 Weeks",
       focus: "Beginner → Mobile Dev",
@@ -53,7 +69,6 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
       source: "pinned",
     },
     {
-      id: "path-web" as View,
       title: "Web Development & WordPress",
       duration: "6 Weeks",
       focus: "Monetize Fast",
@@ -66,7 +81,6 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
       source: "pinned",
     },
     {
-      id: "path-ai" as View,
       title: "AI-Assisted Development",
       duration: "4 Weeks",
       focus: "Productivity & Flow",
@@ -80,62 +94,129 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
     },
   ];
 
+  const [paths, setPaths] = useState<PathDoc[]>([]);
   const [dbCourses, setDbCourses] = useState<CourseDoc[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const list = await registrationStore.getCourses();
-      const active = (list || []).filter((c) => c.isActive !== false);
-      setDbCourses(active);
-    } catch (e) {
-      console.error("Failed to load firestore courses:", e);
-      setDbCourses([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const pathsByTitle = useMemo(() => {
+    const m = new Map<string, PathDoc>();
+    (paths || []).forEach((p) => {
+      const k = String(p.title || "")
+        .trim()
+        .toLowerCase();
+      if (k) m.set(k, p);
+    });
+    return m;
+  }, [paths]);
 
   useEffect(() => {
+    let mounted = true;
+
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [p, list] = await Promise.all([
+          registrationStore.getPaths(false), // active only
+          registrationStore.getCourses(),
+        ]);
+
+        if (!mounted) return;
+
+        setPaths(p || []);
+
+        // ✅ show flags compatibility:
+        // - showInExplore (your current)
+        // - showOnLanding (your Registration uses this)
+        // Default = show it, unless explicitly false
+        const activeExplore = (list || []).filter((c: any) => {
+          const isActive = c.isActive !== false;
+          const showInExplore = (c as any).showInExplore !== false;
+          const showOnLanding = (c as any).showOnLanding !== false;
+
+          // If either is explicitly false, it should hide for that page,
+          // but if admin only uses one flag, we still show.
+          const shouldShow = showInExplore && showOnLanding;
+          return isActive && shouldShow;
+        });
+
+        setDbCourses(activeExplore);
+      } catch (e) {
+        console.error("Failed to load curriculums data:", e);
+        if (!mounted) return;
+        setPaths([]);
+        setDbCourses([]);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
     load();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const merged: DisplayPath[] = useMemo(() => {
-    const pinnedTitles = new Set(
-      pinned.map((p) => p.title.trim().toLowerCase()),
-    );
+    // ✅ hydrate pinned with pathId if path exists
+    const pinnedHydrated: DisplayPath[] = pinned.map((p) => {
+      const match = pathsByTitle.get(p.title.trim().toLowerCase());
+      return { ...p, pathId: match?.id };
+    });
 
-    // Firestore courses that are NOT duplicates of the pinned 3
-    const extras: DisplayPath[] = dbCourses
-      .filter(
-        (c) =>
-          !pinnedTitles.has(
-            String(c.title || "")
-              .trim()
-              .toLowerCase(),
-          ),
-      )
-      .map((c, idx) => {
-        const syllabusView = ((c.syllabusView as View) ||
-          defaultSyllabusViewByTitle(c.title)) as View;
+    // ✅ Firestore cards (do NOT hide just because title matches pinned)
+    const extras: DisplayPath[] = (dbCourses || []).map((c, idx) => {
+      const rawView = (c as any).syllabusView;
+      const syllabusView = safeView(
+        rawView || defaultSyllabusViewByTitle(c.title),
+      );
 
-        return {
-          id: "curriculums" as View, // stays on this page unless it matches known views
-          title: c.title,
-          duration: c.duration,
-          focus: c.level || "Course",
-          image: c.imageUrl || fallbackImageByIndex(idx + 3),
-          description: c.description,
-          accent: "border-slate-200 dark:border-slate-700", // neutral accent to keep look consistent
-          priceLabel: c.priceLabel || "₦10k/wk",
-          syllabusView,
-          source: "firestore",
-        };
-      });
+      return {
+        courseId: c.id,
+        pathId: (c as any).pathId ? String((c as any).pathId) : undefined,
 
-    return [...pinned, ...extras];
-  }, [dbCourses]);
+        title: String(c.title || "Course"),
+        duration: String(c.duration || "4 Weeks"),
+        focus: String((c as any).level || "Course"),
+        image: (c as any).imageUrl || fallbackImageByIndex(idx + 3),
+        description: String(
+          (c as any).description || "Course description coming soon.",
+        ),
+        accent: "border-slate-200 dark:border-slate-700",
+        priceLabel: (c as any).priceLabel || "₦10k/wk",
+        syllabusView,
+        source: "firestore",
+      };
+    });
+
+    // ✅ de-dupe:
+    // - Firestore: use courseId as primary uniqueness
+    // - Pinned: use title+pathId
+    const seen = new Set<string>();
+    const out: DisplayPath[] = [];
+
+    [...pinnedHydrated, ...extras].forEach((x) => {
+      const key =
+        x.source === "firestore" && x.courseId
+          ? `firestore:${x.courseId}`
+          : `pinned:${String(x.pathId || "").trim()}::${x.title.trim().toLowerCase()}`;
+
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(x);
+    });
+
+    return out;
+  }, [dbCourses, pinned, pathsByTitle]);
+
+  const toRegistrationParam = (p: DisplayPath) => {
+    // ✅ prefer pathId truth (your Registration supports pid:)
+    if (p.pathId) return `pid:${p.pathId}`;
+
+    // Optional: if you later want course-specific enrollment
+    // if (p.courseId) return `cid:${p.courseId}`;
+
+    return p.title; // legacy fallback
+  };
 
   return (
     <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
@@ -194,7 +275,7 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
             {merged.map((path) => (
               <div
-                key={`${path.source}-${path.title}`}
+                key={`${path.source}-${path.courseId || path.pathId || path.title}`}
                 className={`bg-white dark:bg-slate-900 rounded-[2.5rem] overflow-hidden border-2 ${path.accent} shadow-2xl flex flex-col hover:translate-y-[-8px] transition-all duration-300 group`}
               >
                 <div className="h-52 overflow-hidden relative">
@@ -233,13 +314,12 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
                     </button>
 
                     <button
-                      onClick={() => onNavigate("registration", path.title)}
+                      onClick={() =>
+                        onNavigate("registration", toRegistrationParam(path))
+                      }
                       className="w-full py-4 bg-teal-600 hover:bg-teal-500 text-white font-black rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2"
                     >
-                      Enroll Now —{" "}
-                      {path.priceLabel
-                        ? path.priceLabel.replace("/wk", "")
-                        : "₦10k"}
+                      Enroll Now — {path.priceLabel || "₦10k/wk"}
                     </button>
                   </div>
                 </div>
@@ -248,11 +328,9 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
           </div>
         )}
 
-        {/* Optional: tiny friendly note when no firestore courses */}
         {!loading && dbCourses.length === 0 && (
           <p className="text-center text-xs text-slate-400 mt-10">
-            Admin-added courses will appear here once you create them in the
-            dashboard.
+            Courses will appear here once available.
           </p>
         )}
       </div>

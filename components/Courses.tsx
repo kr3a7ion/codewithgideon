@@ -1,10 +1,16 @@
+// components/Courses.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Course } from "../types";
 import { IMAGES } from "../assets/images";
 import { View } from "../src/App";
-import { registrationStore, CourseDoc } from "../services/registrationStore";
+import {
+  registrationStore,
+  CourseDoc,
+  PathDoc,
+} from "../services/registrationStore";
 
 interface CoursesProps {
+  // ✅ keep legacy signature so the whole app doesn’t break
   onNavigate: (view: View, path?: string) => void;
 }
 
@@ -49,7 +55,6 @@ const defaultSyllabusViewByTitle = (title: string): View => {
   if (t.includes("flutter")) return "path-flutter";
   if (t.includes("word") || t.includes("web")) return "path-web";
   if (t.includes("ai")) return "path-ai";
-  // fallback route if admin forgot to set syllabusView
   return "curriculums";
 };
 
@@ -63,24 +68,36 @@ type DisplayCourse = {
   priceLabel: string;
   imageUrl: string;
   syllabusView: View;
-  // helpful for debugging / future enhancements
   source: "sample" | "firestore";
+
+  // ✅ pathId/courseId for clean registration routing
+  pathId?: string;
+  courseId?: string;
 };
 
 const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
   const [courses, setCourses] = useState<CourseDoc[] | null>(null);
+  const [paths, setPaths] = useState<PathDoc[] | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadCourses = async () => {
     setLoading(true);
     try {
-      const list = await registrationStore.getCourses();
-      // only show active courses
-      const active = (list || []).filter((c) => c.isActive !== false);
-      setCourses(active);
+      const [courseList, pathList] = await Promise.all([
+        registrationStore.getCourses(),
+        registrationStore.getPaths(false), // active only
+      ]);
+
+      const activeCourses = (courseList || []).filter(
+        (c: any) => c.isActive !== false && (c as any).showOnLanding !== false,
+      );
+
+      setCourses(activeCourses);
+      setPaths(pathList || []);
     } catch (e) {
-      console.error("Failed to load courses:", e);
+      console.error("Failed to load courses/paths:", e);
       setCourses(null);
+      setPaths(null);
     } finally {
       setLoading(false);
     }
@@ -90,8 +107,13 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
     loadCourses();
   }, []);
 
+  const pathTitleById = useMemo(() => {
+    const map = new Map<string, string>();
+    (paths || []).forEach((p) => map.set(p.id, String(p.title || "").trim()));
+    return map;
+  }, [paths]);
+
   const displayCourses: DisplayCourse[] = useMemo(() => {
-    // Always start with your default 3
     const base: DisplayCourse[] = sampleCourses.map((c, idx) => ({
       id: `sample-${idx}`,
       ...c,
@@ -99,42 +121,58 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
       imageUrl: fallbackImageByIndex(idx),
       syllabusView: defaultSyllabusViewByTitle(c.title),
       source: "sample",
+      pathId: undefined,
+      courseId: undefined,
     }));
 
-    // If Firebase has no courses yet → just show defaults
     if (!courses || courses.length === 0) return base;
 
-    // Avoid duplicates: if an admin creates a course with same title as a sample
     const sampleTitles = new Set(
       sampleCourses.map((s) => s.title.trim().toLowerCase()),
     );
 
-    // Add admin-created courses AFTER defaults
     const firebaseCourses: DisplayCourse[] = courses
-      .filter(
-        (c) =>
-          !sampleTitles.has(
-            String(c.title || "")
-              .trim()
-              .toLowerCase(),
-          ),
-      )
-      .map((c, idx) => ({
-        id: c.id,
-        title: c.title,
-        duration: c.duration,
-        sessions: c.sessions,
-        level: c.level,
-        description: c.description,
-        priceLabel: c.priceLabel || "₦10k/wk",
-        imageUrl: c.imageUrl || fallbackImageByIndex(idx + 3),
-        syllabusView: ((c.syllabusView as View) ||
-          defaultSyllabusViewByTitle(c.title)) as View,
-        source: "firestore",
-      }));
+      .filter((c) => {
+        const t = String(c.title || "")
+          .trim()
+          .toLowerCase();
+        return t && !sampleTitles.has(t);
+      })
+      .map((c, idx) => {
+        const cid = String(c.id || "").trim();
+        const pid = c.pathId ? String(c.pathId).trim() : undefined;
+
+        const displayTitle = String(c.title || "").trim();
+
+        return {
+          id: cid || `firestore-${idx}`,
+          title: displayTitle,
+          duration: String(c.duration || "").trim(),
+          sessions: String(c.sessions || "").trim(),
+          level: String(c.level || "").trim() || "Beginner",
+          description: String(c.description || "").trim(),
+          priceLabel: String(c.priceLabel || "").trim() || "₦10k/wk",
+          imageUrl:
+            String(c.imageUrl || "").trim() || fallbackImageByIndex(idx + 3),
+          syllabusView: ((c.syllabusView as View) ||
+            defaultSyllabusViewByTitle(displayTitle)) as View,
+          source: "firestore",
+          pathId: pid,
+          courseId: cid || undefined,
+        };
+      });
 
     return [...base, ...firebaseCourses];
   }, [courses]);
+
+  // ✅ keep App routing unchanged: pass ONE string
+  // Registration can parse it:
+  // - "pid:<pathId>" (preferred)
+  // - fallback to title if no pathId
+  const toRegistrationParam = (
+    course: DisplayCourse,
+    resolvedPathTitle: string,
+  ) => (course.pathId ? `pid:${course.pathId}` : resolvedPathTitle);
 
   return (
     <section
@@ -152,6 +190,7 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
               path.
             </p>
           </div>
+
           <button
             onClick={() => onNavigate("curriculums")}
             className="text-teal-600 dark:text-teal-400 font-bold flex items-center hover:text-teal-700 dark:hover:text-teal-300 transition-colors mx-auto md:mx-0"
@@ -199,75 +238,82 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-            {displayCourses.map((course, idx) => (
-              <div
-                key={course.id}
-                className="bg-white dark:bg-slate-800 rounded-[2.5rem] overflow-hidden shadow-xl border border-gray-100 dark:border-slate-700 flex flex-col hover:shadow-2xl transition-all group"
-              >
-                <div className="h-56 bg-blue-900 relative overflow-hidden">
-                  <img
-                    src={course.imageUrl}
-                    alt={course.title}
-                    className="w-full h-full object-cover opacity-70 group-hover:scale-110 transition-transform duration-700"
-                  />
-                  <div className="absolute top-4 left-4 bg-white/90 dark:bg-slate-900/90 backdrop-blur px-3 py-1 rounded-full text-[10px] font-black text-blue-900 dark:text-teal-400 uppercase tracking-widest">
-                    {course.level}
-                  </div>
-                </div>
+            {displayCourses.map((course, idx) => {
+              const resolvedPathTitle =
+                (course.pathId && pathTitleById.get(course.pathId)) ||
+                course.title;
 
-                <div className="p-8 flex-grow">
-                  <div className="flex justify-between items-start mb-4">
-                    <h3 className="text-2xl font-black text-blue-900 dark:text-white leading-tight">
-                      {course.title}
-                    </h3>
-                  </div>
-
-                  <p className="text-slate-500 dark:text-slate-400 text-sm mb-8 leading-relaxed line-clamp-3">
-                    {course.description}
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-4 mb-8">
-                    <div className="p-3 bg-gray-50 dark:bg-slate-700/50 rounded-2xl border border-gray-100 dark:border-slate-700">
-                      <p className="text-[9px] uppercase font-black text-slate-400 mb-1">
-                        Duration
-                      </p>
-                      <p className="text-xs font-bold text-blue-900 dark:text-slate-200">
-                        {course.duration}
-                      </p>
-                    </div>
-                    <div className="p-3 bg-gray-50 dark:bg-slate-700/50 rounded-2xl border border-gray-100 dark:border-slate-700">
-                      <p className="text-[9px] uppercase font-black text-slate-400 mb-1">
-                        Live Classes
-                      </p>
-                      <p className="text-xs font-bold text-blue-900 dark:text-slate-200">
-                        {course.sessions}
-                      </p>
+              return (
+                <div
+                  key={course.id}
+                  className="bg-white dark:bg-slate-800 rounded-[2.5rem] overflow-hidden shadow-xl border border-gray-100 dark:border-slate-700 flex flex-col hover:shadow-2xl transition-all group"
+                >
+                  <div className="h-56 bg-blue-900 relative overflow-hidden">
+                    <img
+                      src={course.imageUrl}
+                      alt={course.title}
+                      className="w-full h-full object-cover opacity-70 group-hover:scale-110 transition-transform duration-700"
+                    />
+                    <div className="absolute top-4 left-4 bg-white/90 dark:bg-slate-900/90 backdrop-blur px-3 py-1 rounded-full text-[10px] font-black text-blue-900 dark:text-teal-400 uppercase tracking-widest">
+                      {course.level}
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-3">
-                    {/* ✅ Keeps your existing syllabus pages for pinned 3
-                        ✅ For Firestore courses, use their syllabusView if set; else fallback to "curriculums" */}
-                    <button
-                      onClick={() => onNavigate(course.syllabusView)}
-                      className="w-full py-4 bg-blue-900 dark:bg-slate-700 text-white font-black rounded-2xl shadow-lg hover:bg-blue-800 dark:hover:bg-slate-600 transition-all text-sm"
-                    >
-                      View Syllabus
-                    </button>
+                  <div className="p-8 flex-grow">
+                    <div className="flex justify-between items-start mb-4">
+                      <h3 className="text-2xl font-black text-blue-900 dark:text-white leading-tight">
+                        {course.title}
+                      </h3>
+                    </div>
 
-                    {/* ✅ Keeps your current Registration behavior (expects title)
-                        This ensures payment flow stays the same and UI doesn’t change.
-                        Later we can upgrade to pass courseId without breaking anything. */}
-                    <button
-                      onClick={() => onNavigate("registration", course.title)}
-                      className="w-full py-4 bg-teal-600 hover:bg-teal-500 text-white font-black rounded-2xl shadow-lg transition-all text-sm"
-                    >
-                      Join Cohort — {course.priceLabel}
-                    </button>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm mb-8 leading-relaxed line-clamp-3">
+                      {course.description}
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-4 mb-8">
+                      <div className="p-3 bg-gray-50 dark:bg-slate-700/50 rounded-2xl border border-gray-100 dark:border-slate-700">
+                        <p className="text-[9px] uppercase font-black text-slate-400 mb-1">
+                          Duration
+                        </p>
+                        <p className="text-xs font-bold text-blue-900 dark:text-slate-200">
+                          {course.duration}
+                        </p>
+                      </div>
+                      <div className="p-3 bg-gray-50 dark:bg-slate-700/50 rounded-2xl border border-gray-100 dark:border-slate-700">
+                        <p className="text-[9px] uppercase font-black text-slate-400 mb-1">
+                          Live Classes
+                        </p>
+                        <p className="text-xs font-bold text-blue-900 dark:text-slate-200">
+                          {course.sessions}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      <button
+                        onClick={() => onNavigate(course.syllabusView)}
+                        className="w-full py-4 bg-blue-900 dark:bg-slate-700 text-white font-black rounded-2xl shadow-lg hover:bg-blue-800 dark:hover:bg-slate-600 transition-all text-sm"
+                      >
+                        View Syllabus
+                      </button>
+
+                      {/* ✅ pathId-first, but passed via `path` param to avoid breaking App.tsx */}
+                      <button
+                        onClick={() =>
+                          onNavigate(
+                            "registration",
+                            toRegistrationParam(course, resolvedPathTitle),
+                          )
+                        }
+                        className="w-full py-4 bg-teal-600 hover:bg-teal-500 text-white font-black rounded-2xl shadow-lg transition-all text-sm"
+                      >
+                        Join Cohort — {course.priceLabel}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

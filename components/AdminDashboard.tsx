@@ -6,6 +6,9 @@ import {
   CourseDoc,
   CohortDoc,
   SessionDoc,
+  ActiveCohortForPath,
+  PathDoc,
+  SyllabusWeek,
 } from "../services/registrationStore";
 
 interface AdminDashboardProps {
@@ -13,13 +16,22 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
-type SyllabusWeek = {
-  week: number; // 1..N
-  title: string;
-  topics: string[];
+const getCohortDocId = (c: any) => String(c?.id || "").trim();
+const getCohortKey = (c: any) => String(c?.cohortKey || "").trim();
+
+// optional: pick cohort by cohortKey (when you only have cohortKey)
+const findCohortDocIdByKey = (list: any[], cohortKey: string) => {
+  const key = String(cohortKey || "").trim();
+  if (!key) return "";
+  const hit = (list || []).find(
+    (c) => String(c?.cohortKey || "").trim() === key,
+  );
+  return hit ? String(hit.id) : "";
 };
 
 type CourseForm = {
+  pathId: string;
+
   title: string;
   duration: string;
   sessions: string;
@@ -28,7 +40,10 @@ type CourseForm = {
   priceLabel: string;
   imageUrl: string;
   syllabusView: string;
+
   isActive: boolean;
+  showOnLanding: boolean;
+  showInExplore: boolean;
 
   weeks: number;
   pricePerWeek: number;
@@ -36,6 +51,8 @@ type CourseForm = {
 };
 
 const emptyCourse: CourseForm = {
+  pathId: "",
+
   title: "",
   duration: "4 Weeks",
   sessions: "2× Weekly",
@@ -44,24 +61,25 @@ const emptyCourse: CourseForm = {
   priceLabel: "₦10k/wk",
   imageUrl: "",
   syllabusView: "",
+
   isActive: true,
+  showOnLanding: true,
+  showInExplore: true,
+
   weeks: 4,
   pricePerWeek: 10000,
   syllabus: [{ week: 1, title: "Introduction", topics: ["Overview", "Setup"] }],
 };
 
-/**
- * ✅ UPDATED SessionForm:
- * - added week, path, isPublished
- */
 type SessionForm = {
   title: string;
-  week: number; // ✅ NEW
-  path: string; // ✅ NEW
-  isPublished: boolean; // ✅ NEW
+  week: number;
+  pathId: string; // NEW
+  path: string; // legacy label kept too
+  isPublished: boolean;
 
-  date: string; // YYYY-MM-DD
-  time: string; // HH:mm
+  date: string;
+  time: string;
   durationMins: number;
   joinUrl: string;
   notes: string;
@@ -70,6 +88,7 @@ type SessionForm = {
 const emptySession: SessionForm = {
   title: "",
   week: 1,
+  pathId: "",
   path: "",
   isPublished: true,
 
@@ -103,10 +122,6 @@ const combineDateTimeToMs = (date: string, time: string) => {
   return d.getTime();
 };
 
-/**
- * ✅ Timestamp-safe conversion:
- * - supports number, string, Firestore Timestamp
- */
 const sessionTimeToMs = (t: any) => {
   if (!t) return Date.now();
   if (typeof t === "number") return t;
@@ -114,7 +129,7 @@ const sessionTimeToMs = (t: any) => {
     const n = Date.parse(t);
     return Number.isFinite(n) ? n : Date.now();
   }
-  if (typeof t?.toMillis === "function") return t.toMillis(); // Firestore Timestamp
+  if (typeof t?.toMillis === "function") return t.toMillis();
   return Date.now();
 };
 
@@ -133,7 +148,126 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     () => localStorage.getItem("gs_webhook_url") || "",
   );
 
+  // -------------------------
+  // PATHS
+  // -------------------------
+  const [paths, setPaths] = useState<PathDoc[]>([]);
+  const [pathsLoading, setPathsLoading] = useState(true);
+  const [newPathTitle, setNewPathTitle] = useState("");
+  const [editingPathId, setEditingPathId] = useState<string | null>(null);
+  const [editingPathTitle, setEditingPathTitle] = useState("");
+
+  const pathsById = useMemo(() => {
+    const m = new Map<string, PathDoc>();
+    (paths || []).forEach((p) => m.set(p.id, p));
+    return m;
+  }, [paths]);
+
+  // ✅ Legacy mapper: title -> pathId (for old docs missing pathId)
+  const findPathIdByTitle = (title: string) => {
+    const key = String(title || "")
+      .trim()
+      .toLowerCase();
+    if (!key) return "";
+    const hit = (paths || []).find((p) => p.title.trim().toLowerCase() === key);
+    return hit?.id || "";
+  };
+
+  const fetchPaths = async () => {
+    setPathsLoading(true);
+    try {
+      const list = await registrationStore.getPaths(true);
+      setPaths(list || []);
+    } catch (e) {
+      console.error("fetchPaths failed:", e);
+      setPaths([]);
+    } finally {
+      setPathsLoading(false);
+    }
+  };
+
+  const createPath = async () => {
+    const title = newPathTitle.trim();
+    if (title.length < 2) return alert("Path title is too short.");
+    if (pathBusyId) return;
+
+    setPathBusyId("create");
+    try {
+      await registrationStore.addPath({ title, isActive: true });
+      setNewPathTitle("");
+      await fetchPaths();
+    } catch (e: any) {
+      console.error("createPath failed:", e);
+      alert(e?.message || "Failed to create path.");
+    } finally {
+      setPathBusyId(null);
+    }
+  };
+
+  const startEditPath = (p: PathDoc) => {
+    setEditingPathId(p.id);
+    setEditingPathTitle(p.title);
+  };
+
+  const cancelEditPath = () => {
+    setEditingPathId(null);
+    setEditingPathTitle("");
+  };
+
+  const saveEditPath = async () => {
+    if (!editingPathId) return;
+    const title = editingPathTitle.trim();
+    if (title.length < 2) return alert("Path title is too short.");
+    try {
+      await registrationStore.updatePath(editingPathId, { title });
+      cancelEditPath();
+      await fetchPaths();
+    } catch (e: any) {
+      console.error("saveEditPath failed:", e);
+      alert(e?.message || "Failed to update path.");
+    }
+  };
+
+  const togglePathActive = async (p: PathDoc) => {
+    if (pathBusyId) return;
+    setPathBusyId(p.id);
+    try {
+      await registrationStore.updatePath(p.id, {
+        isActive: !(p.isActive !== false),
+      });
+      await fetchPaths();
+    } catch (e: any) {
+      console.error("togglePathActive failed:", e);
+      alert(e?.message || "Failed to toggle path.");
+    } finally {
+      setPathBusyId(null);
+    }
+  };
+
+  const deletePath = async (p: PathDoc) => {
+    if (pathBusyId) return;
+    if (
+      !confirm(
+        `Delete path "${p.title}"?\n\nOnly do this if you are sure no course/session depends on it.`,
+      )
+    )
+      return;
+
+    setPathBusyId(p.id);
+    try {
+      await registrationStore.deletePath(p.id);
+      await fetchPaths();
+    } catch (e: any) {
+      console.error("deletePath failed:", e);
+      alert(e?.message || "Failed to delete path.");
+    } finally {
+      setPathBusyId(null);
+    }
+  };
+
+  // -------------------------
   // Courses
+  // -------------------------
   const [courses, setCourses] = useState<CourseDoc[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(true);
   const [courseModalOpen, setCourseModalOpen] = useState(false);
@@ -141,16 +275,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [courseForm, setCourseForm] = useState<CourseForm>(emptyCourse);
   const [courseError, setCourseError] = useState("");
 
-  // Active cohort config
-  const [activeCohortId, setActiveCohortId] = useState("");
-  const [activeCohortLabel, setActiveCohortLabel] = useState("");
-  const [cohortSaving, setCohortSaving] = useState(false);
-
   // Cohorts + sessions manager
   const [cohorts, setCohorts] = useState<CohortDoc[]>([]);
   const [cohortsLoading, setCohortsLoading] = useState(true);
-  const [cohortIdInput, setCohortIdInput] = useState("");
-  const [cohortLabelInput, setCohortLabelInput] = useState("");
   const [selectedCohortId, setSelectedCohortId] = useState<string>("");
   const [sessions, setSessions] = useState<SessionDoc[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -160,18 +287,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [sessionForm, setSessionForm] = useState<SessionForm>(emptySession);
   const [sessionError, setSessionError] = useState("");
 
-  /**
-   * ✅ NEW: derive path options safely
-   * - from registrations.path
-   * - (optional) from courses.title
-   */
-  const pathOptions = useMemo(() => {
-    const uniq = new Set<string>();
-    registrations.forEach((r) => r.path && uniq.add(String(r.path)));
-    courses.forEach((c) => c.title && uniq.add(String(c.title)));
-    const arr = Array.from(uniq).sort();
-    return arr.length ? arr : ["Flutter & Mobile App Development"];
-  }, [registrations, courses]);
+  const [pathBusy, setPathBusy] = useState(false);
+  const [courseBusy, setCourseBusy] = useState(false);
+  const [sessionBusy, setSessionBusy] = useState(false);
+  const [pathBusyId, setPathBusyId] = useState<string | null>(null);
+  const [courseBusyId, setCourseBusyId] = useState<string | null>(null);
+  const [sessionBusyId, setSessionBusyId] = useState<string | null>(null);
+  const [pendingBusyUid, setPendingBusyUid] = useState<string | null>(null);
+  const [sessionsError, setSessionsError] = useState<string>("");
+
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+
+  const runBusy = async (key: string, fn: () => Promise<void>) => {
+    if (busy[key]) return;
+    setBusy((p) => ({ ...p, [key]: true }));
+    try {
+      await fn();
+    } finally {
+      setBusy((p) => ({ ...p, [key]: false }));
+    }
+  };
 
   // -------------------------
   // Helpers
@@ -200,9 +335,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       .filter(Boolean)
       .map((w, idx) => ({
         week: idx + 1,
-        title: String(w?.title || "").trim(),
-        topics: Array.isArray(w?.topics)
-          ? w.topics.map((t) => String(t).trim()).filter(Boolean)
+        title: String((w as any)?.title || "").trim(),
+        topics: Array.isArray((w as any)?.topics)
+          ? (w as any).topics.map((t: any) => String(t).trim()).filter(Boolean)
           : [],
       }))
       .filter((w) => w.title.length > 0 || w.topics.length > 0);
@@ -250,22 +385,28 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const fetchActiveCohort = async () => {
-    try {
-      const active = await registrationStore.getActiveCohort();
-      setActiveCohortId(active.id);
-      setActiveCohortLabel(active.label);
-    } catch (e) {
-      console.error("fetchActiveCohort failed:", e);
-    }
-  };
-
   const fetchCohorts = async () => {
     setCohortsLoading(true);
     try {
-      const list = await registrationStore.getCohorts();
-      setCohorts(list || []);
-      if (!selectedCohortId && list?.length) setSelectedCohortId(list[0].id);
+      const list: CohortDoc[] = await registrationStore.getCohorts();
+      const safe = (list || []).map((c: any) => ({
+        ...c,
+        id: String(c?.id || "").trim(),
+        cohortKey: String(c?.cohortKey || "").trim(),
+      }));
+
+      setCohorts(safe);
+
+      // ✅ always store cohort DOC ID in selectedCohortId
+      if (!selectedCohortId && safe.length) {
+        setSelectedCohortId(getCohortDocId(safe[0]));
+      }
+
+      if (list?.length) {
+        const stillExists =
+          selectedCohortId && list.some((c) => c.id === selectedCohortId);
+        if (!stillExists) setSelectedCohortId(list[0].id);
+      }
     } catch (e) {
       console.error("fetchCohorts failed:", e);
       setCohorts([]);
@@ -277,26 +418,50 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const fetchSessions = async (cohortId: string) => {
     if (!cohortId) return;
     setSessionsLoading(true);
+    setSessionsError("");
+
     try {
       const list = await registrationStore.getCohortSessions(cohortId);
       setSessions(list || []);
-    } catch (e) {
+    } catch (e: any) {
       console.error("fetchSessions failed:", e);
       setSessions([]);
+      setSessionsError(
+        e?.message || "Failed to load sessions (check Firestore index).",
+      );
     } finally {
       setSessionsLoading(false);
     }
   };
 
+  // ✅ IMPORTANT: Paths first (Option A UI depends on it)
   useEffect(() => {
-    fetchRegistrations();
-    fetchCourses();
-    fetchActiveCohort();
-    fetchCohorts();
+    let mounted = true;
+
+    (async () => {
+      try {
+        await fetchPaths();
+        if (!mounted) return;
+
+        await Promise.all([
+          fetchRegistrations(),
+          fetchCourses(),
+          fetchCohorts(),
+        ]);
+      } catch (e) {
+        console.error("Admin init load failed:", e);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (selectedCohortId) fetchSessions(selectedCohortId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCohortId]);
 
   // -------------------------
@@ -360,13 +525,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleClearAll = async () => {
-    if (
-      confirm(
-        "DANGER: This will permanently delete ALL registration records. Are you absolutely sure?",
-      )
-    ) {
+    const ok = confirm(
+      "DANGER: This will permanently delete ALL registration records. Are you absolutely sure?",
+    );
+    if (!ok) return;
+
+    try {
       await registrationStore.clearAll();
       setRegistrations([]);
+    } catch (e) {
+      console.error("clearAll failed:", e);
+      alert("Failed to clear all registrations.");
     }
   };
 
@@ -378,6 +547,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       "Email",
       "Phone",
       "Path",
+      "PathId",
       "Age",
       "Gender",
       "Weeks",
@@ -390,6 +560,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       reg.email,
       reg.phone,
       `"${reg.path}"`,
+      `"${String((reg as any).pathId || "")}"`,
       reg.ageRange,
       reg.gender,
       reg.weeksToCommit,
@@ -425,7 +596,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         (r.fullName || "").toLowerCase().includes(q) ||
         (r.email || "").toLowerCase().includes(q) ||
         (r.phone || "").toLowerCase().includes(q) ||
-        (r.path || "").toLowerCase().includes(q)
+        (r.path || "").toLowerCase().includes(q) ||
+        String((r as any).pathId || "")
+          .toLowerCase()
+          .includes(q) // ✅ include pathId
       );
     })
     .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
@@ -446,6 +620,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const pendingPayments = registrations.filter(
       (r) => !!(r as any).pendingPayment,
     );
+
     return {
       total,
       pending,
@@ -480,8 +655,41 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const openAddCourse = () => {
     setCourseError("");
     setEditingCourse(null);
-    setCourseForm(emptyCourse);
+
+    const firstPath = paths[0];
+    setCourseForm({
+      ...emptyCourse,
+      pathId: firstPath?.id || "",
+      isActive: true,
+      showOnLanding: true,
+      showInExplore: true,
+    });
+
     setCourseModalOpen(true);
+  };
+
+  const toggleCourseLanding = async (c: CourseDoc) => {
+    const current = (c as any).showOnLanding !== false;
+    try {
+      await registrationStore.updateCourse(c.id, {
+        showOnLanding: !current,
+      } as any);
+      await fetchCourses();
+    } catch (e) {
+      console.error("toggleCourseLanding failed:", e);
+    }
+  };
+
+  const toggleCourseExplore = async (c: CourseDoc) => {
+    const current = (c as any).showInExplore !== false;
+    try {
+      await registrationStore.updateCourse(c.id, {
+        showInExplore: !current,
+      } as any);
+      await fetchCourses();
+    } catch (e) {
+      console.error("toggleCourseExplore failed:", e);
+    }
   };
 
   const openEditCourse = (c: CourseDoc) => {
@@ -502,7 +710,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       ? (c as any).syllabus
       : [{ week: 1, title: "Introduction", topics: ["Overview", "Setup"] }];
 
+    // ✅ FIX: tolerate legacy (no pathId) by mapping by legacy stored title if any
+    const incomingPathId = String((c as any).pathId || "").trim();
+    const legacyPathTitle = String((c as any).path || "").trim();
+    const mappedId = incomingPathId || findPathIdByTitle(legacyPathTitle);
+    const safePathId = mappedId || (paths[0]?.id ?? "");
+
     setCourseForm({
+      pathId: safePathId,
+
       title: c.title || "",
       duration: c.duration || `${inferredWeeks} Weeks`,
       sessions: c.sessions || "2× Weekly",
@@ -511,7 +727,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       priceLabel: c.priceLabel || formatPriceLabel(inferredPricePerWeek),
       imageUrl: c.imageUrl || "",
       syllabusView: (c as any).syllabusView || "",
+
       isActive: (c as any).isActive !== false,
+      showOnLanding: (c as any).showOnLanding !== false,
+      showInExplore: (c as any).showInExplore !== false,
 
       weeks: inferredWeeks,
       pricePerWeek: inferredPricePerWeek,
@@ -521,53 +740,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setCourseModalOpen(true);
   };
 
-  const addSyllabusWeek = () => {
-    setCourseForm((p) => {
-      const nextWeek = (p.syllabus?.length || 0) + 1;
-      const next = [
-        ...(p.syllabus || []),
-        { week: nextWeek, title: `Week ${nextWeek}`, topics: [] },
-      ];
-      const nextWeeks = Math.max(p.weeks, nextWeek);
-      return {
-        ...p,
-        syllabus: next,
-        weeks: nextWeeks,
-        duration: `${nextWeeks} Weeks`,
-      };
-    });
-  };
-
-  const removeSyllabusWeek = (weekIndex: number) => {
-    setCourseForm((p) => {
-      const next = (p.syllabus || []).filter((_, idx) => idx !== weekIndex);
-      const relabeled = next.map((w, idx) => ({ ...w, week: idx + 1 }));
-      const trimmed = normalizeSyllabus(relabeled, p.weeks);
-      return { ...p, syllabus: trimmed };
-    });
-  };
-
-  const updateSyllabusWeekTitle = (weekIndex: number, title: string) => {
-    setCourseForm((p) => {
-      const next = [...(p.syllabus || [])];
-      next[weekIndex] = { ...next[weekIndex], title };
-      return { ...p, syllabus: next };
-    });
-  };
-
-  const updateSyllabusWeekTopics = (weekIndex: number, text: string) => {
-    const topics = String(text)
-      .split("\n")
-      .map((t) => t.trim())
-      .filter(Boolean);
-
-    setCourseForm((p) => {
-      const next = [...(p.syllabus || [])];
-      next[weekIndex] = { ...next[weekIndex], topics };
-      return { ...p, syllabus: next };
-    });
-  };
-
   const saveCourse = async (e: React.FormEvent) => {
     e.preventDefault();
     setCourseError("");
@@ -575,6 +747,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const title = courseForm.title.trim();
     const description = courseForm.description.trim();
 
+    if (!courseForm.pathId)
+      return setCourseError("Select a Path for this course.");
     if (title.length < 3)
       return setCourseError("Title must be at least 3 characters.");
     if (description.length < 3)
@@ -584,6 +758,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       Number.isFinite(courseForm.weeks) && courseForm.weeks > 0
         ? Math.floor(courseForm.weeks)
         : parseWeeks(courseForm.duration || "4 Weeks");
+
     const pricePerWeek =
       Number.isFinite(courseForm.pricePerWeek) && courseForm.pricePerWeek > 0
         ? Math.floor(courseForm.pricePerWeek)
@@ -596,6 +771,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       );
 
     const payload: any = {
+      pathId: courseForm.pathId,
+
       title,
       duration: `${weeks} Weeks`,
       sessions: String(courseForm.sessions || "2× Weekly").trim(),
@@ -604,7 +781,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       priceLabel: formatPriceLabel(pricePerWeek),
       imageUrl: String(courseForm.imageUrl || "").trim(),
       syllabusView: String(courseForm.syllabusView || "").trim(),
+
       isActive: courseForm.isActive ?? true,
+      showOnLanding: courseForm.showOnLanding ?? true,
+      showInExplore: courseForm.showInExplore ?? true,
 
       weeks,
       pricePerWeek,
@@ -626,9 +806,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const deleteCourse = async (c: CourseDoc) => {
     if (
-      !confirm(
-        `Delete course "${c.title}"? This will remove it from the landing page.`,
-      )
+      !confirm(`Delete course "${c.title}"? This will remove it from the site.`)
     )
       return;
     try {
@@ -640,58 +818,130 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const toggleCourseActive = async (c: CourseDoc) => {
-    const current = (c as any).isActive !== false;
-    try {
-      await registrationStore.updateCourse(c.id, { isActive: !current } as any);
-      await fetchCourses();
-    } catch (e) {
-      console.error("Toggle active failed:", e);
-    }
-  };
+  // -------------------------
+  // ACTIVE COHORT (PER PATH) — Option A safe preview
+  // -------------------------
+  const [activePathId, setActivePathId] = useState<string>("");
+  const [activeSeasonKey, setActiveSeasonKey] = useState("2026-03");
+  const [activeSeasonLabel, setActiveSeasonLabel] =
+    useState("March 2026 Cohort");
 
-  // -------------------------
-  // Active cohort save
-  // -------------------------
+  const [computedCohortId, setComputedCohortId] = useState("");
+  const [computedCohortKey, setComputedCohortKey] = useState("");
+  const [cohortSaving, setCohortSaving] = useState(false);
+
+  // ✅ Option A identity helpers (pathId drives identity; title is display-only)
+  const computeCohortIdFromPathId = (pathId: string) => `path_${pathId}`;
+  const computeCohortKeyFromPathId = (pathId: string, seasonKey: string) =>
+    registrationStore.computeCohortKey(
+      computeCohortIdFromPathId(pathId),
+      seasonKey,
+    );
+
+  useEffect(() => {
+    if (!activePathId && paths.length) setActivePathId(paths[0].id);
+  }, [paths, activePathId]);
+
+  useEffect(() => {
+    try {
+      if (!activePathId) {
+        setComputedCohortId("");
+        setComputedCohortKey("");
+        return;
+      }
+      const cid = computeCohortIdFromPathId(activePathId);
+      const ckey = computeCohortKeyFromPathId(activePathId, activeSeasonKey);
+      setComputedCohortId(cid);
+      setComputedCohortKey(ckey);
+    } catch {
+      setComputedCohortId("");
+      setComputedCohortKey("");
+    }
+  }, [activePathId, activeSeasonKey]);
+
   const saveActiveCohort = async () => {
-    const id = activeCohortId.trim();
-    const label = activeCohortLabel.trim();
-    if (!id || !label) return alert("Cohort ID and Label are required.");
+    if (!activePathId) return alert("Pick a Path first.");
+    if (!activeSeasonKey.trim()) return alert("Season Key is required.");
+    if (!activeSeasonLabel.trim()) return alert("Season Label is required.");
 
     setCohortSaving(true);
     try {
-      await registrationStore.setActiveCohort(id, label);
-      alert("Active cohort updated.");
-      await fetchActiveCohort();
-    } catch (e) {
+      const res: ActiveCohortForPath =
+        await registrationStore.setActiveCohortForPathId(activePathId, {
+          seasonKey: activeSeasonKey,
+          seasonLabel: activeSeasonLabel,
+        } as any);
+
+      // refresh cohorts list so we can map cohortKey -> cohortDocId
+      await fetchCohorts();
+
+      // ✅ map cohortKey -> doc id
+      const docId =
+        findCohortDocIdByKey(cohorts, res.cohortKey) ||
+        findCohortDocIdByKey(
+          await registrationStore.getCohorts(),
+          res.cohortKey,
+        );
+
+      if (!docId) {
+        console.warn(
+          "Could not map cohortKey to cohort doc id:",
+          res.cohortKey,
+        );
+        alert(
+          `Active cohort set, but I couldn't auto-select it.\nCohortKey: ${res.cohortKey}`,
+        );
+        return;
+      }
+
+      setSelectedCohortId(docId);
+      await fetchSessions(docId);
+
+      alert(`Active cohort set for "${res.path}" → ${res.cohortKey}`);
+    } catch (e: any) {
       console.error("saveActiveCohort failed:", e);
-      alert("Failed to update active cohort.");
+      alert(e?.message || "Failed to update active cohort.");
     } finally {
       setCohortSaving(false);
     }
   };
 
-  // -------------------------
-  // Cohorts manager actions
-  // -------------------------
   const addCohort = async () => {
-    const id = cohortIdInput.trim();
-    const label = cohortLabelInput.trim();
-    if (!label) return alert("Cohort label is required.");
+    if (!activePathId) return alert("Pick a Path first.");
+    if (!activeSeasonKey.trim() || !activeSeasonLabel.trim()) {
+      return alert("Set Season Key + Season Label first.");
+    }
 
     try {
-      const newId = await registrationStore.addCohort({
-        id: id || undefined,
-        label,
-        isActive: true,
-      });
-      setCohortIdInput("");
-      setCohortLabelInput("");
+      const res = await registrationStore.setActiveCohortForPathId(
+        activePathId,
+        {
+          seasonKey: activeSeasonKey,
+          seasonLabel: activeSeasonLabel,
+        } as any,
+      );
+
       await fetchCohorts();
-      setSelectedCohortId(newId);
-    } catch (e) {
+
+      const docId =
+        findCohortDocIdByKey(cohorts, res.cohortKey) ||
+        findCohortDocIdByKey(
+          await registrationStore.getCohorts(),
+          res.cohortKey,
+        );
+
+      if (!docId) {
+        alert(
+          `Cohort created, but couldn't auto-select it.\nCohortKey: ${res.cohortKey}`,
+        );
+        return;
+      }
+
+      setSelectedCohortId(docId);
+      await fetchSessions(docId);
+    } catch (e: any) {
       console.error("addCohort failed:", e);
-      alert("Failed to add cohort.");
+      alert(e?.message || "Failed to create cohort.");
     }
   };
 
@@ -716,18 +966,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   // -------------------------
-  // Sessions manager actions (✅ upgraded)
+  // Sessions manager actions (pathId + label)
   // -------------------------
   const openAddSession = () => {
     setSessionError("");
     setEditingSession(null);
 
-    const defaultPath = pathOptions[0] || "Flutter & Mobile App Development";
+    const p = pathsById.get(activePathId) || paths[0];
 
     setSessionForm({
       ...emptySession,
       week: 1,
-      path: defaultPath,
+      pathId: p?.id || "",
+      path: p?.title || "",
       isPublished: true,
       date: toLocalDateInput(Date.now()),
       time: "18:00",
@@ -742,12 +993,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     const ms = sessionTimeToMs((s as any).startsAt);
 
+    const incomingPathId = String((s as any).pathId || "").trim();
+    const legacyTitle = String((s as any).path || "").trim();
+
+    // ✅ if session has no pathId, map by title
+    const mappedId = incomingPathId || findPathIdByTitle(legacyTitle);
+    const bestTitle =
+      (mappedId && pathsById.get(mappedId)?.title) || legacyTitle || "";
+
     setSessionForm({
       title: s.title || "",
       week: Number((s as any).week || 1),
-      path: String(
-        (s as any).path || pathOptions[0] || "Flutter & Mobile App Development",
-      ),
+      pathId: mappedId,
+      path: bestTitle,
       isPublished: (s as any).isPublished !== false,
 
       date: toLocalDateInput(ms),
@@ -771,8 +1029,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return setSessionError("Title must be at least 3 characters.");
 
     const week = Math.max(1, Math.floor(Number(sessionForm.week || 1)));
-    const path = String(sessionForm.path || "").trim();
-    if (!path) return setSessionError("Path is required.");
+
+    if (!sessionForm.pathId)
+      return setSessionError("Select a Path for this session.");
+    const p = pathsById.get(sessionForm.pathId);
+    const pathLabel = (p?.title || sessionForm.path || "").trim();
+    if (!pathLabel) return setSessionError("Path title is missing.");
 
     const startsAt = combineDateTimeToMs(sessionForm.date, sessionForm.time);
     const durationMins = Math.max(
@@ -781,32 +1043,50 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
 
     try {
+      const payload: any = {
+        title,
+        week,
+        pathId: sessionForm.pathId,
+        path: pathLabel,
+        isPublished: !!sessionForm.isPublished,
+        startsAt,
+        durationMins,
+        joinUrl: sessionForm.joinUrl.trim(),
+        notes: sessionForm.notes.trim(),
+      };
+
+      await runBusy(
+        editingSession ? "saveSession" : "createSession",
+        async () => {
+          if (editingSession) {
+            await registrationStore.updateCohortSession(
+              selectedCohortId,
+              editingSession.id,
+              payload,
+            );
+          } else {
+            await registrationStore.addCohortSession(selectedCohortId, payload);
+          }
+        },
+      );
+
       if (editingSession) {
         await registrationStore.updateCohortSession(
           selectedCohortId,
           editingSession.id,
-          {
-            title,
-            week,
-            path,
-            isPublished: !!sessionForm.isPublished,
-            startsAt,
-            durationMins,
-            joinUrl: sessionForm.joinUrl.trim(),
-            notes: sessionForm.notes.trim(),
-          } as any,
+          payload,
         );
       } else {
-        await registrationStore.addCohortSession(selectedCohortId, {
-          title,
-          week,
-          path,
-          isPublished: !!sessionForm.isPublished,
-          startsAt,
-          durationMins,
-          joinUrl: sessionForm.joinUrl.trim(),
-          notes: sessionForm.notes.trim(),
-        } as any);
+        const sessionId =
+          `${sessionForm.pathId}__w${week}__${startsAt}`.replace(
+            /[^\w-]/g,
+            "_",
+          );
+        await registrationStore.upsertCohortSession(
+          selectedCohortId,
+          sessionId,
+          payload,
+        );
       }
 
       closeSessionModal();
@@ -814,18 +1094,25 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } catch (e: any) {
       console.error("saveSession failed:", e);
       setSessionError(e?.message || "Failed to save session.");
+    } finally {
+      setSessionBusy(false);
     }
   };
 
   const deleteSession = async (s: SessionDoc) => {
     if (!selectedCohortId) return;
+    if (sessionBusyId) return;
     if (!confirm(`Delete session "${s.title}"?`)) return;
+
+    setSessionBusyId(s.id);
     try {
       await registrationStore.deleteCohortSession(selectedCohortId, s.id);
       await fetchSessions(selectedCohortId);
     } catch (e) {
       console.error("deleteSession failed:", e);
       alert("Failed to delete session.");
+    } finally {
+      setSessionBusyId(null);
     }
   };
 
@@ -833,17 +1120,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Pending payment actions
   // -------------------------
   const clearPending = async (uid: string) => {
+    if (pendingBusyUid) return;
     if (!confirm("Clear pending payment for this user?")) return;
+
+    setPendingBusyUid(uid);
     try {
       await registrationStore.clearPendingPayment(uid);
       await fetchRegistrations();
     } catch (e) {
       console.error("clearPending failed:", e);
       alert("Failed to clear pending payment.");
+    } finally {
+      setPendingBusyUid(null);
     }
   };
 
   const approvePending = async (reg: RegistrationEntry) => {
+    if (pendingBusyUid) return;
     const pending = (reg as any).pendingPayment;
     if (!pending) return;
 
@@ -852,9 +1145,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
     if (!ok) return;
 
+    setPendingBusyUid(reg.uid);
     try {
       if (pending.kind === "topup") {
-        await registrationStore.approveTopUpFromPending(reg.uid, pending);
+        await registrationStore.approveTopUpFromPending(reg.uid, {
+          weeks: pending.weeks,
+          amount: pending.amount,
+          reference: pending.reference,
+        });
       } else {
         await registrationStore.approveInitialPayment(
           reg.uid,
@@ -867,11 +1165,70 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } catch (e) {
       console.error("approvePending failed:", e);
       alert("Failed to approve pending payment.");
+    } finally {
+      setPendingBusyUid(null);
     }
   };
 
+  // ---------- UI helpers ----------
+  const Spinner = ({ className = "h-4 w-4" }: { className?: string }) => (
+    <svg className={`animate-spin ${className}`} viewBox="0 0 24 24">
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+        fill="none"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      />
+    </svg>
+  );
+
+  const BusyButton = ({
+    busy,
+    disabled,
+    onClick,
+    className,
+    children,
+    busyText,
+    type = "button",
+  }: {
+    busy?: boolean;
+    disabled?: boolean;
+    onClick?: () => void;
+    className: string;
+    children: React.ReactNode;
+    busyText?: string;
+    type?: "button" | "submit";
+  }) => {
+    const isDisabled = !!disabled || !!busy;
+    return (
+      <button
+        type={type}
+        onClick={onClick}
+        disabled={isDisabled}
+        className={`${className} ${isDisabled ? "opacity-60 cursor-not-allowed" : ""}`}
+      >
+        {busy ? (
+          <span className="flex items-center justify-center gap-2">
+            <Spinner />
+            <span>{busyText || "Processing..."}</span>
+          </span>
+        ) : (
+          children
+        )}
+      </button>
+    );
+  };
+
   // -------------------------
-  // RETURN JSX (unchanged except session modal + session list date line)
+  // RETURN JSX (your UI preserved)
   // -------------------------
   return (
     <div className="py-12 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
@@ -883,16 +1240,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               Admin Control Center
             </h1>
             <p className="text-slate-500 dark:text-slate-400">
-              Manage cohorts, sessions, payments, and integrations
+              Manage paths, cohorts, sessions, payments, and integrations
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
             <button
-              onClick={fetchRegistrations}
+              onClick={() => {
+                fetchPaths();
+                fetchRegistrations();
+                fetchCourses();
+                fetchCohorts();
+              }}
               className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
             >
-              Refresh
+              Refresh All
             </button>
 
             <button
@@ -1019,15 +1381,145 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           ))}
         </div>
 
-        {/* Active Cohort */}
+        {/* PATHS MANAGER */}
         <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <h2 className="text-xl font-black text-blue-900 dark:text-white">
-                Active Cohort
+                Paths Manager
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                This cohort tag is attached to new student registrations.
+                Create and manage your learning paths (tracks). Everything else
+                (courses, cohorts, sessions) ties to these.
+              </p>
+            </div>
+
+            <button
+              onClick={fetchPaths}
+              className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:opacity-90 transition"
+            >
+              Refresh Paths
+            </button>
+          </div>
+
+          <div className="flex flex-col md:flex-row gap-3 mb-6">
+            <input
+              value={newPathTitle}
+              onChange={(e) => setNewPathTitle(e.target.value)}
+              className="flex-1 px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+              placeholder="New Path Title (e.g. Flutter Development)"
+            />
+            <BusyButton
+              busy={pathBusyId === "create"}
+              disabled={!newPathTitle.trim()}
+              onClick={createPath}
+              className="px-6 py-4 rounded-2xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:bg-teal-500 transition"
+              busyText="Adding..."
+            >
+              + Add Path
+            </BusyButton>
+          </div>
+
+          {pathsLoading ? (
+            <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
+              Loading paths…
+            </div>
+          ) : paths.length === 0 ? (
+            <div className="p-6 bg-orange-50 dark:bg-orange-500/10 rounded-2xl border border-orange-100 dark:border-orange-500/20 text-orange-800 dark:text-orange-200">
+              No paths yet. Create your first path above (recommended).
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {paths.map((p) => (
+                <div
+                  key={p.id}
+                  className="p-5 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      {editingPathId === p.id ? (
+                        <div className="space-y-3">
+                          <input
+                            value={editingPathTitle}
+                            onChange={(e) =>
+                              setEditingPathTitle(e.target.value)
+                            }
+                            className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-700 rounded-xl text-sm text-blue-900 dark:text-white outline-none"
+                          />
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={saveEditPath}
+                              className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={cancelEditPath}
+                              className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:opacity-90 transition"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-sm font-black text-blue-900 dark:text-white">
+                            {p.title}
+                          </p>
+                          <p className="text-[11px] text-slate-400 font-bold mt-1 break-all">
+                            ID: {p.id}
+                          </p>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => togglePathActive(p)}
+                        className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
+                          p.isActive !== false
+                            ? "bg-teal-50 border-teal-200 text-teal-600 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-400"
+                            : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
+                        }`}
+                      >
+                        {p.isActive !== false ? "Active" : "Inactive"}
+                      </button>
+
+                      {editingPathId !== p.id ? (
+                        <button
+                          onClick={() => startEditPath(p)}
+                          className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
+                        >
+                          Edit
+                        </button>
+                      ) : null}
+
+                      <BusyButton
+                        busy={pathBusyId === p.id}
+                        onClick={() => deletePath(p)}
+                        className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
+                        busyText="Deleting..."
+                      >
+                        Delete
+                      </BusyButton>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Active Cohort (PER PATH) */}
+        <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <div>
+              <h2 className="text-xl font-black text-blue-900 dark:text-white">
+                Active Cohort (Per Path)
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                New student registrations use the active cohort mapped to their
+                selected path.
               </p>
             </div>
 
@@ -1035,8 +1527,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               onClick={saveActiveCohort}
               disabled={
                 cohortSaving ||
-                !activeCohortId.trim() ||
-                !activeCohortLabel.trim()
+                !activePathId ||
+                !activeSeasonKey.trim() ||
+                !activeSeasonLabel.trim()
               }
               className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition ${
                 cohortSaving
@@ -1048,30 +1541,81 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                Cohort ID
+                Path
               </label>
-              <input
-                value={activeCohortId}
-                onChange={(e) => setActiveCohortId(e.target.value)}
+
+              <select
+                value={activePathId}
+                onChange={(e) => setActivePathId(e.target.value)}
                 className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                placeholder="e.g. CWG-FEB-2026"
-              />
+              >
+                {paths.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.title}
+                  </option>
+                ))}
+              </select>
+
+              {!paths.length ? (
+                <p className="text-[11px] text-orange-600 mt-2 font-bold">
+                  Create paths first (above), then set active cohort.
+                </p>
+              ) : null}
             </div>
 
             <div>
               <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                Cohort Label
+                Season Key
               </label>
               <input
-                value={activeCohortLabel}
-                onChange={(e) => setActiveCohortLabel(e.target.value)}
+                value={activeSeasonKey}
+                onChange={(e) => setActiveSeasonKey(e.target.value)}
                 className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                placeholder="e.g. February 2026 Cohort"
+                placeholder="e.g. 2026-03"
               />
+              <p className="text-[11px] text-slate-400 mt-2 font-bold">
+                Used to build cohortKey:{" "}
+                <span className="text-slate-500">
+                  {computedCohortKey || "—"}
+                </span>
+              </p>
             </div>
+
+            <div>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                Season Label
+              </label>
+              <input
+                value={activeSeasonLabel}
+                onChange={(e) => setActiveSeasonLabel(e.target.value)}
+                className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                placeholder="e.g. March 2026 Cohort"
+              />
+              <p className="text-[11px] text-slate-400 mt-2 font-bold">
+                cohortId:{" "}
+                <span className="text-slate-500">
+                  {computedCohortId || "—"}
+                </span>
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-6 p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/40 border border-gray-100 dark:border-slate-800">
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              ✅ This sets the active cohort identity for this path:
+              <span className="font-black"> {computedCohortKey || "—"}</span>.
+              <br />
+              Sessions are stored under a cohort document (Doc ID) in{" "}
+              <span className="font-black">/cohorts</span> →{" "}
+              <span className="font-black">
+                {selectedCohortId || "Select a cohort above"}
+              </span>{" "}
+              and its <span className="font-black">/sessions</span>{" "}
+              subcollection.
+            </p>
           </div>
         </div>
 
@@ -1097,26 +1641,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-              <input
-                value={cohortIdInput}
-                onChange={(e) => setCohortIdInput(e.target.value)}
-                className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl text-sm text-slate-800 dark:text-slate-100 outline-none"
-                placeholder="Optional ID: CWG-FEB-2026"
-              />
-              <input
-                value={cohortLabelInput}
-                onChange={(e) => setCohortLabelInput(e.target.value)}
-                className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl text-sm text-slate-800 dark:text-slate-100 outline-none"
-                placeholder="Label: February 2026 Cohort"
-              />
-            </div>
-
             <button
               onClick={addCohort}
-              className="w-full px-4 py-3 rounded-xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:bg-teal-500 transition mb-6"
+              disabled={!activePathId}
+              className={`w-full px-4 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition mb-6 ${
+                !activePathId
+                  ? "bg-gray-200 text-gray-500"
+                  : "bg-teal-600 text-white hover:bg-teal-500"
+              }`}
             >
-              + Add Cohort
+              + Add Cohort From Active Path + Season
             </button>
 
             {cohortsLoading ? (
@@ -1125,42 +1659,84 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             ) : cohorts.length === 0 ? (
               <div className="p-5 bg-orange-50 dark:bg-orange-500/10 rounded-2xl border border-orange-100 dark:border-orange-500/20 text-orange-800 dark:text-orange-200">
-                No cohorts yet. Add one above.
+                No cohorts yet. Set active cohort first (above), then add
+                cohort.
               </div>
             ) : (
               <div className="space-y-3">
-                {cohorts.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => setSelectedCohortId(c.id)}
-                    className={`w-full text-left p-4 rounded-2xl border transition ${
-                      selectedCohortId === c.id
-                        ? "border-blue-900 dark:border-teal-600 bg-blue-50 dark:bg-teal-900/20"
-                        : "border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-black text-blue-900 dark:text-white">
-                          {c.label}
-                        </p>
-                        <p className="text-[11px] text-slate-400 font-bold mt-1">
-                          ID: {c.id}
-                        </p>
+                {cohorts.map((c) => {
+                  const isSelected = selectedCohortId === c.id;
+                  const pathTitle = c.pathId
+                    ? pathsById.get(String(c.pathId))?.title
+                    : c.path || "";
+
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => setSelectedCohortId(c.id)} // ✅ doc id
+                      className={`w-full text-left p-4 rounded-2xl border transition ${
+                        isSelected
+                          ? "border-blue-900 dark:border-teal-600 bg-blue-50 dark:bg-teal-900/20"
+                          : "border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="text-sm font-black text-blue-900 dark:text-white">
+                            {c.label}
+                          </p>
+
+                          {/* ✅ show doc id (real storage location) */}
+                          <p className="text-[11px] text-slate-400 font-bold mt-1 break-all">
+                            Doc ID: {c.id}
+                          </p>
+
+                          {/* ✅ show cohortKey if present (identity metadata) */}
+                          {c.cohortKey ? (
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold mt-1 break-all">
+                              cohortKey: {c.cohortKey}
+                              {c.cohortKey === c.id ? (
+                                <span className="ml-2 text-teal-600 font-black">
+                                  • matches Doc ID
+                                </span>
+                              ) : (
+                                <span className="ml-2 text-orange-600 font-black">
+                                  • differs from Doc ID
+                                </span>
+                              )}
+                            </p>
+                          ) : null}
+
+                          {/* ✅ show path identity */}
+                          {c.pathId || c.path ? (
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold mt-1">
+                              Path:{" "}
+                              <span className="text-slate-600 dark:text-slate-200">
+                                {pathTitle || "—"}
+                              </span>
+                              {c.pathId ? (
+                                <span className="ml-2 text-slate-400 break-all">
+                                  (pathId: {c.pathId})
+                                </span>
+                              ) : null}
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteCohort(c);
+                          }}
+                          className="px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
+                        >
+                          Delete
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteCohort(c);
-                        }}
-                        className="px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1172,16 +1748,43 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <h2 className="text-xl font-black text-blue-900 dark:text-white">
                   Live Sessions
                 </h2>
+                {sessionsError ? (
+                  <div className="p-4 mb-4 rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-200 text-sm font-bold">
+                    {sessionsError}
+                  </div>
+                ) : null}
                 <p className="text-sm text-slate-500 dark:text-slate-400">
                   {selectedCohortId
-                    ? `Cohort: ${selectedCohortId}`
+                    ? (() => {
+                        const selected = cohorts.find(
+                          (x) => x.id === selectedCohortId,
+                        );
+                        return (
+                          <>
+                            Cohort Doc ID:{" "}
+                            <span className="font-black">
+                              {selectedCohortId}
+                            </span>
+                            {selected?.cohortKey ? (
+                              <>
+                                {" "}
+                                • cohortKey:{" "}
+                                <span className="font-black">
+                                  {selected.cohortKey}
+                                </span>
+                              </>
+                            ) : null}
+                          </>
+                        );
+                      })()
                     : "Select a cohort to manage sessions."}
                 </p>
               </div>
 
-              <button
+              <BusyButton
+                busy={false}
+                disabled={!selectedCohortId || sessionsLoading}
                 onClick={openAddSession}
-                disabled={!selectedCohortId}
                 className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition ${
                   !selectedCohortId
                     ? "bg-gray-200 text-gray-500"
@@ -1189,7 +1792,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 }`}
               >
                 + Add Session
-              </button>
+              </BusyButton>
             </div>
 
             {sessionsLoading ? (
@@ -1215,8 +1818,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <p className="text-[11px] text-slate-400 font-bold mt-1">
                           {new Date(
                             sessionTimeToMs((s as any).startsAt),
-                          ).toLocaleString()}
-                          {Number(s.durationMins || 60)} mins
+                          ).toLocaleString()}{" "}
+                          • {Number((s as any).durationMins || 60)} mins • Week{" "}
+                          {(s as any).week || 1}
+                        </p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                          Path: {(s as any).path || "—"}{" "}
+                          {(s as any).isPublished !== false ? (
+                            <span className="ml-2 text-teal-600 font-black">
+                              • Published
+                            </span>
+                          ) : (
+                            <span className="ml-2 text-orange-600 font-black">
+                              • Hidden
+                            </span>
+                          )}
                         </p>
                         {s.joinUrl ? (
                           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 break-all">
@@ -1232,12 +1848,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         >
                           Edit
                         </button>
-                        <button
+                        <BusyButton
+                          busy={sessionBusyId === s.id}
                           onClick={() => deleteSession(s)}
                           className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
+                          busyText="Deleting..."
                         >
                           Delete
-                        </button>
+                        </BusyButton>
                       </div>
                     </div>
 
@@ -1343,18 +1961,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
-                            <button
+                            <BusyButton
+                              busy={pendingBusyUid === r.uid}
                               onClick={() => approvePending(r)}
                               className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:opacity-90 transition"
+                              busyText="Approving..."
                             >
                               Approve
-                            </button>
-                            <button
+                            </BusyButton>
+                            <BusyButton
+                              busy={pendingBusyUid === r.uid}
                               onClick={() => clearPending(r.uid)}
                               className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-orange-600 text-white hover:opacity-90 transition"
+                              busyText="Clearing..."
                             >
                               Clear
-                            </button>
+                            </BusyButton>
                           </div>
                         </td>
                       </tr>
@@ -1430,7 +2052,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 Course Catalog
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                Add / edit courses shown on the landing page “Courses” section.
+                Add / edit courses shown on the landing page and explore pages.
               </p>
             </div>
 
@@ -1444,12 +2066,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <button
                 onClick={openAddCourse}
-                className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:bg-teal-500 transition"
+                disabled={!paths.length}
+                className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition ${
+                  !paths.length
+                    ? "bg-gray-200 text-gray-500"
+                    : "bg-teal-600 text-white hover:bg-teal-500"
+                }`}
               >
                 + Add Course
               </button>
             </div>
           </div>
+
+          {!paths.length ? (
+            <div className="p-6 bg-orange-50 dark:bg-orange-500/10 rounded-2xl border border-orange-100 dark:border-orange-500/20 text-orange-800 dark:text-orange-200 mb-6">
+              Create at least one Path first. Courses must belong to a Path.
+            </div>
+          ) : null}
 
           {coursesLoading ? (
             <div className="p-6 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
@@ -1471,6 +2104,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   10000;
                 const label = c.priceLabel || formatPriceLabel(ppw);
 
+                const pTitle = (c as any).pathId
+                  ? pathsById.get(String((c as any).pathId))?.title
+                  : null;
+
                 return (
                   <div
                     key={c.id}
@@ -1487,19 +2124,43 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <p className="text-[11px] text-slate-400 mt-2 font-bold">
                           {weeks} Weeks • {c.sessions} • {c.level} • {label}
                         </p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-bold">
+                          Path:{" "}
+                          <span className="text-slate-600 dark:text-slate-200">
+                            {pTitle || "—"}
+                          </span>
+                        </p>
                       </div>
 
-                      <button
-                        onClick={() => toggleCourseActive(c)}
-                        className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
-                          (c as any).isActive !== false
-                            ? "bg-teal-50 border-teal-200 text-teal-600 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-400"
-                            : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
-                        }`}
-                        title="Toggle visibility on landing page"
-                      >
-                        {(c as any).isActive !== false ? "Active" : "Hidden"}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => toggleCourseLanding(c)}
+                          className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
+                            (c as any).showOnLanding !== false
+                              ? "bg-teal-50 border-teal-200 text-teal-600 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-400"
+                              : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
+                          }`}
+                          title="Toggle landing page visibility"
+                        >
+                          {(c as any).showOnLanding !== false
+                            ? "Landing: ON"
+                            : "Landing: OFF"}
+                        </button>
+
+                        <button
+                          onClick={() => toggleCourseExplore(c)}
+                          className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
+                            (c as any).showInExplore !== false
+                              ? "bg-blue-50 border-blue-200 text-blue-700 dark:bg-slate-800/40 dark:border-slate-700 dark:text-blue-300"
+                              : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
+                          }`}
+                          title="Toggle Explore All Paths visibility"
+                        >
+                          {(c as any).showInExplore !== false
+                            ? "Explore: ON"
+                            : "Explore: OFF"}
+                        </button>
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-end gap-2 mt-4">
@@ -1551,8 +2212,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {editingCourse ? "Edit Course" : "Add New Course"}
               </h3>
               <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-                This updates what students see in the landing page “Courses”
-                section.
+                This updates what students see across your site.
               </p>
 
               <form onSubmit={saveCourse} className="space-y-4">
@@ -1561,6 +2221,29 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     {courseError}
                   </div>
                 )}
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                    Path
+                  </label>
+                  <select
+                    value={courseForm.pathId}
+                    onChange={(e) =>
+                      setCourseForm((p) => ({ ...p, pathId: e.target.value }))
+                    }
+                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                    required
+                  >
+                    <option value="" disabled>
+                      Select a path…
+                    </option>
+                    {paths.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
                 <div>
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
@@ -1625,100 +2308,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       required
                     />
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Level
-                    </label>
-                    <input
-                      value={courseForm.level}
-                      onChange={(e) =>
-                        setCourseForm((p) => ({ ...p, level: e.target.value }))
-                      }
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                      placeholder="Beginner / Intermediate / Advanced"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Price Label
-                    </label>
-                    <input
-                      onBlur={() => {
-                        const ppw = parsePricePerWeek(courseForm.priceLabel);
-                        const safe = ppw || courseForm.pricePerWeek || 10000;
-                        setCourseForm((p) => ({
-                          ...p,
-                          pricePerWeek: safe,
-                          priceLabel: formatPriceLabel(safe),
-                        }));
-                      }}
-                      value={courseForm.priceLabel}
-                      onChange={(e) =>
-                        setCourseForm((p) => ({
-                          ...p,
-                          priceLabel: e.target.value,
-                        }))
-                      }
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                      placeholder="e.g. ₦10k/wk"
-                    />
-                    <p className="text-[11px] text-slate-400 mt-2 font-bold">
-                      Price/week (truth): ₦
-                      {Number(courseForm.pricePerWeek || 0).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Weeks (Number)
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={courseForm.weeks}
-                      onChange={(e) => {
-                        const w = Math.max(
-                          1,
-                          parseInt(e.target.value || "1", 10),
-                        );
-                        setCourseForm((p) => ({
-                          ...p,
-                          weeks: w,
-                          duration: `${w} Weeks`,
-                          syllabus: normalizeSyllabus(p.syllabus, w),
-                        }));
-                      }}
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Price Per Week (Number)
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={courseForm.pricePerWeek}
-                      onChange={(e) => {
-                        const ppw = Math.max(
-                          0,
-                          parseInt(e.target.value || "0", 10),
-                        );
-                        setCourseForm((p) => ({
-                          ...p,
-                          pricePerWeek: ppw,
-                          priceLabel: formatPriceLabel(ppw),
-                        }));
-                      }}
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                    />
-                  </div>
                 </div>
 
                 <div>
@@ -1739,130 +2328,61 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Image URL (optional)
-                    </label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4 bg-gray-50 dark:bg-slate-800/40 rounded-2xl border border-gray-100 dark:border-slate-800">
+                  <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
                     <input
-                      value={courseForm.imageUrl}
+                      type="checkbox"
+                      checked={courseForm.isActive}
                       onChange={(e) =>
                         setCourseForm((p) => ({
                           ...p,
-                          imageUrl: e.target.value,
+                          isActive: e.target.checked,
                         }))
                       }
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                      placeholder="https://..."
+                      className="h-4 w-4"
                     />
-                  </div>
+                    Active
+                  </label>
 
-                  <div>
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Syllabus View (optional fallback)
-                    </label>
+                  <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
                     <input
-                      value={courseForm.syllabusView}
+                      type="checkbox"
+                      checked={courseForm.showOnLanding}
                       onChange={(e) =>
                         setCourseForm((p) => ({
                           ...p,
-                          syllabusView: e.target.value,
+                          showOnLanding: e.target.checked,
                         }))
                       }
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                      placeholder='e.g. "path-flutter"'
+                      className="h-4 w-4"
                     />
-                  </div>
+                    Show on Landing
+                  </label>
+
+                  <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={courseForm.showInExplore}
+                      onChange={(e) =>
+                        setCourseForm((p) => ({
+                          ...p,
+                          showInExplore: e.target.checked,
+                        }))
+                      }
+                      className="h-4 w-4"
+                    />
+                    Show in Explore
+                  </label>
                 </div>
 
-                <div className="mt-4 p-6 bg-gray-50 dark:bg-slate-800/50 rounded-2xl border border-gray-100 dark:border-slate-700">
-                  <div className="flex items-center justify-between gap-4 mb-4">
-                    <div>
-                      <p className="text-sm font-black text-blue-900 dark:text-white">
-                        Syllabus Builder
-                      </p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold">
-                        This is what “View Syllabus” will display for this
-                        course.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={addSyllabusWeek}
-                      className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
-                    >
-                      + Add Week
-                    </button>
-                  </div>
-
-                  <div className="space-y-4">
-                    {(courseForm.syllabus || []).map((w, idx) => (
-                      <div
-                        key={idx}
-                        className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-gray-100 dark:border-slate-800"
-                      >
-                        <div className="flex items-start justify-between gap-3 mb-3">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                            Week {idx + 1}
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => removeSyllabusWeek(idx)}
-                            className="text-[10px] font-black uppercase tracking-widest text-red-600 hover:underline"
-                          >
-                            Remove
-                          </button>
-                        </div>
-
-                        <input
-                          value={w.title}
-                          onChange={(e) =>
-                            updateSyllabusWeekTitle(idx, e.target.value)
-                          }
-                          className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl text-sm text-blue-900 dark:text-white outline-none mb-3"
-                          placeholder={`Week ${idx + 1} title`}
-                        />
-
-                        <textarea
-                          value={(w.topics || []).join("\n")}
-                          onChange={(e) =>
-                            updateSyllabusWeekTopics(idx, e.target.value)
-                          }
-                          className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl text-sm text-blue-900 dark:text-white outline-none min-h-[90px]"
-                          placeholder={
-                            "Topics (one per line)\n- Topic 1\n- Topic 2"
-                          }
-                        />
-                      </div>
-                    ))}
-                  </div>
-
-                  <p className="mt-4 text-[11px] text-slate-500 dark:text-slate-400 font-bold">
-                    Tip: Weeks are auto-trimmed on save.
-                  </p>
-                </div>
-
-                <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={courseForm.isActive}
-                    onChange={(e) =>
-                      setCourseForm((p) => ({
-                        ...p,
-                        isActive: e.target.checked,
-                      }))
-                    }
-                    className="h-4 w-4"
-                  />
-                  Show on landing page
-                </label>
-
-                <button
+                <BusyButton
                   type="submit"
+                  busy={courseBusyId === (editingCourse?.id || "create")}
                   className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all"
+                  busyText={editingCourse ? "Saving..." : "Creating..."}
                 >
                   {editingCourse ? "Save Changes" : "Create Course"}
-                </button>
+                </BusyButton>
               </form>
             </div>
           </div>
@@ -1905,6 +2425,69 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     {sessionError}
                   </div>
                 )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                      Week
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={sessionForm.week}
+                      onChange={(e) =>
+                        setSessionForm((p) => ({
+                          ...p,
+                          week: Math.max(
+                            1,
+                            parseInt(e.target.value || "1", 10),
+                          ),
+                        }))
+                      }
+                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                      Path
+                    </label>
+                    <select
+                      value={sessionForm.pathId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        const t = pathsById.get(id)?.title || "";
+                        setSessionForm((p) => ({ ...p, pathId: id, path: t }));
+                      }}
+                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                      required
+                    >
+                      <option value="" disabled>
+                        Select a path…
+                      </option>
+                      {paths.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.title}
+                        </option>
+                      ))}
+                    </select>
+
+                    <label className="mt-3 flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={sessionForm.isPublished}
+                        onChange={(e) =>
+                          setSessionForm((p) => ({
+                            ...p,
+                            isPublished: e.target.checked,
+                          }))
+                        }
+                        className="h-4 w-4"
+                      />
+                      Published (visible to students)
+                    </label>
+                  </div>
+                </div>
 
                 <div>
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
@@ -1950,7 +2533,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
                       required
                     />
-                    
                   </div>
 
                   <div>
@@ -2002,9 +2584,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                 <button
                   type="submit"
-                  className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all"
+                  disabled={busy.createSession || busy.saveSession}
+                  className="w-full ... disabled:opacity-60 flex items-center justify-center gap-3"
                 >
-                  {editingSession ? "Save Session" : "Create Session"}
+                  {busy.createSession || busy.saveSession ? (
+                    <>
+                      <span className="h-5 w-5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                      <span>
+                        {editingSession ? "Saving..." : "Creating..."}
+                      </span>
+                    </>
+                  ) : editingSession ? (
+                    "Save Session"
+                  ) : (
+                    "Create Session"
+                  )}
                 </button>
               </form>
             </div>
@@ -2033,7 +2627,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, email, phone, path..."
+              placeholder="Search name, email, phone, path, pathId..."
               className="px-4 py-2.5 rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200 outline-none"
             />
           </div>
@@ -2096,89 +2690,102 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </td>
                     </tr>
                   ) : (
-                    filteredData.map((reg) => (
-                      <tr
-                        key={reg.uid}
-                        className="hover:bg-gray-50/50 dark:hover:bg-slate-800/30 transition-colors"
-                      >
-                        <td className="px-8 py-6">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-blue-900 text-white flex items-center justify-center font-black text-xs">
-                              {reg.fullName?.charAt(0)}
+                    filteredData.map((reg) => {
+                      const regPathTitle = (reg as any).pathId
+                        ? pathsById.get(String((reg as any).pathId))?.title
+                        : null;
+
+                      return (
+                        <tr
+                          key={reg.uid}
+                          className="hover:bg-gray-50/50 dark:hover:bg-slate-800/30 transition-colors"
+                        >
+                          <td className="px-8 py-6">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-blue-900 text-white flex items-center justify-center font-black text-xs">
+                                {reg.fullName?.charAt(0)}
+                              </div>
+                              <div>
+                                <p className="font-bold text-blue-900 dark:text-white leading-tight">
+                                  {reg.fullName}
+                                </p>
+                                <p className="text-xs text-slate-400 font-medium mt-1">
+                                  {reg.email}
+                                </p>
+                                <p className="text-[10px] text-slate-400">
+                                  {reg.phone} · {reg.gender}
+                                  {(reg as any).pendingPayment ? (
+                                    <span className="ml-2 text-purple-600 font-black">
+                                      • Pending Pay
+                                    </span>
+                                  ) : null}
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="font-bold text-blue-900 dark:text-white leading-tight">
-                                {reg.fullName}
-                              </p>
-                              <p className="text-xs text-slate-400 font-medium mt-1">
-                                {reg.email}
-                              </p>
-                              <p className="text-[10px] text-slate-400">
-                                {reg.phone} · {reg.gender}
-                                {(reg as any).pendingPayment ? (
-                                  <span className="ml-2 text-purple-600 font-black">
-                                    • Pending Pay
-                                  </span>
-                                ) : null}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
+                          </td>
 
-                        <td className="px-8 py-6">
-                          <span className="text-xs font-bold text-slate-600 dark:text-slate-300 block">
-                            {reg.path}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
-                            {reg.weeksToCommit} Weeks
-                          </span>
-                        </td>
+                          <td className="px-8 py-6">
+                            <span className="text-xs font-bold text-slate-600 dark:text-slate-300 block">
+                              {regPathTitle || reg.path}
+                            </span>
 
-                        <td className="px-8 py-6">
-                          <p className="text-sm font-black text-blue-900 dark:text-teal-500">
-                            ₦{Number(reg.totalPrice || 0).toLocaleString()}
-                          </p>
-                        </td>
+                            {(reg as any).pathId ? (
+                              <span className="text-[10px] text-slate-400 font-bold block">
+                                ID: {String((reg as any).pathId)}
+                              </span>
+                            ) : null}
 
-                        <td className="px-8 py-6">
-                          <button
-                            onClick={() =>
-                              handleToggleStatus(reg.uid, reg.status)
-                            }
-                            className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
-                              reg.status === "Complete"
-                                ? "bg-teal-50 border-teal-200 text-teal-600 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-400"
-                                : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
-                            }`}
-                          >
-                            {reg.status}
-                          </button>
-                        </td>
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
+                              {reg.weeksToCommit} Weeks
+                            </span>
+                          </td>
 
-                        <td className="px-8 py-6">
-                          <button
-                            onClick={() => handleDelete(reg.uid)}
-                            className="p-2 text-slate-300 hover:text-red-600 transition-colors"
-                            title="Delete Registration"
-                            aria-label="Delete Registration"
-                          >
-                            <svg
-                              className="w-5 h-5"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
+                          <td className="px-8 py-6">
+                            <p className="text-sm font-black text-blue-900 dark:text-teal-500">
+                              ₦{Number(reg.totalPrice || 0).toLocaleString()}
+                            </p>
+                          </td>
+
+                          <td className="px-8 py-6">
+                            <button
+                              onClick={() =>
+                                handleToggleStatus(reg.uid, reg.status)
+                              }
+                              className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
+                                reg.status === "Complete"
+                                  ? "bg-teal-50 border-teal-200 text-teal-600 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-400"
+                                  : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
+                              }`}
                             >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth="2"
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                              />
-                            </svg>
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                              {reg.status}
+                            </button>
+                          </td>
+
+                          <td className="px-8 py-6">
+                            <button
+                              onClick={() => handleDelete(reg.uid)}
+                              className="p-2 text-slate-300 hover:text-red-600 transition-colors"
+                              title="Delete Registration"
+                              aria-label="Delete Registration"
+                            >
+                              <svg
+                                className="w-5 h-5"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                />
+                              </svg>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -2186,7 +2793,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
-        {/* Footer status */}
+        {/* Footer status (unchanged) */}
         <div className="mt-16 p-8 bg-blue-900 dark:bg-slate-900 rounded-[2rem] text-white shadow-2xl flex flex-col md:flex-row items-center gap-12">
           <div className="md:w-1/2">
             <h3 className="text-2xl font-black mb-4">Infrastructure Status</h3>
@@ -2199,7 +2806,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </li>
               <li className="flex items-center gap-3">
                 <div
-                  className={`w-3 h-3 rounded-full ${webhookUrl ? "bg-teal-400" : "bg-orange-400"}`}
+                  className={`w-3 h-3 rounded-full ${
+                    webhookUrl ? "bg-teal-400" : "bg-orange-400"
+                  }`}
                 />
                 <span className="text-sm font-medium">
                   Sheets Binding:{" "}

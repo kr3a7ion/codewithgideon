@@ -1,10 +1,11 @@
+/* eslint-disable valid-jsdoc */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {onRequest} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import axios from "axios";
 import cors from "cors";
 
 admin.initializeApp();
-
 const corsHandler = cors({origin: true});
 
 const parseWeeksFromDuration = (duration: string, fallback = 4) => {
@@ -21,6 +22,58 @@ const PINNED_MAX_WEEKS: Record<string, number> = {
   "ai-assisted development": 4,
 };
 
+type VerifyBody = {
+  reference?: string;
+  uid?: string;
+  expectedAmount?: number | string;
+
+  weeks?: number | string;
+  kind?: "initial" | "topup";
+
+  path?: string;
+  pathId?: string;
+  courseId?: string;
+
+  cohortId?: string;
+  cohortLabel?: string;
+  cohortKey?: string;
+
+  // optional metadata hints
+  courseMaxWeeks?: number | string;
+  weeklyRate?: number | string;
+};
+
+/**
+ * Returns a trimmed string for any input. Null/undefined become "".
+ */
+function safeString(x: unknown): string {
+  return String(x ?? "").trim();
+}
+
+/**
+ * Paystack metadata can be object or stringified JSON sometimes.
+ * Returns a plain object or null.
+ */
+function parseMetadata(meta: unknown): Record<string, any> | null {
+  if (!meta) return null;
+
+  if (typeof meta === "object") {
+    return meta as Record<string, any>;
+  }
+
+  if (typeof meta === "string") {
+    try {
+      const j = JSON.parse(meta);
+      if (j && typeof j === "object") return j as Record<string, any>;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("parseMetadata: invalid JSON metadata string");
+    }
+  }
+
+  return null;
+}
+
 export const verifyPaystackPayment = onRequest(
   {secrets: ["PAYSTACK_SECRET_KEY"]},
   (req, res) => {
@@ -36,15 +89,21 @@ export const verifyPaystackPayment = onRequest(
           return;
         }
 
-        const body = req.body || {};
-        const reference = body.reference;
-        const uid = body.uid;
-        const expectedAmountRaw = body.expectedAmount;
-        const weeks = body.weeks;
-        const kind = body.kind; // "initial" | "topup"
-        const cohortId = body.cohortId;
-        const cohortLabel = body.cohortLabel;
-        const path = body.path; // ✅ IMPORTANT for duration cap
+        const body = (req.body || {}) as VerifyBody;
+
+        const reference = safeString(body.reference);
+        const uid = safeString(body.uid);
+
+        const kind: "initial" | "topup" =
+          body.kind === "topup" ? "topup" : "initial";
+
+        const path = safeString(body.path);
+        const pathId = safeString(body.pathId);
+        const courseId = safeString(body.courseId);
+
+        const cohortId = safeString(body.cohortId);
+        const cohortLabel = safeString(body.cohortLabel);
+        const cohortKey = safeString(body.cohortKey);
 
         if (!reference || !uid) {
           res
@@ -53,10 +112,11 @@ export const verifyPaystackPayment = onRequest(
           return;
         }
 
+        // expected amount (kobo) optional
         const expectedAmountKobo =
-          expectedAmountRaw === undefined || expectedAmountRaw === null ?
+          body.expectedAmount === undefined || body.expectedAmount === null ?
             null :
-            Number(expectedAmountRaw);
+            Number(body.expectedAmount);
 
         if (
           expectedAmountKobo !== null &&
@@ -72,16 +132,17 @@ export const verifyPaystackPayment = onRequest(
           return;
         }
 
+        // 🔐 verify with Paystack
         const verifyUrl =
           "https://api.paystack.co/transaction/verify/" +
-          encodeURIComponent(String(reference));
+          encodeURIComponent(reference);
 
         const paystackResp = await axios.get(verifyUrl, {
           headers: {Authorization: "Bearer " + secret},
         });
 
-        const ok = paystackResp.data && paystackResp.data.status;
-        const data = paystackResp.data && paystackResp.data.data;
+        const ok = paystackResp.data?.status;
+        const data = paystackResp.data?.data;
 
         if (!ok || !data) {
           res.status(400).json({
@@ -117,117 +178,215 @@ export const verifyPaystackPayment = onRequest(
           return;
         }
 
-        const userRef = admin.firestore().doc("users/" + String(uid));
-        const userSnap = await userRef.get();
-
-        if (!userSnap.exists) {
-          res.status(404).json({ok: false, error: "User not found"});
+        // ✅ SECURITY (backward compatible):
+        // If Paystack metadata includes uid, enforce it.
+        const meta = parseMetadata(data.metadata);
+        const metaUid = safeString(meta?.uid || meta?.userId);
+        if (metaUid && metaUid !== uid) {
+          res.status(400).json({
+            ok: false,
+            error: "UID mismatch (metadata does not match request uid)",
+            details: {metaUid, uid},
+          });
           return;
         }
 
-        const userData = userSnap.data() || {};
-        const originalWeeks = Number(userData.weeksToCommit || 0) || 0;
+        const db = admin.firestore();
+        const userRef = db.doc(`users/${uid}`);
 
-        // ✅ Parse requested weeks (still untrusted)
-        const requestedWeeks =
-          Number.isFinite(Number(weeks)) && Number(weeks) > 0 ?
-            Number(weeks) :
-            1;
+        // ✅ idempotency lock: deterministic doc per reference
+        const paymentRef = db.doc(`users/${uid}/payments/${reference}`);
 
-        // ✅ Get course max weeks from pinned OR Firestore
-        let maxWeeks = 4;
-        const normalizedPath = String(path || userData.path || "")
-          .trim()
-          .toLowerCase();
+        // ✅ run in transaction to avoid double-credit on retries
+        const result = await db.runTransaction(async (tx) => {
+          const [userSnap, paymentSnap] = await Promise.all([
+            tx.get(userRef),
+            tx.get(paymentRef),
+          ]);
 
-        // 1) pinned
-        if (PINNED_MAX_WEEKS[normalizedPath]) {
-          maxWeeks = PINNED_MAX_WEEKS[normalizedPath];
-        } else {
-          // 2) Firestore courses lookup by title
-          if (normalizedPath) {
-            const coursesSnap = await admin
-              .firestore()
-              .collection("courses")
-              .get();
-            const found = coursesSnap.docs.find((d) => {
-              const t = String(d.data()?.title || "")
-                .trim()
-                .toLowerCase();
-              return t === normalizedPath;
-            });
+          if (!userSnap.exists) {
+            throw Object.assign(new Error("User not found"), {code: 404});
+          }
 
-            if (found) {
-              maxWeeks = parseWeeksFromDuration(
-                String(found.data()?.duration || "4"),
-                4,
-              );
+          // Already processed? Return existing
+          if (paymentSnap.exists) {
+            const prev = paymentSnap.data() || {};
+            return {
+              alreadyProcessed: true,
+              safeWeeks: Number(prev.weeks || 0) || 0,
+              maxWeeks: Number(prev.maxWeeks || 0) || 0,
+            };
+          }
+
+          const userData = userSnap.data() || {};
+          const originalWeeks = Number(userData.weeksToCommit || 0) || 0;
+
+          // ✅ requested weeks (still untrusted)
+          const requestedWeeks =
+            Number.isFinite(Number(body.weeks)) && Number(body.weeks) > 0 ?
+              Number(body.weeks) :
+              1;
+
+          // ✅ resolve maxWeeks (truth fields first)
+          let maxWeeks = 4;
+
+          // 0) client hint (only if sane)
+          const hintedMax = Number(body.courseMaxWeeks);
+          if (Number.isFinite(hintedMax) && hintedMax > 0 && hintedMax <= 104) {
+            maxWeeks = Math.floor(hintedMax);
+          } else {
+            const normalizedPath = String(path || userData.path || "")
+              .trim()
+              .toLowerCase();
+
+            // 1) pinned
+            if (PINNED_MAX_WEEKS[normalizedPath]) {
+              maxWeeks = PINNED_MAX_WEEKS[normalizedPath];
+            } else {
+              // 2) Firestore course lookup using tx.get ONLY
+              const coursesCol = db.collection("courses");
+              let found: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+
+              // Prefer courseId
+              if (courseId) {
+                const cSnap = await tx.get(coursesCol.doc(courseId));
+                if (cSnap.exists) {
+                  // doc snapshot isn't query snapshot; wrap via a flag
+                  // We'll treat it as "found" via direct data below
+                  const foundData = cSnap.data() as any;
+                  const truthWeeks = Number(foundData?.weeks);
+                  if (Number.isFinite(truthWeeks) && truthWeeks > 0) {
+                    maxWeeks = Math.floor(truthWeeks);
+                  } else {
+                    maxWeeks = parseWeeksFromDuration(
+                      String(foundData?.duration || "4"),
+                      4,
+                    );
+                  }
+
+                  // continue without query
+                  found = null;
+                }
+              }
+
+              // If we still have default and have pathId: query by pathId
+              if (maxWeeks === 4 && pathId) {
+                const q = coursesCol.where("pathId", "==", pathId).limit(1);
+                const qs = await tx.get(q);
+                if (!qs.empty) found = qs.docs[0];
+              }
+
+              // Last fallback: title match (requires exact title field)
+              // NOTE: better to store titleLower in courses and query that.
+              if (maxWeeks === 4 && !found && normalizedPath) {
+                const q = coursesCol.where("title", "==", path).limit(1);
+                const qs = await tx.get(q);
+                if (!qs.empty) found = qs.docs[0];
+              }
+
+              if (found) {
+                const foundData = found.data() as any;
+                const truthWeeks = Number(foundData?.weeks);
+                if (Number.isFinite(truthWeeks) && truthWeeks > 0) {
+                  maxWeeks = Math.floor(truthWeeks);
+                } else {
+                  maxWeeks = parseWeeksFromDuration(
+                    String(foundData?.duration || "4"),
+                    4,
+                  );
+                }
+              }
             }
           }
-        }
 
-        // ✅ Enforce cap
-        // initial: 1..maxWeeks
-        // topup: 1..(maxWeeks - originalWeeks)  (at least 1)
-        const maxAllowed =
-          kind === "topup" ?
-            Math.max(1, maxWeeks - originalWeeks) :
-            Math.max(1, maxWeeks);
+          // ✅ enforce cap correctly
+          const remaining = Math.max(0, maxWeeks - originalWeeks);
 
-        const safeWeeks = clamp(requestedWeeks, 1, maxAllowed);
+          let safeWeeks = 0;
+          if (kind === "topup") {
+            if (remaining <= 0) safeWeeks = 0;
+            else safeWeeks = clamp(requestedWeeks, 1, remaining);
+          } else {
+            safeWeeks = clamp(requestedWeeks, 1, Math.max(1, maxWeeks));
+          }
 
-        const updates: Record<string, unknown> = {
-          status: "Complete",
-          pendingPayment: admin.firestore.FieldValue.delete(),
-          path: String(path || userData.path || ""), // ✅ keep path consistent
-        };
+          // ✅ update user (simple, no TS generics needed)
+          const updates: Record<string, any> = {
+            status: "Complete",
+            pendingPayment: admin.firestore.FieldValue.delete(),
+            path: String(path || userData.path || "").trim(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          };
 
-        if (kind === "topup") {
-          updates.weeksToCommit =
-            admin.firestore.FieldValue.increment(safeWeeks);
-        } else {
-          updates.weeksToCommit = safeWeeks;
-        }
+          if (pathId) updates.pathId = pathId;
+          if (courseId) updates.courseId = courseId;
+          if (cohortId) updates.cohortId = cohortId;
+          if (cohortLabel) updates.cohortLabel = cohortLabel;
+          if (cohortKey) updates.cohortKey = cohortKey;
 
-        if (cohortId) updates.cohortId = String(cohortId);
-        if (cohortLabel) updates.cohortLabel = String(cohortLabel);
+          if (kind === "topup") {
+            if (safeWeeks > 0) {
+              updates.weeksToCommit =
+                admin.firestore.FieldValue.increment(safeWeeks);
+            }
+          } else {
+            updates.weeksToCommit = safeWeeks;
+          }
 
-        await userRef.update(updates);
+          tx.update(userRef, updates);
 
-        await admin
-          .firestore()
-          .collection("users/" + String(uid) + "/payments")
-          .add({
-            reference: String(reference),
+          tx.set(paymentRef, {
+            reference,
+            uid,
             amountKobo,
-            email: (data.customer && data.customer.email) || null,
-            weeks: safeWeeks, // ✅ store enforced weeks
-            kind: kind || "initial",
+            email: data?.customer?.email || null,
+            weeks: safeWeeks,
+            kind,
+
             cohortId: cohortId || null,
             cohortLabel: cohortLabel || null,
-            path: String(path || userData.path || ""),
+            cohortKey: cohortKey || null,
+
+            path: String(path || userData.path || "").trim(),
+            pathId: pathId || null,
+            courseId: courseId || null,
+
             maxWeeks,
-            verifiedAt: Date.now(),
+            verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+
             paystack: {
               id: data.id || null,
               status: data.status || null,
               currency: data.currency || null,
               paidAt: data.paid_at || null,
               channel: data.channel || null,
+              metadata: meta || null,
             },
           });
 
-        res.json({ok: true, safeWeeks, maxWeeks});
-      } catch (e: unknown) {
-        const err = e as { response?: { data?: unknown }; message?: string };
-        const axiosData = err.response?.data;
+          return {alreadyProcessed: false, safeWeeks, maxWeeks};
+        });
 
-        console.error("verifyPaystackPayment error:", err);
+        res.json({
+          ok: true,
+          safeWeeks: result.safeWeeks,
+          maxWeeks: result.maxWeeks,
+          alreadyProcessed: result.alreadyProcessed,
+        });
+      } catch (e: any) {
+        const axiosData = e?.response?.data;
+
+        console.error("verifyPaystackPayment error:", e);
+
+        if (e?.code === 404) {
+          res.status(404).json({ok: false, error: "User not found"});
+          return;
+        }
 
         res.status(500).json({
           ok: false,
           error: "Server verification failed",
-          details: axiosData || err.message || String(err),
+          details: axiosData || e?.message || String(e),
         });
       }
     });

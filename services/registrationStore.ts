@@ -15,6 +15,7 @@ import {
   orderBy,
   where,
   Timestamp,
+  serverTimestamp,
 } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword,
@@ -26,6 +27,12 @@ import {
 // ✅ allow UI to send ms number / ISO string / Timestamp
 type TimestampLike = Timestamp | number | string;
 
+// ✅ removes undefined keys so Firestore never crashes
+const stripUndefined = <T extends Record<string, any>>(obj: T): T => {
+  Object.keys(obj).forEach((k) => obj[k] === undefined && delete obj[k]);
+  return obj;
+};
+
 export interface PendingPayment {
   kind: "initial" | "topup";
   status: "Pending";
@@ -35,12 +42,44 @@ export interface PendingPayment {
   createdAt: number;
 }
 
+/**
+ * ✅ NEW: Path docs (tracks) live in /paths
+ * This is the source of truth for available learning tracks.
+ */
+export type PathDoc = {
+  id: string; // Firestore doc id (stable)
+  title: string; // human label shown in UI
+  isActive?: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type PathInput = {
+  title: string;
+  isActive?: boolean;
+};
+
+type PathPatch = Partial<PathInput>;
+
+/**
+ * ✅ RegistrationEntry (backward-compatible)
+ * - Keep `path` string for existing flows.
+ * - Add `pathId` for re-engineered, data-driven flows.
+ * - Add optional `courseId` for future “specific course enrollment”.
+ */
 export interface RegistrationEntry {
   uid: string;
   fullName: string;
   email: string;
   phone: string;
+
+  // ✅ legacy string label (keep)
   path: string;
+
+  // ✅ new (preferred)
+  pathId?: string;
+  courseId?: string;
+
   ageRange: string;
   gender: string;
   weeksToCommit: number;
@@ -48,8 +87,12 @@ export interface RegistrationEntry {
   status: "Pending" | "Complete";
   role: "student" | "admin";
   timestamp: number;
-  cohortId?: string;
-  cohortLabel?: string;
+
+  // ✅ cohort grouping fields
+  cohortId?: string; // stable id e.g. FLUTTER
+  cohortLabel?: string; // human label e.g. "March 2026 Cohort"
+  cohortKey?: string; // unique schedule key e.g. FLUTTER-2026-03
+
   pendingPayment?: PendingPayment;
 }
 
@@ -64,12 +107,23 @@ export type CohortDoc = {
   id: string;
   label: string;
   isActive?: boolean;
+
+  // ✅ optional metadata (safe to add)
+  path?: string; // legacy label
+  pathId?: string; // preferred
+  cohortId?: string;
+  cohortKey?: string;
+
   createdAt: number;
   updatedAt: number;
 };
 
 export type CourseDoc = {
   id: string;
+
+  // ✅ pathId for grouping/filtering (optional to keep old docs working)
+  pathId?: string;
+
   title: string;
   duration: string; // e.g. "12 Weeks"
   sessions: string;
@@ -80,7 +134,13 @@ export type CourseDoc = {
   syllabusView?: string;
   createdAt: number;
   updatedAt: number;
+
+  // legacy
   isActive: boolean;
+
+  // ✅ visibility flags
+  showOnLanding?: boolean;
+  showInExplore?: boolean;
 
   /** optional truth fields */
   weeks?: number;
@@ -91,14 +151,18 @@ export type CourseDoc = {
 export type SessionDoc = {
   id: string;
 
-  // ✅ REQUIRED for student unlock logic
   week: number; // 1..N
-  path: string; // must match RegistrationEntry.path
+
+  // ✅ legacy string matching (kept)
+  path: string;
+
+  // ✅ preferred key for matching (new)
+  pathId?: string;
+
   isPublished: boolean;
 
   title: string;
 
-  // ✅ Store as Firestore Timestamp for proper ordering/querying
   startsAt: Timestamp;
   endsAt?: Timestamp;
 
@@ -118,7 +182,6 @@ export type SessionInput = Omit<
   endsAt?: TimestampLike;
 };
 
-// ✅ FIX: Admin can patch with number/string too
 export type SessionPatch = Partial<
   Omit<SessionDoc, "id" | "createdAt" | "updatedAt" | "startsAt" | "endsAt">
 > & {
@@ -130,79 +193,521 @@ type CourseInput = Omit<CourseDoc, "id" | "createdAt" | "updatedAt">;
 type CoursePatch = Partial<Omit<CourseDoc, "id" | "createdAt" | "updatedAt">>;
 
 const coursesColRef = collection(db, "courses");
-const cohortsColRef = collection(db, "cohorts");
 const usersColRef = collection(db, "users");
-
-export type ActiveCohort = { id: string; label: string };
+const pathsColRef = collection(db, "paths");
 
 type NewStudentEntry = Omit<
   RegistrationEntry,
-  "uid" | "role" | "status" | "timestamp"
+  | "uid"
+  | "role"
+  | "status"
+  | "timestamp"
+  | "cohortId"
+  | "cohortLabel"
+  | "cohortKey"
 >;
 
+export type ActiveCohortForPath = {
+  // legacy
+  path: string;
+  pathKey: string;
+
+  // new
+  pathId?: string;
+
+  cohortId: string; // e.g. FLUTTER
+  cohortKey: string; // e.g. FLUTTER-2026-03
+  label: string; // e.g. March 2026 Cohort
+  seasonKey: string; // e.g. 2026-03
+  updatedAt?: any;
+};
+
 export const registrationStore = {
-  // ✅ Always pull from Firestore config/app
+  // -------------------------
+  // PATH + COHORT HELPERS
+  // -------------------------
+  pathKey(path: string): string {
+    return String(path || "")
+      .trim()
+      .toLowerCase()
+      .replace(/&/g, "and")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+  },
+
+  /**
+   * ✅ Legacy mapping (kept for backward-compat)
+   * Used ONLY when pathId is missing.
+   */
+  computeCohortIdFromPath(path: string): string {
+    const p = String(path || "").toLowerCase();
+    if (p.includes("flutter")) return "FLUTTER";
+    if (p.includes("ui") && p.includes("ux")) return "UIUX";
+    if (p.includes("wordpress")) return "WORDPRESS";
+    if (p.includes("web")) return "WEB";
+    if (p.includes("ai")) return "AI";
+    const cleaned = this.pathKey(path).replace(/-/g, "").toUpperCase();
+    return cleaned.slice(0, 10) || "CWG";
+  },
+
+  computeCohortKey(cohortId: string, seasonKey: string): string {
+    const c = String(cohortId || "")
+      .trim()
+      .toUpperCase();
+    const s = String(seasonKey || "").trim();
+    return `${c}-${s}`;
+  },
+
+  defaultSeasonKey() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    return `${y}-${m}`;
+  },
+
+  // -------------------------
+  // PATH RESOLVERS (prevents path/pathId drift)
+  // -------------------------
+  async resolvePathTitle(
+    pathId?: string,
+    fallbackTitle?: string,
+  ): Promise<string> {
+    const fb = String(fallbackTitle || "").trim();
+    const id = String(pathId || "").trim();
+    if (!id) return fb;
+    const p = await this.getPath(id);
+    if (p?.title) return String(p.title).trim();
+    return fb;
+  },
+
+  async resolvePathId(pathTitle?: string): Promise<string | undefined> {
+    const title = String(pathTitle || "")
+      .trim()
+      .toLowerCase();
+    if (!title) return undefined;
+    const list = await this.getPaths(true);
+    const found = list.find(
+      (p) =>
+        String(p.title || "")
+          .trim()
+          .toLowerCase() === title,
+    );
+    return found?.id;
+  },
+
+  // =========================
+  // PATHS (Admin-managed)
+  // =========================
+  async getPaths(includeInactive = true): Promise<PathDoc[]> {
+    const q = includeInactive
+      ? query(pathsColRef, orderBy("createdAt", "asc"))
+      : query(
+          pathsColRef,
+          where("isActive", "==", true),
+          orderBy("createdAt", "asc"),
+        );
+
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as any),
+    })) as PathDoc[];
+  },
+
+  async addPath(input: PathInput): Promise<string> {
+    const title = String(input.title || "").trim();
+    if (title.length < 2) throw new Error("Path title is too short.");
+
+    const payload = stripUndefined({
+      title,
+      isActive: input.isActive ?? true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    const ref = await addDoc(pathsColRef, payload);
+    return ref.id;
+  },
+
+  async updatePath(pathId: string, patch: PathPatch): Promise<void> {
+    const clean: any = { updatedAt: Date.now() };
+    if (patch.title !== undefined)
+      clean.title = String(patch.title || "").trim();
+    if (patch.isActive !== undefined) clean.isActive = !!patch.isActive;
+    await updateDoc(doc(db, "paths", pathId), stripUndefined(clean));
+  },
+
+  async deletePath(pathId: string): Promise<void> {
+    await deleteDoc(doc(db, "paths", pathId));
+  },
+
+  async getPath(pathId: string): Promise<PathDoc | null> {
+    const snap = await getDoc(doc(db, "paths", pathId));
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...(snap.data() as any) } as PathDoc;
+  },
+
+  // -------------------------
+  // ACTIVE COHORTS (PER PATH)
+  // legacy: activeCohorts/{pathKey}
+  // new:    activeCohorts/{pathId}
+  // -------------------------
+
+  /**
+   * ✅ Preferred: use pathId (no string guessing)
+   */
+  async getActiveCohortForPathId(pathId: string): Promise<ActiveCohortForPath> {
+    const pathDoc = await this.getPath(pathId);
+    const pathTitle = pathDoc?.title || "Unknown Path";
+
+    const ref = doc(db, "activeCohorts", pathId);
+    const snap = await getDoc(ref);
+
+    const fallbackSeasonKey = this.defaultSeasonKey();
+    const fallbackCohortId = this.computeCohortIdFromPath(pathTitle);
+
+    if (!snap.exists()) {
+      const cohortId = fallbackCohortId;
+      const seasonKey = fallbackSeasonKey;
+      return {
+        path: pathTitle,
+        pathKey: this.pathKey(pathTitle),
+        pathId,
+        cohortId,
+        seasonKey,
+        cohortKey: this.computeCohortKey(cohortId, seasonKey),
+        label: "Current Cohort",
+      };
+    }
+
+    const data = snap.data() as any;
+
+    const cohortId = String(data.cohortId || fallbackCohortId);
+    const seasonKey = String(data.seasonKey || fallbackSeasonKey);
+
+    const cohortKey =
+      String(data.cohortKey || "").trim() ||
+      this.computeCohortKey(cohortId, seasonKey);
+
+    const label =
+      String(data.label || "").trim() || `${cohortId} (${seasonKey})`;
+
+    return {
+      path: String(data.path || pathTitle),
+      pathKey: String(data.pathKey || this.pathKey(pathTitle)),
+      pathId,
+      cohortId,
+      seasonKey,
+      cohortKey,
+      label,
+      updatedAt: data.updatedAt,
+    };
+  },
+
+  /**
+   * ✅ Preferred: set active cohort by pathId
+   * ✅ ALSO sync legacy activeCohorts/{pathKey} to avoid split-brain.
+   */
+  async setActiveCohortForPathId(
+    pathId: string,
+    input: { seasonKey: string; seasonLabel: string; cohortId?: string },
+  ): Promise<ActiveCohortForPath> {
+    const pathDoc = await this.getPath(pathId);
+    if (!pathDoc) throw new Error("Path not found. Create the path first.");
+
+    const pathTitle = String(pathDoc.title || "").trim();
+    const pathKey = this.pathKey(pathTitle);
+
+    const cohortId = String(
+      input.cohortId || this.computeCohortIdFromPath(pathTitle),
+    )
+      .trim()
+      .toUpperCase();
+
+    const seasonKey = String(input.seasonKey || "").trim();
+    const label = String(input.seasonLabel || "").trim();
+
+    if (!seasonKey) throw new Error("seasonKey is required (e.g. 2026-03).");
+    if (!label) throw new Error("seasonLabel is required.");
+
+    const cohortKey = this.computeCohortKey(cohortId, seasonKey);
+
+    // new: activeCohorts/{pathId}
+    await setDoc(
+      doc(db, "activeCohorts", pathId),
+      stripUndefined({
+        pathId,
+        path: pathTitle,
+        pathKey,
+        cohortId,
+        seasonKey,
+        cohortKey,
+        label,
+        updatedAt: serverTimestamp(),
+      }),
+      { merge: true },
+    );
+
+    // ✅ legacy sync: activeCohorts/{pathKey}
+    await setDoc(
+      doc(db, "activeCohorts", pathKey),
+      stripUndefined({
+        path: pathTitle,
+        pathKey,
+        cohortId,
+        seasonKey,
+        cohortKey,
+        label,
+        updatedAt: serverTimestamp(),
+      }),
+      { merge: true },
+    );
+
+    // ensure cohorts/{cohortKey} exists
+    const cohortRef = doc(db, "cohorts", cohortKey);
+    const cohortSnap = await getDoc(cohortRef);
+
+    if (!cohortSnap.exists()) {
+      await setDoc(
+        cohortRef,
+        stripUndefined({
+          label,
+          isActive: true,
+
+          // metadata (safe)
+          pathId,
+          path: pathTitle,
+          cohortId,
+          cohortKey,
+
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }),
+        { merge: false },
+      );
+    } else {
+      await updateDoc(
+        cohortRef,
+        stripUndefined({ label, updatedAt: Date.now() }),
+      );
+    }
+
+    return {
+      path: pathTitle,
+      pathKey,
+      pathId,
+      cohortId,
+      seasonKey,
+      cohortKey,
+      label,
+    };
+  },
+
+  /**
+   * ✅ Legacy (kept): path string → activeCohorts/{pathKey}
+   */
+  async getActiveCohortForPath(path: string): Promise<ActiveCohortForPath> {
+    const pathKey = this.pathKey(path);
+    const ref = doc(db, "activeCohorts", pathKey);
+    const snap = await getDoc(ref);
+
+    const fallbackSeasonKey = this.defaultSeasonKey();
+    const fallbackCohortId = this.computeCohortIdFromPath(path);
+
+    if (!snap.exists()) {
+      const cohortId = fallbackCohortId;
+      const seasonKey = fallbackSeasonKey;
+      return {
+        path,
+        pathKey,
+        cohortId,
+        seasonKey,
+        cohortKey: this.computeCohortKey(cohortId, seasonKey),
+        label: "Current Cohort",
+      };
+    }
+
+    const data = snap.data() as any;
+
+    const cohortId = String(data.cohortId || fallbackCohortId);
+    const seasonKey = String(data.seasonKey || fallbackSeasonKey);
+
+    const cohortKey =
+      String(data.cohortKey || "").trim() ||
+      this.computeCohortKey(cohortId, seasonKey);
+
+    const label =
+      String(data.label || "").trim() || `${cohortId} (${seasonKey})`;
+
+    return {
+      path,
+      pathKey,
+      cohortId,
+      seasonKey,
+      cohortKey,
+      label,
+      updatedAt: data.updatedAt,
+    };
+  },
+
+  async setActiveCohortForPath(
+    path: string,
+    input: { seasonKey: string; seasonLabel: string; cohortId?: string },
+  ): Promise<ActiveCohortForPath> {
+    const pathKey = this.pathKey(path);
+    const cohortId = String(
+      input.cohortId || this.computeCohortIdFromPath(path),
+    )
+      .trim()
+      .toUpperCase();
+
+    const seasonKey = String(input.seasonKey || "").trim();
+    const label = String(input.seasonLabel || "").trim();
+
+    if (!seasonKey) throw new Error("seasonKey is required (e.g. 2026-03).");
+    if (!label) throw new Error("seasonLabel is required.");
+
+    const cohortKey = this.computeCohortKey(cohortId, seasonKey);
+
+    await setDoc(
+      doc(db, "activeCohorts", pathKey),
+      stripUndefined({
+        path: String(path || "").trim(),
+        pathKey,
+        cohortId,
+        seasonKey,
+        cohortKey,
+        label,
+        updatedAt: serverTimestamp(),
+      }),
+      { merge: true },
+    );
+
+    // ensure cohorts/{cohortKey} exists
+    const cohortRef = doc(db, "cohorts", cohortKey);
+    const cohortSnap = await getDoc(cohortRef);
+
+    if (!cohortSnap.exists()) {
+      await setDoc(
+        cohortRef,
+        {
+          label,
+          isActive: true,
+          path: String(path || "").trim(),
+          cohortId,
+          cohortKey,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        { merge: false },
+      );
+    } else {
+      await updateDoc(cohortRef, { label, updatedAt: Date.now() });
+    }
+
+    return { path, pathKey, cohortId, seasonKey, cohortKey, label };
+  },
+
+  // -------------------------
+  // LEGACY GLOBAL ACTIVE COHORT (optional)
+  // -------------------------
   async getActiveCohort(): Promise<{ id: string; label: string }> {
     try {
       const ref = doc(db, "config", "app");
       const snap = await getDoc(ref);
-
-      if (!snap.exists()) {
-        console.warn("config/app missing");
-        return { id: "CWG-DEFAULT", label: "Current Cohort" };
-      }
-
+      if (!snap.exists()) return { id: "CWG-DEFAULT", label: "Current Cohort" };
       const data = snap.data() as any;
       const id = data?.activeCohortId;
       const label = data?.activeCohortLabel;
-
-      if (!id || !label) {
-        console.warn("config/app fields missing:", data);
-        return { id: "CWG-DEFAULT", label: "Current Cohort" };
-      }
-
+      if (!id || !label) return { id: "CWG-DEFAULT", label: "Current Cohort" };
       return { id, label };
-    } catch (e) {
-      console.error("getActiveCohort failed:", e);
+    } catch {
       return { id: "CWG-DEFAULT", label: "Current Cohort" };
     }
   },
 
-  async updateUserCohort(uid: string, cohortId: string, cohortLabel: string) {
-    await updateDoc(doc(db, "users", uid), { cohortId, cohortLabel });
+  async setActiveCohort(id: string, label: string): Promise<void> {
+    await setDoc(
+      doc(db, "config", "app"),
+      {
+        activeCohortId: String(id || "").trim(),
+        activeCohortLabel: String(label || "").trim(),
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    );
   },
 
-  // ✅ Register (Auth) + profile (Firestore)
+  // -------------------------
+  // USERS
+  // -------------------------
   async createAccount(
     entry: NewStudentEntry,
     password: string,
   ): Promise<string> {
+    const email = String((entry as any).email || "").trim();
+    if (!email) throw new Error("Email is required.");
+
     const userCredential = await createUserWithEmailAndPassword(
       auth,
-      entry.email,
+      email,
       password,
     );
     const user = userCredential.user;
 
-    // ✅ Use cohort coming from Registration. Fallback to active cohort.
-    let cohortId = (entry as any).cohortId;
-    let cohortLabel = (entry as any).cohortLabel;
+    // -------------------------
+    // ✅ Normalize path + pathId (prevents drift)
+    // -------------------------
+    const entryPathIdRaw = (entry as any).pathId
+      ? String((entry as any).pathId).trim()
+      : "";
+    const entryPathTitleRaw = String((entry as any).path || "").trim();
 
-    if (!cohortId || !cohortLabel) {
-      const active = await this.getActiveCohort();
-      cohortId = active.id;
-      cohortLabel = active.label;
-    }
+    // if UI sent pathId, force title from /paths (source of truth)
+    const resolvedTitleFromId = entryPathIdRaw
+      ? await this.resolvePathTitle(entryPathIdRaw, entryPathTitleRaw)
+      : entryPathTitleRaw;
 
-    const profile: RegistrationEntry = {
+    // if UI did NOT send pathId, try to infer it from title
+    const resolvedIdFromTitle = !entryPathIdRaw
+      ? await this.resolvePathId(resolvedTitleFromId)
+      : undefined;
+
+    const finalPathId = entryPathIdRaw || resolvedIdFromTitle || undefined;
+
+    // pick active cohort using finalPathId when possible
+    let active: ActiveCohortForPath;
+    if (finalPathId) active = await this.getActiveCohortForPathId(finalPathId);
+    else active = await this.getActiveCohortForPath(resolvedTitleFromId);
+
+    // always store a valid legacy path string
+    const resolvedPath =
+      resolvedTitleFromId || String(active.path || "").trim();
+    if (!resolvedPath) throw new Error("Path is required.");
+
+    const profile: RegistrationEntry = stripUndefined({
       ...(entry as any),
       uid: user.uid,
       role: "student",
       status: "Pending",
       timestamp: Date.now(),
-      cohortId,
-      cohortLabel,
-    };
+
+      // ✅ always store legacy label
+      path: resolvedPath,
+
+      // ✅ store normalized pathId if we have it
+      pathId:
+        finalPathId || (active.pathId ? String(active.pathId) : undefined),
+
+      // optional course enrollment
+      courseId: (entry as any).courseId
+        ? String((entry as any).courseId).trim()
+        : undefined,
+
+      cohortId: active.cohortId,
+      cohortLabel: active.label,
+      cohortKey: active.cohortKey,
+    });
 
     await setDoc(doc(db, "users", user.uid), profile);
     return user.uid;
@@ -211,6 +716,28 @@ export const registrationStore = {
   async login(email: string, password: string): Promise<string> {
     const cred = await signInWithEmailAndPassword(auth, email, password);
     return cred.user.uid;
+  },
+
+  async updateUserCohortFields(
+    uid: string,
+    patch: Partial<
+      Pick<
+        RegistrationEntry,
+        | "cohortId"
+        | "cohortLabel"
+        | "cohortKey"
+        | "pathId"
+        | "path"
+        | "courseId"
+      >
+    >,
+  ): Promise<void> {
+    const clean: any = stripUndefined({
+      ...patch,
+      updatedAt: Date.now(),
+    });
+
+    await updateDoc(doc(db, "users", uid), clean);
   },
 
   async setPendingPayment(
@@ -222,9 +749,7 @@ export const registrationStore = {
       reference: string;
     },
   ): Promise<void> {
-    const userRef = doc(db, "users", uid);
-
-    await updateDoc(userRef, {
+    await updateDoc(doc(db, "users", uid), {
       pendingPayment: {
         kind: pending.kind,
         status: "Pending",
@@ -237,8 +762,7 @@ export const registrationStore = {
   },
 
   async clearPendingPayment(uid: string): Promise<void> {
-    const userRef = doc(db, "users", uid);
-    await updateDoc(userRef, { pendingPayment: deleteField() });
+    await updateDoc(doc(db, "users", uid), { pendingPayment: deleteField() });
   },
 
   async resetPassword(email: string): Promise<void> {
@@ -270,9 +794,7 @@ export const registrationStore = {
     amount: number,
     reference: string,
   ): Promise<void> {
-    const userRef = doc(db, "users", uid);
-
-    await updateDoc(userRef, {
+    await updateDoc(doc(db, "users", uid), {
       weeksToCommit: increment(additionalWeeks),
       status: "Complete",
       pendingPayment: deleteField(),
@@ -290,21 +812,444 @@ export const registrationStore = {
     await deleteDoc(doc(db, "users", uid));
   },
 
-  async clearAll(): Promise<void> {
-    const snap = await getDocs(usersColRef);
-    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+  // =========================
+  // COHORT SESSIONS
+  // =========================
+  _sessionsCol(cohortDocId: string) {
+    // ✅ cohortDocId should be the cohort document ID (usually cohortKey like FLUTTER-2026-03)
+    return collection(db, "cohorts", cohortDocId, "sessions");
   },
 
-  async setActiveCohort(id: string, label: string): Promise<void> {
+  _toTimestamp(input: TimestampLike): Timestamp {
+    if (!input) throw new Error("startsAt is required");
+    if (input instanceof Timestamp) return input;
+
+    if (typeof input === "number") return Timestamp.fromMillis(input);
+
+    if (typeof input === "string") {
+      const d = new Date(input);
+      if (isNaN(d.getTime())) throw new Error("Invalid date string");
+      return Timestamp.fromDate(d);
+    }
+
+    if (
+      (input as any)?.toMillis &&
+      typeof (input as any).toMillis === "function"
+    ) {
+      return input as any as Timestamp;
+    }
+
+    throw new Error("Invalid startsAt format");
+  },
+
+  _sanitizeSessionInput(
+    input: any,
+  ): Omit<SessionDoc, "id" | "createdAt" | "updatedAt"> {
+    const week = Number(input.week);
+    if (!Number.isFinite(week) || week < 1)
+      throw new Error("Week must be >= 1");
+
+    const pathId = input.pathId ? String(input.pathId).trim() : undefined;
+
+    // ✅ Keep legacy path required for now (backward-compatible)
+    // If a caller sends pathId but forgets title, avoid crashing hard:
+    let path = String(input.path || "").trim();
+    if (!path && pathId) path = "Unknown Path";
+    if (!path) throw new Error("Session path (title) is required.");
+
+    const title = String(input.title || "").trim();
+    if (!title) throw new Error("Session title is required.");
+
+    const startsAt = this._toTimestamp(input.startsAt);
+
+    let endsAt: Timestamp | undefined = undefined;
+    if (input.endsAt) endsAt = this._toTimestamp(input.endsAt);
+
+    return stripUndefined({
+      week: Math.floor(week),
+      path,
+      pathId,
+      isPublished: !!input.isPublished,
+      title,
+      startsAt,
+      endsAt,
+      joinUrl: input.joinUrl ? String(input.joinUrl).trim() : "",
+      durationMins:
+        input.durationMins !== undefined
+          ? Math.max(15, Math.floor(Number(input.durationMins)))
+          : 60,
+      notes: input.notes ? String(input.notes).trim() : "",
+    });
+  },
+
+  async getCohortSessions(cohortDocId: string): Promise<SessionDoc[]> {
+    try {
+      const snap = await getDocs(
+        query(
+          this._sessionsCol(cohortDocId),
+          orderBy("week", "asc"),
+          orderBy("startsAt", "asc"),
+        ),
+      );
+
+      return snap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as any),
+      })) as SessionDoc[];
+    } catch (e: any) {
+      // ✅ common: missing composite index
+      const msg = String(e?.message || "");
+      const code = String(e?.code || "");
+
+      // Try a safe fallback query so sessions still appear
+      if (
+        code === "failed-precondition" ||
+        msg.toLowerCase().includes("index")
+      ) {
+        const snap2 = await getDocs(
+          query(this._sessionsCol(cohortDocId), orderBy("week", "asc")),
+        );
+
+        return snap2.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as any),
+        })) as SessionDoc[];
+      }
+
+      throw e;
+    }
+  },
+
+  async addCohortSession(
+    cohortDocId: string,
+    input: SessionInput,
+  ): Promise<string> {
+    const clean = this._sanitizeSessionInput(input);
+
+    // ✅ deterministic id => no duplicates
+    const date = new Date(
+      typeof clean.startsAt?.toMillis === "function"
+        ? clean.startsAt.toMillis()
+        : Number(clean.startsAt),
+    );
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const dd = String(date.getDate()).padStart(2, "0");
+    const hh = String(date.getHours()).padStart(2, "0");
+    const min = String(date.getMinutes()).padStart(2, "0");
+
+    const safePathId =
+      String((clean as any).pathId || "nopid").trim() || "nopid";
+    const safeWeek = String(clean.week || 1).padStart(2, "0");
+
+    const sessionId = `W${safeWeek}_${yyyy}${mm}${dd}_${hh}${min}_${safePathId}`;
+
+    const payload = stripUndefined({
+      ...clean,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
     await setDoc(
-      doc(db, "config", "app"),
-      {
-        activeCohortId: String(id || "").trim(),
-        activeCohortLabel: String(label || "").trim(),
-        updatedAt: Date.now(),
-      },
+      doc(db, "cohorts", cohortDocId, "sessions", sessionId),
+      payload,
+      { merge: false },
+    );
+    return sessionId;
+  },
+
+  async upsertCohortSession(
+    cohortDocId: string,
+    sessionId: string,
+    input: SessionInput,
+  ): Promise<string> {
+    const clean = this._sanitizeSessionInput(input);
+    const payload = stripUndefined({
+      ...clean,
+      id: sessionId,
+      updatedAt: Date.now(),
+      createdAt: Date.now(), // if already exists, merge keeps old if you want; we’ll merge
+    });
+
+    await setDoc(
+      doc(db, "cohorts", cohortDocId, "sessions", sessionId),
+      payload,
       { merge: true },
     );
+
+    return sessionId;
+  },
+
+  async updateCohortSession(
+    cohortDocId: string,
+    sessionId: string,
+    patch: SessionPatch,
+  ): Promise<void> {
+    const clean: any = { updatedAt: Date.now() };
+
+    if (patch.week !== undefined) {
+      const w = Number(patch.week);
+      if (!Number.isFinite(w) || w < 1) throw new Error("Week must be >= 1.");
+      clean.week = Math.floor(w);
+    }
+
+    if (patch.path !== undefined) clean.path = String(patch.path || "").trim();
+    if ((patch as any).pathId !== undefined) {
+      const v = String((patch as any).pathId || "").trim();
+      clean.pathId = v ? v : deleteField(); // allow clearing
+    }
+
+    if (patch.title !== undefined)
+      clean.title = String(patch.title || "").trim();
+    if (patch.joinUrl !== undefined)
+      clean.joinUrl = String(patch.joinUrl || "").trim();
+    if (patch.isPublished !== undefined)
+      clean.isPublished = !!patch.isPublished;
+
+    if (patch.durationMins !== undefined)
+      clean.durationMins = Math.max(15, Math.floor(Number(patch.durationMins)));
+    if (patch.notes !== undefined)
+      clean.notes = String(patch.notes || "").trim();
+
+    if (patch.startsAt !== undefined)
+      clean.startsAt = this._toTimestamp(patch.startsAt);
+
+    if (patch.endsAt !== undefined) {
+      if (
+        patch.endsAt === null ||
+        patch.endsAt === "" ||
+        (patch as any).endsAt === false
+      ) {
+        clean.endsAt = deleteField();
+      } else {
+        clean.endsAt = this._toTimestamp(patch.endsAt as TimestampLike);
+      }
+    }
+
+    await updateDoc(
+      doc(db, "cohorts", cohortDocId, "sessions", sessionId),
+      stripUndefined(clean),
+    );
+  },
+
+  async deleteCohortSession(
+    cohortDocId: string,
+    sessionId: string,
+  ): Promise<void> {
+    await deleteDoc(doc(db, "cohorts", cohortDocId, "sessions", sessionId));
+  },
+
+  // =========================
+  // COURSES (Admin-managed)
+  // =========================
+  async getCourses(): Promise<CourseDoc[]> {
+    const snap = await getDocs(
+      query(coursesColRef, orderBy("createdAt", "asc")),
+    );
+    return snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as any),
+    })) as CourseDoc[];
+  },
+
+  _sanitizeSyllabus(syllabus: any, weeks?: number): SyllabusWeek[] {
+    const list: any[] = Array.isArray(syllabus) ? syllabus : [];
+
+    const clean = list
+      .filter(Boolean)
+      .map((w: any, idx: number) => ({
+        week: idx + 1,
+        title: String(w?.title || "").trim(),
+        topics: Array.isArray(w?.topics)
+          ? w.topics.map((t: any) => String(t).trim()).filter(Boolean)
+          : [],
+      }))
+      .filter((w) => w.title.length > 0 || w.topics.length > 0);
+
+    const limit =
+      weeks && Number.isFinite(weeks)
+        ? Math.max(1, Math.floor(weeks))
+        : clean.length;
+
+    return clean.slice(0, limit);
+  },
+
+  async addCourse(input: CourseInput): Promise<string> {
+    const weeks =
+      input.weeks !== undefined &&
+      Number.isFinite(input.weeks) &&
+      (input.weeks as number) > 0
+        ? Math.floor(input.weeks as number)
+        : undefined;
+
+    const pricePerWeek =
+      input.pricePerWeek !== undefined &&
+      Number.isFinite(input.pricePerWeek) &&
+      (input.pricePerWeek as number) >= 0
+        ? Math.floor(input.pricePerWeek as number)
+        : undefined;
+
+    const syllabus = this._sanitizeSyllabus((input as any).syllabus, weeks);
+
+    const showInExplore = input.showInExplore ?? true;
+    const showOnLanding = input.showOnLanding ?? input.isActive ?? true;
+
+    const cleanPayload: any = stripUndefined({
+      pathId: (input as any).pathId
+        ? String((input as any).pathId).trim()
+        : undefined,
+
+      title: String(input.title || "").trim(),
+      duration: String(input.duration || "").trim(),
+      sessions: String(input.sessions || "").trim(),
+      level: String(input.level || "").trim(),
+      description: String(input.description || "").trim(),
+      priceLabel: String(input.priceLabel || ""),
+      imageUrl: String(input.imageUrl || ""),
+      syllabusView: String(input.syllabusView || ""),
+
+      isActive: input.isActive ?? true,
+      showOnLanding,
+      showInExplore,
+
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    if (weeks !== undefined) cleanPayload.weeks = weeks;
+    if (pricePerWeek !== undefined) cleanPayload.pricePerWeek = pricePerWeek;
+    if (syllabus.length > 0) cleanPayload.syllabus = syllabus;
+
+    const ref = await addDoc(coursesColRef, cleanPayload);
+    return ref.id;
+  },
+
+  async updateCourse(courseId: string, patch: CoursePatch): Promise<void> {
+    const cleanPatch: any = { updatedAt: Date.now() };
+
+    if ((patch as any).pathId !== undefined) {
+      const v = String((patch as any).pathId || "").trim();
+      cleanPatch.pathId = v ? v : deleteField(); // allow clearing
+    }
+
+    if (patch.title !== undefined)
+      cleanPatch.title = String(patch.title).trim();
+    if (patch.duration !== undefined)
+      cleanPatch.duration = String(patch.duration).trim();
+    if (patch.sessions !== undefined)
+      cleanPatch.sessions = String(patch.sessions).trim();
+    if (patch.level !== undefined)
+      cleanPatch.level = String(patch.level).trim();
+    if (patch.description !== undefined)
+      cleanPatch.description = String(patch.description).trim();
+    if (patch.priceLabel !== undefined)
+      cleanPatch.priceLabel = String(patch.priceLabel);
+    if (patch.imageUrl !== undefined)
+      cleanPatch.imageUrl = String(patch.imageUrl);
+    if (patch.syllabusView !== undefined)
+      cleanPatch.syllabusView = String(patch.syllabusView);
+
+    if (patch.isActive !== undefined) cleanPatch.isActive = !!patch.isActive;
+    if ((patch as any).showOnLanding !== undefined)
+      cleanPatch.showOnLanding = !!(patch as any).showOnLanding;
+    if ((patch as any).showInExplore !== undefined)
+      cleanPatch.showInExplore = !!(patch as any).showInExplore;
+
+    if (patch.weeks !== undefined) {
+      const w = Number(patch.weeks);
+      if (Number.isFinite(w) && w > 0) cleanPatch.weeks = Math.floor(w);
+    }
+
+    if (patch.pricePerWeek !== undefined) {
+      const p = Number(patch.pricePerWeek);
+      if (Number.isFinite(p) && p >= 0) cleanPatch.pricePerWeek = Math.floor(p);
+    }
+
+    if ((patch as any).syllabus !== undefined) {
+      const weeksHint =
+        cleanPatch.weeks !== undefined
+          ? cleanPatch.weeks
+          : patch.weeks !== undefined
+            ? Number(patch.weeks)
+            : undefined;
+
+      cleanPatch.syllabus = this._sanitizeSyllabus(
+        (patch as any).syllabus,
+        weeksHint,
+      );
+    }
+
+    await updateDoc(doc(db, "courses", courseId), stripUndefined(cleanPatch));
+  },
+
+  async deleteCourse(courseId: string): Promise<void> {
+    await deleteDoc(doc(db, "courses", courseId));
+  },
+
+  // ✅ Student unlock helper (upgraded: prefer pathId, fallback to path string)
+  async getUnlockedSessionsForStudent(
+    profile: RegistrationEntry,
+  ): Promise<SessionDoc[]> {
+    let cohortDocId = profile.cohortKey || profile.cohortId;
+
+    if (!cohortDocId) {
+      if (profile.pathId) {
+        const active = await this.getActiveCohortForPathId(profile.pathId);
+        cohortDocId = active.cohortKey || active.cohortId;
+      } else {
+        const active = await this.getActiveCohortForPath(profile.path);
+        cohortDocId = active.cohortKey || active.cohortId;
+      }
+    }
+
+    const paidWeeks = Math.max(0, Number(profile.weeksToCommit || 0));
+    if (!cohortDocId || paidWeeks <= 0) return [];
+
+    // ✅ Preferred query: match by pathId if present
+    if (profile.pathId) {
+      const snap = await getDocs(
+        query(
+          this._sessionsCol(cohortDocId),
+          where("pathId", "==", profile.pathId),
+          where("isPublished", "==", true),
+          where("week", "<=", paidWeeks),
+          orderBy("week", "asc"),
+          orderBy("startsAt", "asc"),
+        ),
+      );
+
+      const byId = snap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as any),
+      })) as SessionDoc[];
+      // ✅ Fallback during migration: old sessions may not have pathId
+      if (byId.length > 0) return byId;
+    }
+
+    // ✅ Legacy query: match by path string
+    const snap = await getDocs(
+      query(
+        this._sessionsCol(cohortDocId),
+        where("path", "==", profile.path),
+        where("isPublished", "==", true),
+        where("week", "<=", paidWeeks),
+        orderBy("week", "asc"),
+        orderBy("startsAt", "asc"),
+      ),
+    );
+
+    return snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as any),
+    })) as SessionDoc[];
+  },
+
+  // =========================
+  // ADMIN: CLEAR ALL USERS
+  // =========================
+  async clearAll(): Promise<void> {
+    const snap = await getDocs(collection(db, "users"));
+    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
   },
 
   // =========================
@@ -350,168 +1295,11 @@ export const registrationStore = {
     if (patch.label !== undefined)
       cleanPatch.label = String(patch.label).trim();
     if (patch.isActive !== undefined) cleanPatch.isActive = !!patch.isActive;
-    await updateDoc(doc(db, "cohorts", cohortId), cleanPatch);
+    await updateDoc(doc(db, "cohorts", cohortId), stripUndefined(cleanPatch));
   },
 
   async deleteCohort(cohortId: string): Promise<void> {
     await deleteDoc(doc(db, "cohorts", cohortId));
-  },
-
-  // =========================
-  // COHORT SESSIONS (Admin-managed)
-  // /cohorts/{cohortId}/sessions/{sessionId}
-  // =========================
-
-  _sessionsCol(cohortId: string) {
-    return collection(db, "cohorts", cohortId, "sessions");
-  },
-
-  _toTimestamp(input: TimestampLike): Timestamp {
-    if (!input) throw new Error("startsAt is required");
-    if (input instanceof Timestamp) return input;
-
-    if (typeof input === "number") return Timestamp.fromMillis(input);
-
-    if (typeof input === "string") {
-      const d = new Date(input);
-      if (isNaN(d.getTime()))
-        throw new Error("Invalid date string for startsAt");
-      return Timestamp.fromDate(d);
-    }
-
-    if (
-      (input as any)?.toMillis &&
-      typeof (input as any).toMillis === "function"
-    )
-      return input as any as Timestamp;
-
-    throw new Error("Invalid startsAt format");
-  },
-
-  _sanitizeSessionInput(
-    input: any,
-  ): Omit<SessionDoc, "id" | "createdAt" | "updatedAt"> {
-    const week = Number(input.week);
-    if (!Number.isFinite(week) || week < 1)
-      throw new Error("Session week must be >= 1.");
-
-    const path = String(input.path || "").trim();
-    if (!path) throw new Error("Session path is required.");
-
-    const title = String(input.title || "").trim();
-    if (!title) throw new Error("Session title is required.");
-
-    const isPublished = !!input.isPublished;
-
-    const startsAt = this._toTimestamp(input.startsAt);
-
-    let endsAt: Timestamp | undefined = undefined;
-    if (input.endsAt) endsAt = this._toTimestamp(input.endsAt);
-
-    const joinUrl = input.joinUrl ? String(input.joinUrl).trim() : "";
-    const durationMins =
-      input.durationMins !== undefined
-        ? Math.max(15, Math.floor(Number(input.durationMins)))
-        : 60;
-    const notes = input.notes ? String(input.notes).trim() : "";
-
-    return {
-      week: Math.floor(week),
-      path,
-      isPublished,
-      title,
-      startsAt,
-      endsAt,
-      joinUrl,
-      durationMins,
-      notes,
-    };
-  },
-
-  async getCohortSessions(cohortId: string): Promise<SessionDoc[]> {
-    const snap = await getDocs(
-      query(
-        this._sessionsCol(cohortId),
-        orderBy("week", "asc"),
-        orderBy("startsAt", "asc"),
-      ),
-    );
-
-    return snap.docs.map((d) => ({
-      id: d.id,
-      ...(d.data() as any),
-    })) as SessionDoc[];
-  },
-
-  async addCohortSession(
-    cohortId: string,
-    input: SessionInput,
-  ): Promise<string> {
-    const clean = this._sanitizeSessionInput(input);
-
-    const ref = await addDoc(this._sessionsCol(cohortId), {
-      ...clean,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-
-    return ref.id;
-  },
-
-  async updateCohortSession(
-    cohortId: string,
-    sessionId: string,
-    patch: SessionPatch,
-  ): Promise<void> {
-    const clean: any = { updatedAt: Date.now() };
-
-    if (patch.week !== undefined) {
-      const w = Number(patch.week);
-      if (!Number.isFinite(w) || w < 1) throw new Error("Week must be >= 1.");
-      clean.week = Math.floor(w);
-    }
-
-    if (patch.path !== undefined) clean.path = String(patch.path || "").trim();
-    if (patch.title !== undefined)
-      clean.title = String(patch.title || "").trim();
-    if (patch.joinUrl !== undefined)
-      clean.joinUrl = String(patch.joinUrl || "").trim();
-    if (patch.isPublished !== undefined)
-      clean.isPublished = !!patch.isPublished;
-
-    if (patch.durationMins !== undefined) {
-      clean.durationMins = Math.max(15, Math.floor(Number(patch.durationMins)));
-    }
-
-    if (patch.notes !== undefined)
-      clean.notes = String(patch.notes || "").trim();
-
-    // ✅ accepts number/string/timestamp
-    if (patch.startsAt !== undefined) {
-      clean.startsAt = this._toTimestamp(patch.startsAt);
-    }
-
-    // ✅ allow clearing endsAt
-    if (patch.endsAt !== undefined) {
-      if (
-        patch.endsAt === null ||
-        patch.endsAt === "" ||
-        (patch as any).endsAt === false
-      ) {
-        clean.endsAt = deleteField();
-      } else {
-        clean.endsAt = this._toTimestamp(patch.endsAt as TimestampLike);
-      }
-    }
-
-    await updateDoc(doc(db, "cohorts", cohortId, "sessions", sessionId), clean);
-  },
-
-  async deleteCohortSession(
-    cohortId: string,
-    sessionId: string,
-  ): Promise<void> {
-    await deleteDoc(doc(db, "cohorts", cohortId, "sessions", sessionId));
   },
 
   // =========================
@@ -549,157 +1337,5 @@ export const registrationStore = {
       pending.amount,
       pending.reference,
     );
-  },
-
-  // =========================
-  // COURSES (Admin-managed)
-  // =========================
-  _sanitizeSyllabus(raw: any, weeksHint?: number): SyllabusWeek[] {
-    const safeWeeks =
-      Number.isFinite(weeksHint) && (weeksHint as number) > 0
-        ? Math.floor(weeksHint as number)
-        : undefined;
-
-    if (!Array.isArray(raw)) return [];
-
-    const cleaned = raw
-      .filter(Boolean)
-      .map((w: any, idx: number) => {
-        const title = String(w?.title || "").trim();
-        const topics = Array.isArray(w?.topics)
-          ? w.topics.map((t: any) => String(t).trim()).filter(Boolean)
-          : [];
-        return { week: idx + 1, title, topics } as SyllabusWeek;
-      })
-      .filter((w: SyllabusWeek) => w.title.length > 0 || w.topics.length > 0);
-
-    if (safeWeeks) return cleaned.slice(0, safeWeeks);
-    return cleaned;
-  },
-
-  async getCourses(): Promise<CourseDoc[]> {
-    const snap = await getDocs(
-      query(coursesColRef, orderBy("createdAt", "asc")),
-    );
-    return snap.docs.map((d) => ({
-      id: d.id,
-      ...(d.data() as any),
-    })) as CourseDoc[];
-  },
-
-  async addCourse(input: CourseInput): Promise<string> {
-    const weeks =
-      input.weeks !== undefined &&
-      Number.isFinite(input.weeks) &&
-      (input.weeks as number) > 0
-        ? Math.floor(input.weeks as number)
-        : undefined;
-
-    const pricePerWeek =
-      input.pricePerWeek !== undefined &&
-      Number.isFinite(input.pricePerWeek) &&
-      (input.pricePerWeek as number) >= 0
-        ? Math.floor(input.pricePerWeek as number)
-        : undefined;
-
-    const syllabus = this._sanitizeSyllabus((input as any).syllabus, weeks);
-
-    const cleanPayload: any = {
-      title: String(input.title || "").trim(),
-      duration: String(input.duration || "").trim(),
-      sessions: String(input.sessions || "").trim(),
-      level: String(input.level || "").trim(),
-      description: String(input.description || "").trim(),
-      priceLabel: String(input.priceLabel || ""),
-      imageUrl: String(input.imageUrl || ""),
-      syllabusView: String(input.syllabusView || ""),
-      isActive: input.isActive ?? true,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    if (weeks !== undefined) cleanPayload.weeks = weeks;
-    if (pricePerWeek !== undefined) cleanPayload.pricePerWeek = pricePerWeek;
-    if (syllabus.length > 0) cleanPayload.syllabus = syllabus;
-
-    const ref = await addDoc(collection(db, "courses"), cleanPayload);
-    return ref.id;
-  },
-
-  async updateCourse(courseId: string, patch: CoursePatch): Promise<void> {
-    const cleanPatch: any = { updatedAt: Date.now() };
-
-    if (patch.title !== undefined)
-      cleanPatch.title = String(patch.title).trim();
-    if (patch.duration !== undefined)
-      cleanPatch.duration = String(patch.duration).trim();
-    if (patch.sessions !== undefined)
-      cleanPatch.sessions = String(patch.sessions).trim();
-    if (patch.level !== undefined)
-      cleanPatch.level = String(patch.level).trim();
-    if (patch.description !== undefined)
-      cleanPatch.description = String(patch.description).trim();
-    if (patch.priceLabel !== undefined)
-      cleanPatch.priceLabel = String(patch.priceLabel);
-    if (patch.imageUrl !== undefined)
-      cleanPatch.imageUrl = String(patch.imageUrl);
-    if (patch.syllabusView !== undefined)
-      cleanPatch.syllabusView = String(patch.syllabusView);
-    if (patch.isActive !== undefined) cleanPatch.isActive = !!patch.isActive;
-
-    if (patch.weeks !== undefined) {
-      const w = Number(patch.weeks);
-      if (Number.isFinite(w) && w > 0) cleanPatch.weeks = Math.floor(w);
-    }
-
-    if (patch.pricePerWeek !== undefined) {
-      const p = Number(patch.pricePerWeek);
-      if (Number.isFinite(p) && p >= 0) cleanPatch.pricePerWeek = Math.floor(p);
-    }
-
-    if ((patch as any).syllabus !== undefined) {
-      const weeksHint =
-        cleanPatch.weeks !== undefined
-          ? cleanPatch.weeks
-          : patch.weeks !== undefined
-            ? Number(patch.weeks)
-            : undefined;
-
-      cleanPatch.syllabus = this._sanitizeSyllabus(
-        (patch as any).syllabus,
-        weeksHint,
-      );
-    }
-
-    await updateDoc(doc(db, "courses", courseId), cleanPatch);
-  },
-
-  async deleteCourse(courseId: string): Promise<void> {
-    await deleteDoc(doc(db, "courses", courseId));
-  },
-
-  // ✅ Student helper: get sessions unlocked by paid weeks (published only)
-  async getUnlockedSessionsForStudent(
-    profile: RegistrationEntry,
-  ): Promise<SessionDoc[]> {
-    const cohortId = profile.cohortId || (await this.getActiveCohort()).id;
-    const paidWeeks = Math.max(0, Number(profile.weeksToCommit || 0));
-    if (!cohortId || paidWeeks <= 0) return [];
-
-    const snap = await getDocs(
-      query(
-        this._sessionsCol(cohortId),
-        where("path", "==", profile.path),
-        where("isPublished", "==", true),
-        where("week", "<=", paidWeeks),
-        orderBy("week", "asc"),
-        orderBy("startsAt", "asc"),
-      ),
-    );
-
-    return snap.docs.map((d) => ({
-      id: d.id,
-      ...(d.data() as any),
-    })) as SessionDoc[];
   },
 };

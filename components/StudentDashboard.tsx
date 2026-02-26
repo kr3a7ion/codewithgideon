@@ -1,119 +1,200 @@
+// components/StudentDashboard.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { View } from "../src/App";
 import {
-  RegistrationEntry,
   registrationStore,
-  CourseDoc,
+  RegistrationEntry,
   SessionDoc,
+  CourseDoc,
 } from "../services/registrationStore";
 
-type ActiveCohort = { id: string; label: string };
-
 interface StudentDashboardProps {
-  profile: RegistrationEntry | null;
-  onNavigate: (view: View, extraData?: any) => void;
+  onNavigate: (view: View, extraData?: unknown) => void;
   onLogout: () => void;
+  profile: RegistrationEntry | null;
 }
 
+const PINNED = [
+  { title: "Flutter & Mobile App Development", weeks: 12, rate: 10000 },
+  { title: "Web Development & WordPress", weeks: 8, rate: 10000 },
+  { title: "AI-Assisted Development", weeks: 4, rate: 10000 },
+];
+
+const clamp = (n: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, n));
+
+const parseWeeksFromDuration = (duration: string, fallback = 4) => {
+  const n = parseInt(String(duration || "").replace(/[^\d]/g, ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+const parsePricePerWeek = (label: string, fallback = 10000) => {
+  const s = String(label || "").toLowerCase();
+  const hasK = s.includes("k");
+  const num = parseInt(s.replace(/[^\d]/g, ""), 10);
+  if (!Number.isFinite(num) || num <= 0) return fallback;
+  return hasK ? num * 1000 : num;
+};
+
+type SessionTag = "LIVE" | "RECORDING SOON" | "JOIN LINK AVAILABLE";
+
 const StudentDashboard: React.FC<StudentDashboardProps> = ({
-  profile,
   onNavigate,
   onLogout,
+  profile,
 }) => {
-  const [isTopUpOpen, setIsTopUpOpen] = useState(false);
-  const [topUpWeeks, setTopUpWeeks] = useState("4");
-
-  const [activeCohort, setActiveCohort] = useState<ActiveCohort | null>(null);
-  const [cohortLoading, setCohortLoading] = useState(false);
-
-  // ✅ NEW: course truth fields
-  const [course, setCourse] = useState<CourseDoc | null>(null);
-  const [courseLoading, setCourseLoading] = useState(false);
-
-  // ✅ NEW: sessions (unlocked)
   const [sessions, setSessions] = useState<SessionDoc[]>([]);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
 
-  // ✅ Always attempt to load active cohort once profile exists
+  const [courseLoading, setCourseLoading] = useState(true);
+  const [courseMaxWeeks, setCourseMaxWeeks] = useState<number>(4);
+  const [weeklyRate, setWeeklyRate] = useState<number>(10000);
+
+  const [cohortLoading, setCohortLoading] = useState(true);
+  const [activeForPath, setActiveForPath] = useState<{
+    cohortId: string;
+    cohortKey: string;
+    label: string;
+  } | null>(null);
+
+  const [isTopUpOpen, setIsTopUpOpen] = useState(false);
+  const [topUpWeeks, setTopUpWeeks] = useState("1");
+
+  // -----------------------------
+  // ✅ Load active cohort for student's path
+  // -----------------------------
   useEffect(() => {
     let mounted = true;
 
-    const loadActive = async () => {
-      if (!profile) return;
+    const loadCohortForPath = async () => {
+      if (!profile?.uid || !profile?.path) return;
 
       setCohortLoading(true);
       try {
-        const active = await registrationStore.getActiveCohort();
+        const safePath = profile.path;
+        const inferredPathId =
+          profile.pathId || (await registrationStore.resolvePathId(safePath));
+
+        const active = inferredPathId
+          ? await registrationStore.getActiveCohortForPathId(inferredPathId)
+          : await registrationStore.getActiveCohortForPath(safePath);
+
         if (!mounted) return;
 
-        setActiveCohort(active);
+        setActiveForPath({
+          cohortId: active.cohortId,
+          cohortKey: active.cohortKey,
+          label: active.label,
+        });
 
-        // If user profile missing cohort, write it back
-        const missing = !profile.cohortId || !profile.cohortLabel;
-        if (missing && active?.id && active?.label) {
-          await registrationStore.updateUserCohort(
-            profile.uid,
-            active.id,
-            active.label,
-          );
+        try {
+          await registrationStore.updateUserCohortFields(profile.uid, {
+            cohortId: active.cohortId,
+            cohortLabel: active.label,
+            cohortKey: active.cohortKey,
+          });
+        } catch {
+          // ignore
         }
-      } catch (e) {
-        console.error("Failed to load active cohort:", e);
+      } catch {
+        if (!mounted) return;
+        setActiveForPath(null);
       } finally {
-        if (mounted) setCohortLoading(false);
+        if (!mounted) return;
+        setCohortLoading(false);
       }
     };
 
-    loadActive();
+    loadCohortForPath();
     return () => {
       mounted = false;
     };
-  }, [profile?.uid]);
+  }, [profile?.uid, profile?.path, profile?.pathId]);
 
-  if (!profile) return null;
+  const cohortId =
+    profile?.cohortId || activeForPath?.cohortId || "CWG-DEFAULT";
+  const cohortKey =
+    profile?.cohortKey || activeForPath?.cohortKey || "CWG-DEFAULT";
+  const cohortLabel =
+    profile?.cohortLabel || activeForPath?.label || "Current Cohort";
 
-  // ✅ RESOLVED COHORT (single source for UI + navigation)
-  const resolvedCohort = useMemo(() => {
-    const id = profile.cohortId || activeCohort?.id || "CWG-DEFAULT";
-    const label =
-      profile.cohortLabel || activeCohort?.label || "Current Cohort";
-    return { id, label };
-  }, [
-    profile.cohortId,
-    profile.cohortLabel,
-    activeCohort?.id,
-    activeCohort?.label,
-  ]);
-
-  const cohortId = resolvedCohort.id;
-  const cohortLabel = resolvedCohort.label;
-
-  // ✅ Load course truth fields (weeks + pricePerWeek)
+  // -----------------------------
+  // ✅ Load course pricing + max weeks
+  // -----------------------------
   useEffect(() => {
     let mounted = true;
 
     const loadCourse = async () => {
       if (!profile?.path) return;
+
       setCourseLoading(true);
 
+      const pinned = PINNED.find(
+        (p) =>
+          p.title.trim().toLowerCase() === profile.path.trim().toLowerCase(),
+      );
+      if (pinned) {
+        if (!mounted) return;
+        setCourseMaxWeeks(pinned.weeks);
+        setWeeklyRate(pinned.rate);
+        setCourseLoading(false);
+        return;
+      }
+
       try {
-        const list = await registrationStore.getCourses();
+        const list: CourseDoc[] = await registrationStore.getCourses();
+        const active = (list || []).filter((c: any) => c.isActive !== false);
+
+        const found = active.find((c: any) => {
+          if (profile.courseId)
+            return String(c.id) === String(profile.courseId);
+          if (profile.pathId && c.pathId)
+            return String(c.pathId) === String(profile.pathId);
+
+          return (
+            String(c.title || "")
+              .trim()
+              .toLowerCase() ===
+            String(profile.path || "")
+              .trim()
+              .toLowerCase()
+          );
+        });
+
         if (!mounted) return;
 
-        // Match by title OR label (since your CourseDoc has both)
-        const found =
-          (list || []).find(
-            (c: any) =>
-              String(c.title || "").trim() === String(profile.path).trim() ||
-              String(c.label || "").trim() === String(profile.path).trim(),
-          ) || null;
+        if (found) {
+          const w = Number((found as any).weeks);
+          const p = Number((found as any).pricePerWeek);
 
-        setCourse(found);
-      } catch (e) {
-        console.error("Failed to load courses:", e);
-        setCourse(null);
+          const weeks =
+            Number.isFinite(w) && w > 0
+              ? Math.floor(w)
+              : parseWeeksFromDuration((found as any).duration || "4", 4);
+
+          const rate =
+            Number.isFinite(p) && p > 0
+              ? Math.floor(p)
+              : parsePricePerWeek(
+                  (found as any).priceLabel || "₦10k/wk",
+                  10000,
+                );
+
+          setCourseMaxWeeks(weeks);
+          setWeeklyRate(rate);
+        } else {
+          if (profile.courseDurationWeeks)
+            setCourseMaxWeeks(profile.courseDurationWeeks);
+          if (profile.weeklyRate) setWeeklyRate(profile.weeklyRate);
+        }
+      } catch {
+        if (!mounted) return;
+        if (profile.courseDurationWeeks)
+          setCourseMaxWeeks(profile.courseDurationWeeks);
+        if (profile.weeklyRate) setWeeklyRate(profile.weeklyRate);
       } finally {
-        if (mounted) setCourseLoading(false);
+        if (!mounted) return;
+        setCourseLoading(false);
       }
     };
 
@@ -121,26 +202,36 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
     return () => {
       mounted = false;
     };
-  }, [profile?.path]);
+  }, [
+    profile?.path,
+    profile?.pathId,
+    profile?.courseId,
+    profile?.courseDurationWeeks,
+    profile?.weeklyRate,
+  ]);
 
-  // ✅ Load unlocked sessions (published only + <= paid weeks)
+  // -----------------------------
+  // ✅ Load unlocked sessions available to student
+  // -----------------------------
   useEffect(() => {
     let mounted = true;
 
     const loadSessions = async () => {
-      if (!profile) return;
+      if (!profile?.uid) return;
 
       setSessionsLoading(true);
       try {
         const unlocked =
           await registrationStore.getUnlockedSessionsForStudent(profile);
+
         if (!mounted) return;
         setSessions(unlocked || []);
-      } catch (e) {
-        console.error("Failed to load unlocked sessions:", e);
-        if (mounted) setSessions([]);
+      } catch {
+        if (!mounted) return;
+        setSessions([]);
       } finally {
-        if (mounted) setSessionsLoading(false);
+        if (!mounted) return;
+        setSessionsLoading(false);
       }
     };
 
@@ -148,128 +239,42 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
     return () => {
       mounted = false;
     };
-  }, [profile?.uid, profile?.weeksToCommit, profile?.cohortId, profile?.path]);
+  }, [
+    profile?.uid,
+    profile?.pathId,
+    profile?.path,
+    profile?.cohortKey,
+    profile?.cohortId,
+    profile?.weeksToCommit,
+  ]);
 
-  // ✅ Truth fields (fallback if course not found)
-  const weeklyRate = useMemo(() => {
-    const v = Number((course as any)?.pricePerWeek);
-    return Number.isFinite(v) && v > 0 ? v : 10000;
-  }, [course]);
+  // -----------------------------
+  // ✅ Enrollment + progress + pending logic
+  // -----------------------------
+  const isEnrolled = profile?.status === "Complete";
 
-  const totalProgramWeeks = useMemo(() => {
-    const w = Number((course as any)?.weeks);
-    if (Number.isFinite(w) && w > 0) return Math.floor(w);
+  const paidWeeks = Math.max(0, Number(profile?.weeksToCommit || 0));
+  const totalProgramWeeks = Math.max(1, Number(courseMaxWeeks || 1));
 
-    // fallback (your old heuristic)
-    return profile.path.includes("Flutter")
-      ? 12
-      : profile.path.includes("Web")
-        ? 8
-        : 4;
-  }, [course, profile.path]);
+  const progressPercent = clamp((paidWeeks / totalProgramWeeks) * 100, 0, 100);
 
-  const paidWeeks = Math.max(0, Number(profile.weeksToCommit || 0));
-  const remainingWeeks = Math.max(0, totalProgramWeeks - paidWeeks);
-
-  const progressPercent = Math.min((paidWeeks / totalProgramWeeks) * 100, 100);
-
-  const hasPendingInitial = profile.status === "Pending";
+  const hasAnyPending = profile?.pendingPayment?.status === "Pending";
   const hasPendingTopUp =
-    profile.status === "Complete" &&
-    profile.pendingPayment?.status === "Pending";
-  const hasAnyPending = hasPendingInitial || hasPendingTopUp;
+    hasAnyPending && profile?.pendingPayment?.kind === "topup";
 
-  // ✅ Only allow top up when there is room left and nothing pending
-  const canTopUp = !hasAnyPending && remainingWeeks > 0;
+  const remainingWeeks = Math.max(0, totalProgramWeeks - paidWeeks);
+  const canTopUp = isEnrolled && remainingWeeks > 0 && !hasAnyPending;
 
-  // ✅ Clamp topUpWeeks when modal is open + remaining changes
-  useEffect(() => {
-    if (!isTopUpOpen) return;
+  const joinedDate = new Date(
+    profile?.timestamp || Date.now(),
+  ).toLocaleDateString();
 
-    const current = Math.max(1, parseInt(topUpWeeks || "1", 10) || 1);
-    const clamped = Math.min(current, Math.max(1, remainingWeeks || 1));
-
-    if (String(clamped) !== topUpWeeks) {
-      setTopUpWeeks(String(clamped));
-    }
-  }, [isTopUpOpen, remainingWeeks, topUpWeeks]);
-
-  // ✅ Build safe payload for payment
-  const buildPaymentPayload = () => {
-    const base = {
-      uid: profile.uid,
-      email: profile.email,
-      path: profile.path,
-      cohortId,
-      cohortLabel,
-    };
-
-    if (profile.pendingPayment?.status === "Pending") {
-      const pp = profile.pendingPayment;
-      return {
-        selectedPath: profile.path,
-        userData: {
-          ...base,
-          weeksToCommit: Number(pp.weeks) || 1,
-          originalWeeks: Number(profile.weeksToCommit) || 0,
-          isTopUp: pp.kind === "topup",
-          reference: pp.reference,
-        },
-      };
-    }
-
-    return {
-      selectedPath: profile.path,
-      userData: {
-        ...base,
-        weeksToCommit: Number(profile.weeksToCommit) || 1,
-        isTopUp: false,
-      },
-    };
-  };
-
-  const handleContinuePayment = () => {
-    const payload = buildPaymentPayload();
-    if (!payload?.userData?.uid || !payload?.userData?.email) {
-      console.error("Payment payload invalid:", payload);
-      return;
-    }
-    onNavigate("payment", payload);
-  };
-
-  const handleTopUp = () => {
-    if (!canTopUp) {
-      setIsTopUpOpen(false);
-      return;
-    }
-
-    const requested = Math.max(1, parseInt(topUpWeeks || "1", 10) || 1);
-    const weeks = Math.min(requested, remainingWeeks || 1);
-
-    onNavigate("payment", {
-      selectedPath: profile.path,
-      userData: {
-        uid: profile.uid,
-        email: profile.email,
-        path: profile.path,
-        weeksToCommit: weeks,
-        originalWeeks: Number(profile.weeksToCommit) || 0,
-        isTopUp: true,
-        cohortId,
-        cohortLabel,
-      },
-    });
-
-    setIsTopUpOpen(false);
-  };
-
-  const joinedDate = new Date(profile.timestamp).toLocaleDateString();
-
-  // ✅ Next session card helpers
-  const nowMs = Date.now();
-
+  // -----------------------------
+  // Next session + formatting
+  // -----------------------------
   const nextSession = useMemo(() => {
-    // sessions are Firestore Timestamps -> toMillis()
+    const nowMs = Date.now();
+
     const upcoming = (sessions || [])
       .map((s) => ({
         ...s,
@@ -283,7 +288,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
       .sort((a, b) => (a._ms as number) - (b._ms as number));
 
     return upcoming[0] || null;
-  }, [sessions, nowMs]);
+  }, [sessions]);
 
   const formatSessionTime = (s: SessionDoc) => {
     const ms =
@@ -304,7 +309,115 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  // ✅ Small loading UI helpers
+  // -----------------------------
+  // ✅ NEW: money + sessions routing + session tags
+  // -----------------------------
+  const formatNaira = (n: number) => `₦${Math.max(0, n).toLocaleString()}`;
+
+  const sessionsNavPayload = {
+    cohortId,
+    cohortLabel,
+    cohortKey,
+    path: profile?.path,
+    pathId: profile?.pathId,
+  };
+
+  const goToSessions = () => onNavigate("sessions" as View, sessionsNavPayload);
+
+  const getSessionWindowMs = (s: SessionDoc) => {
+    const startMs =
+      typeof (s as any)?.startsAt?.toMillis === "function"
+        ? (s as any).startsAt.toMillis()
+        : NaN;
+
+    const endMsRaw =
+      typeof (s as any)?.endsAt?.toMillis === "function"
+        ? (s as any).endsAt.toMillis()
+        : NaN;
+
+    const durationMs =
+      Number.isFinite(Number((s as any).durationMins)) &&
+      Number((s as any).durationMins) > 0
+        ? Number((s as any).durationMins) * 60 * 1000
+        : 60 * 60 * 1000;
+
+    const endMs = Number.isFinite(endMsRaw) ? endMsRaw : startMs + durationMs;
+
+    return { startMs, endMs };
+  };
+
+  const getSessionTags = (s: SessionDoc): SessionTag[] => {
+    const now = Date.now();
+    const { startMs, endMs } = getSessionWindowMs(s);
+
+    const isLive =
+      Number.isFinite(startMs) &&
+      Number.isFinite(endMs) &&
+      now >= startMs &&
+      now <= endMs;
+
+    const joinAvailable = !!String((s as any).joinUrl || "").trim();
+
+    // Recording Soon = ended recently (48h) AND join link not available yet
+    const endedRecently =
+      Number.isFinite(endMs) &&
+      now > endMs &&
+      now - endMs <= 48 * 60 * 60 * 1000;
+
+    const recordingSoon = endedRecently && !joinAvailable;
+
+    const tags: SessionTag[] = [];
+    if (isLive) tags.push("LIVE");
+    if (joinAvailable) tags.push("JOIN LINK AVAILABLE");
+    if (recordingSoon) tags.push("RECORDING SOON");
+    return tags;
+  };
+
+  const tagClass = (kind: SessionTag) => {
+    if (kind === "LIVE") {
+      return "bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-200 border border-teal-100 dark:border-teal-500/20";
+    }
+    if (kind === "JOIN LINK AVAILABLE") {
+      return "bg-blue-50 text-blue-800 dark:bg-blue-500/10 dark:text-blue-200 border border-blue-100 dark:border-blue-500/20";
+    }
+    return "bg-orange-50 text-orange-800 dark:bg-orange-500/10 dark:text-orange-200 border border-orange-100 dark:border-orange-500/20";
+  };
+
+  // ✅ IMPORTANT FIX: render tags inline so TS never tries to treat `key` as a prop
+  const TagRow = ({ tags }: { tags: SessionTag[] }) => {
+    if (!tags || tags.length === 0) {
+      return (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <span
+            className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${tagClass(
+              "RECORDING SOON",
+            )}`}
+          >
+            RECORDING SOON
+          </span>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-2 flex flex-wrap gap-2">
+        {tags.map((t) => (
+          <span
+            key={t}
+            className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${tagClass(
+              t,
+            )}`}
+          >
+            {t}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
+  // -----------------------------
+  // UI bits
+  // -----------------------------
   const InlineSpinner = ({ label }: { label?: string }) => (
     <span className="inline-flex items-center gap-2">
       <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300/70 dark:border-slate-600 border-t-blue-900 dark:border-t-teal-400 animate-spin" />
@@ -319,11 +432,114 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
     </span>
   );
 
-  // ✅ Clamp total due display in modal
   const selectedWeeksClamped = Math.min(
     Math.max(1, parseInt(topUpWeeks || "1", 10) || 1),
     Math.max(1, remainingWeeks || 1),
   );
+
+  const buildPaymentPayload = () => {
+    if (!profile) return null;
+
+    const base = {
+      uid: profile.uid,
+      email: profile.email,
+      path: profile.path,
+      pathId: profile.pathId,
+      courseId: profile.courseId,
+
+      cohortId,
+      cohortLabel,
+      cohortKey,
+
+      courseDurationWeeks: totalProgramWeeks,
+      weeklyRate,
+    };
+
+    if (profile.pendingPayment?.status === "Pending") {
+      const pp = profile.pendingPayment;
+      return {
+        selectedPath: profile.path,
+        userData: {
+          ...base,
+          weeksToCommit: Number(pp.weeks) || 1,
+          originalWeeks: paidWeeks,
+          isTopUp: pp.kind === "topup",
+          reference: pp.reference,
+        },
+      };
+    }
+
+    return {
+      selectedPath: profile.path,
+      userData: {
+        ...base,
+        weeksToCommit: Math.max(1, paidWeeks || 1),
+        isTopUp: false,
+      },
+    };
+  };
+
+  const handleContinuePayment = () => {
+    const payload = buildPaymentPayload();
+    if (!(payload as any)?.userData?.uid || !(payload as any)?.userData?.email)
+      return;
+    onNavigate("payment", payload);
+  };
+
+  const handleTopUp = () => {
+    if (!profile) return;
+    if (!canTopUp) {
+      setIsTopUpOpen(false);
+      return;
+    }
+
+    const requested = Math.max(1, parseInt(topUpWeeks || "1", 10) || 1);
+    const weeks = Math.min(requested, remainingWeeks || 1);
+
+    onNavigate("payment", {
+      selectedPath: profile.path,
+      userData: {
+        uid: profile.uid,
+        email: profile.email,
+        path: profile.path,
+        pathId: profile.pathId,
+        courseId: profile.courseId,
+
+        weeksToCommit: weeks,
+        originalWeeks: paidWeeks,
+        isTopUp: true,
+
+        cohortId,
+        cohortLabel,
+        cohortKey,
+
+        courseDurationWeeks: totalProgramWeeks,
+        weeklyRate,
+      },
+    });
+
+    setIsTopUpOpen(false);
+  };
+
+  if (!profile) {
+    return (
+      <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 max-w-md w-full p-8 rounded-3xl shadow-xl">
+          <h1 className="text-2xl font-black text-blue-900 dark:text-white mb-2">
+            Profile missing
+          </h1>
+          <p className="text-sm text-slate-500 mb-6">Please log in again.</p>
+
+          <button
+            onClick={onLogout}
+            className="w-full bg-blue-900 text-white font-black py-4 rounded-2xl"
+          >
+            Logout
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="py-12 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
@@ -469,7 +685,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
               </div>
             </div>
 
-            {/* ✅ NEW: Next Live Session */}
+            {/* Next Live Session */}
             <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] shadow-xl border border-gray-100 dark:border-slate-800">
               <div className="flex items-start justify-between gap-6">
                 <div>
@@ -486,6 +702,10 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                       <h3 className="text-xl font-black text-blue-900 dark:text-white">
                         Week {nextSession.week}: {nextSession.title}
                       </h3>
+
+                      {/* ✅ Tags (fixed key typing issue) */}
+                      <TagRow tags={getSessionTags(nextSession)} />
+
                       <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
                         {formatSessionTime(nextSession)}
                       </p>
@@ -500,7 +720,15 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   )}
                 </div>
 
+                {/* Continue Learning always routes to sessions */}
                 <div className="flex flex-col items-end gap-2">
+                  <button
+                    onClick={goToSessions}
+                    className="px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition bg-blue-900 dark:bg-teal-600 text-white shadow-lg hover:opacity-95"
+                  >
+                    Continue Learning
+                  </button>
+
                   <button
                     disabled={!nextSession?.joinUrl}
                     onClick={() => openJoin(nextSession?.joinUrl)}
@@ -514,13 +742,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   </button>
 
                   <button
-                    onClick={() =>
-                      onNavigate("sessions" as View, {
-                        cohortId,
-                        cohortLabel,
-                        path: profile.path,
-                      })
-                    }
+                    onClick={goToSessions}
                     className="text-xs font-black uppercase tracking-widest text-blue-900 dark:text-teal-400 hover:underline"
                   >
                     View all sessions
@@ -528,7 +750,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 </div>
               </div>
 
-              {/* ✅ Unlocked list (preview) */}
+              {/* Unlocked list (preview) */}
               <div className="mt-6">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
                   Unlocked Sessions (Paid Weeks)
@@ -558,6 +780,9 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                             {formatSessionTime(s)}
                           </p>
+
+                          {/* Tags */}
+                          <TagRow tags={getSessionTags(s)} />
                         </div>
 
                         <button
@@ -620,6 +845,30 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                     )}
                   </div>
                 </div>
+
+                {/* Next payment due */}
+                {remainingWeeks > 0 && !hasAnyPending && (
+                  <div className="mt-6 rounded-2xl border p-4 bg-blue-50 border-blue-100 text-blue-900 dark:bg-blue-900/20 dark:border-blue-900/30 dark:text-slate-100">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-xs font-black uppercase tracking-widest">
+                        Next payment due
+                      </p>
+                      <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-white/70 dark:bg-slate-800/60">
+                        {remainingWeeks} wk{remainingWeeks === 1 ? "" : "s"}{" "}
+                        left
+                      </span>
+                    </div>
+
+                    <p className="text-sm font-bold mt-3">
+                      {formatNaira(remainingWeeks * weeklyRate)} •{" "}
+                      {remainingWeeks} week(s)
+                    </p>
+
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1">
+                      Top up anytime to keep access active.
+                    </p>
+                  </div>
+                )}
 
                 {profile.pendingPayment?.status === "Pending" && (
                   <div className="mt-6 rounded-2xl border p-4 bg-orange-50 border-orange-100 text-orange-800 dark:bg-orange-500/10 dark:border-orange-500/20 dark:text-orange-200">
