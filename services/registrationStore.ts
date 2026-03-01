@@ -1,4 +1,3 @@
-// services/registrationStore.ts
 import { db, auth } from "./firebase";
 import {
   doc,
@@ -22,7 +21,23 @@ import {
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
   signOut,
+  onAuthStateChanged,
 } from "firebase/auth";
+
+function waitForAuthUid(auth: any, expectedUid: string, timeoutMs = 8000) {
+  return new Promise<void>((resolve, reject) => {
+    const start = Date.now();
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (u?.uid === expectedUid) {
+        unsub();
+        resolve();
+      } else if (Date.now() - start > timeoutMs) {
+        unsub();
+        reject(new Error("Auth state not attached yet"));
+      }
+    });
+  });
+}
 
 // ✅ allow UI to send ms number / ISO string / Timestamp
 type TimestampLike = Timestamp | number | string;
@@ -638,79 +653,114 @@ export const registrationStore = {
     );
   },
 
-  // -------------------------
-  // USERS
-  // -------------------------
   async createAccount(
     entry: NewStudentEntry,
     password: string,
   ): Promise<string> {
+    // Validate input early
     const email = String((entry as any).email || "").trim();
     if (!email) throw new Error("Email is required.");
 
-    const userCredential = await createUserWithEmailAndPassword(
-      auth,
-      email,
-      password,
-    );
-    const user = userCredential.user;
+    try {
+      // Step 1: Ensure global auth readiness (once)
+      console.log("🔄 Waiting for auth readiness...");
+      await auth.authStateReady();
+      console.log("✅ Auth ready");
 
-    // -------------------------
-    // ✅ Normalize path + pathId (prevents drift)
-    // -------------------------
-    const entryPathIdRaw = (entry as any).pathId
-      ? String((entry as any).pathId).trim()
-      : "";
-    const entryPathTitleRaw = String((entry as any).path || "").trim();
+      // Step 2: Create user (throws if email exists)
+      console.log("🔄 Creating user...");
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password,
+      );
+      const user = userCredential.user;
+      console.log(`✅ User created: ${user.uid}`);
+      await auth.updateCurrentUser(user);
 
-    // if UI sent pathId, force title from /paths (source of truth)
-    const resolvedTitleFromId = entryPathIdRaw
-      ? await this.resolvePathTitle(entryPathIdRaw, entryPathTitleRaw)
-      : entryPathTitleRaw;
+      // Step 3: Refresh token once (ensures valid for Firestore)
+      console.log("🔄 Refreshing token...");
+      const tokenResult = await user.getIdTokenResult(true);
+      console.log(`✅ Token ready: ${tokenResult.token ? "valid" : "invalid"}`);
 
-    // if UI did NOT send pathId, try to infer it from title
-    const resolvedIdFromTitle = !entryPathIdRaw
-      ? await this.resolvePathId(resolvedTitleFromId)
-      : undefined;
+      // Step 4: Resolve path/cohort (these should be public reads or use token)
+      console.log("🔄 Resolving path/cohort...");
+      let pathIdRaw = String((entry as any).pathId || "").trim();
+      const pathTitleRaw = String((entry as any).path || "").trim();
 
-    const finalPathId = entryPathIdRaw || resolvedIdFromTitle || undefined;
+      let resolvedPathTitle = pathTitleRaw;
+      if (pathIdRaw) {
+        resolvedPathTitle = await this.resolvePathTitle(
+          pathIdRaw,
+          pathTitleRaw,
+        );
+      } else {
+        const resolvedId = await this.resolvePathId(resolvedPathTitle);
+        if (resolvedId) pathIdRaw = resolvedId; // Update for final use
+      }
 
-    // pick active cohort using finalPathId when possible
-    let active: ActiveCohortForPath;
-    if (finalPathId) active = await this.getActiveCohortForPathId(finalPathId);
-    else active = await this.getActiveCohortForPath(resolvedTitleFromId);
+      if (!resolvedPathTitle)
+        throw new Error(
+          "Path resolution failed. Provide valid pathId or path.",
+        );
 
-    // always store a valid legacy path string
-    const resolvedPath =
-      resolvedTitleFromId || String(active.path || "").trim();
-    if (!resolvedPath) throw new Error("Path is required.");
+      const finalPathId = pathIdRaw;
+      const activeCohort = finalPathId
+        ? await this.getActiveCohortForPathId(finalPathId)
+        : await this.getActiveCohortForPath(resolvedPathTitle);
 
-    const profile: RegistrationEntry = stripUndefined({
-      ...(entry as any),
-      uid: user.uid,
-      role: "student",
-      status: "Pending",
-      timestamp: Date.now(),
+      const resolvedPath =
+        resolvedPathTitle || String(activeCohort?.path || "").trim();
+      if (!resolvedPath) throw new Error("Path is required.");
 
-      // ✅ always store legacy label
-      path: resolvedPath,
+      const profileData = {
+        uid: user.uid,
+        role: "student",
+        status: "Pending",
+        timestamp: Date.now(),
+        fullName: String((entry as any).fullName || "Student").trim(),
+        email: user.email!,
+        phone: String((entry as any).phone || "000").trim(),
+        ageRange: String((entry as any).ageRange || "18+").trim(),
+        gender: String((entry as any).gender || "Other").trim(),
+        weeksToCommit: Math.max(
+          1,
+          Math.floor(Number((entry as any).weeksToCommit || 1)),
+        ),
+        totalPrice: Number((entry as any).totalPrice || 0),
+        path: resolvedPath,
+        // ✅ ONLY add if they have values
+        ...(finalPathId && { pathId: finalPathId }),
+        ...((entry as any).courseId && {
+          courseId: String((entry as any).courseId).trim(),
+        }),
+        ...(activeCohort?.cohortId && { cohortId: activeCohort.cohortId }),
+        ...(activeCohort?.label && { cohortLabel: activeCohort.label }),
+        ...(activeCohort?.cohortKey && { cohortKey: activeCohort.cohortKey }),
+      };
 
-      // ✅ store normalized pathId if we have it
-      pathId:
-        finalPathId || (active.pathId ? String(active.pathId) : undefined),
+      // ✅ Your stripUndefined will now work perfectly
+      const profile = stripUndefined(profileData);
 
-      // optional course enrollment
-      courseId: (entry as any).courseId
-        ? String((entry as any).courseId).trim()
-        : undefined,
+      // Step 6: Single Firestore write (now fully safe)
+      console.log("AUTH UID AT WRITE:", auth.currentUser?.uid);
+      console.log("DOC UID:", user.uid);
+      console.log("DATA UID:", profile.uid);
+      console.log("🔄 Writing profile...", profile);
+      console.log("🔍 FINAL PROFILE KEYS:", Object.keys(profile));
+      await user.getIdToken(true);
+      // ✅ WAIT until auth.currentUser is actually set
+      await waitForAuthUid(auth, user.uid);
 
-      cohortId: active.cohortId,
-      cohortLabel: active.label,
-      cohortKey: active.cohortKey,
-    });
+      await setDoc(doc(db, "users", user.uid), profile);
+      console.log(`✅ Profile saved for ${user.uid}`);
 
-    await setDoc(doc(db, "users", user.uid), profile);
-    return user.uid;
+      return user.uid;
+    } catch (error: any) {
+      console.error("❌ createAccount failed:", error);
+      // Re-throw for UI handling
+      throw new Error(error.message || "Account creation failed");
+    }
   },
 
   async login(email: string, password: string): Promise<string> {
@@ -897,15 +947,15 @@ export const registrationStore = {
         ...(d.data() as any),
       })) as SessionDoc[];
     } catch (e: any) {
-      // ✅ common: missing composite index
-      const msg = String(e?.message || "");
-      const code = String(e?.code || "");
+      const msg = String(e?.message || "").toLowerCase();
+      const code = String(e?.code || "").toLowerCase();
 
-      // Try a safe fallback query so sessions still appear
-      if (
-        code === "failed-precondition" ||
-        msg.toLowerCase().includes("index")
-      ) {
+      // ✅ common: missing composite index for (week asc, startsAt asc)
+      const looksLikeIndex =
+        code.includes("failed-precondition") || msg.includes("index");
+
+      if (looksLikeIndex) {
+        // ✅ safe fallback so admin still sees sessions
         const snap2 = await getDocs(
           query(this._sessionsCol(cohortDocId), orderBy("week", "asc")),
         );
@@ -926,23 +976,24 @@ export const registrationStore = {
   ): Promise<string> {
     const clean = this._sanitizeSessionInput(input);
 
-    // ✅ deterministic id => no duplicates
-    const date = new Date(
-      typeof clean.startsAt?.toMillis === "function"
-        ? clean.startsAt.toMillis()
-        : Number(clean.startsAt),
-    );
-    const yyyy = date.getFullYear();
-    const mm = String(date.getMonth() + 1).padStart(2, "0");
-    const dd = String(date.getDate()).padStart(2, "0");
-    const hh = String(date.getHours()).padStart(2, "0");
-    const min = String(date.getMinutes()).padStart(2, "0");
+    // ✅ deterministic id prevents duplicates on double-click / retry
+    const ms = (clean.startsAt as any)?.toMillis
+      ? (clean.startsAt as any).toMillis()
+      : Date.now();
 
-    const safePathId =
-      String((clean as any).pathId || "nopid").trim() || "nopid";
+    const d = new Date(ms);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+
     const safeWeek = String(clean.week || 1).padStart(2, "0");
+    const safePathId = String((clean as any).pathId || "nopid")
+      .trim()
+      .replace(/[^\w-]/g, "_");
 
-    const sessionId = `W${safeWeek}_${yyyy}${mm}${dd}_${hh}${min}_${safePathId}`;
+    const sessionId = `W${safeWeek}_${yyyy}${mm}${dd}_${hh}${mi}_${safePathId}`;
 
     const payload = stripUndefined({
       ...clean,
@@ -955,6 +1006,7 @@ export const registrationStore = {
       payload,
       { merge: false },
     );
+
     return sessionId;
   },
 

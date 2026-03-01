@@ -203,6 +203,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setPathBusyId(null);
     }
   };
+  
 
   const startEditPath = (p: PathDoc) => {
     setEditingPathId(p.id);
@@ -296,6 +297,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [pendingBusyUid, setPendingBusyUid] = useState<string | null>(null);
   const [sessionsError, setSessionsError] = useState<string>("");
 
+  // global busy map for all buttons
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
   const runBusy = async (key: string, fn: () => Promise<void>) => {
@@ -427,7 +429,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       console.error("fetchSessions failed:", e);
       setSessions([]);
       setSessionsError(
-        e?.message || "Failed to load sessions (check Firestore index).",
+        e?.message ||
+          "Failed to load sessions. (If it mentions an index, create Firestore index or rely on fallback.)",
       );
     } finally {
       setSessionsLoading(false);
@@ -1018,6 +1021,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setSessionModalOpen(true);
   };
 
+
   const saveSession = async (e: React.FormEvent) => {
     e.preventDefault();
     setSessionError("");
@@ -1032,6 +1036,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     if (!sessionForm.pathId)
       return setSessionError("Select a Path for this session.");
+
     const p = pathsById.get(sessionForm.pathId);
     const pathLabel = (p?.title || sessionForm.path || "").trim();
     if (!pathLabel) return setSessionError("Path title is missing.");
@@ -1042,61 +1047,39 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       Math.floor(Number(sessionForm.durationMins || 60)),
     );
 
-    try {
-      const payload: any = {
-        title,
-        week,
-        pathId: sessionForm.pathId,
-        path: pathLabel,
-        isPublished: !!sessionForm.isPublished,
-        startsAt,
-        durationMins,
-        joinUrl: sessionForm.joinUrl.trim(),
-        notes: sessionForm.notes.trim(),
-      };
+    const payload: any = {
+      title,
+      week,
+      pathId: sessionForm.pathId,
+      path: pathLabel,
+      isPublished: !!sessionForm.isPublished,
+      startsAt,
+      durationMins,
+      joinUrl: sessionForm.joinUrl.trim(),
+      notes: sessionForm.notes.trim(),
+    };
 
-      await runBusy(
-        editingSession ? "saveSession" : "createSession",
-        async () => {
-          if (editingSession) {
-            await registrationStore.updateCohortSession(
-              selectedCohortId,
-              editingSession.id,
-              payload,
-            );
-          } else {
-            await registrationStore.addCohortSession(selectedCohortId, payload);
-          }
-        },
-      );
+    const key = editingSession ? "saveSession" : "createSession";
 
-      if (editingSession) {
-        await registrationStore.updateCohortSession(
-          selectedCohortId,
-          editingSession.id,
-          payload,
-        );
-      } else {
-        const sessionId =
-          `${sessionForm.pathId}__w${week}__${startsAt}`.replace(
-            /[^\w-]/g,
-            "_",
+    await runBusy(key, async () => {
+      try {
+        if (editingSession) {
+          await registrationStore.updateCohortSession(
+            selectedCohortId,
+            editingSession.id,
+            payload,
           );
-        await registrationStore.upsertCohortSession(
-          selectedCohortId,
-          sessionId,
-          payload,
-        );
-      }
+        } else {
+          await registrationStore.addCohortSession(selectedCohortId, payload);
+        }
 
-      closeSessionModal();
-      await fetchSessions(selectedCohortId);
-    } catch (e: any) {
-      console.error("saveSession failed:", e);
-      setSessionError(e?.message || "Failed to save session.");
-    } finally {
-      setSessionBusy(false);
-    }
+        closeSessionModal();
+        await fetchSessions(selectedCohortId);
+      } catch (e: any) {
+        console.error("saveSession failed:", e);
+        setSessionError(e?.message || "Failed to save session.");
+      }
+    });
   };
 
   const deleteSession = async (s: SessionDoc) => {
@@ -2216,6 +2199,34 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </p>
 
               <form onSubmit={saveCourse} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                    Image URL (optional)
+                  </label>
+                  <input
+                    value={courseForm.imageUrl}
+                    onChange={(e) =>
+                      setCourseForm((p) => ({ ...p, imageUrl: e.target.value }))
+                    }
+                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                    placeholder="https://... (jpeg/png/webp)"
+                  />
+
+                  {/* Optional preview (safe) */}
+                  {courseForm.imageUrl?.trim() ? (
+                    <div className="mt-3 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700">
+                      <img
+                        src={courseForm.imageUrl.trim()}
+                        alt="Course preview"
+                        className="w-full h-40 object-cover"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.display =
+                            "none";
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                </div>
                 {courseError && (
                   <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
                     {courseError}

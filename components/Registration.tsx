@@ -7,10 +7,14 @@ import {
   ActiveCohortForPath,
   PathDoc,
 } from "../services/registrationStore";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "../services/firebase";
+
+
 
 interface RegistrationProps {
   onNavigate: (view: View) => void;
-
+  
   /**
    * ✅ Backward compatible:
    * - legacy: "Flutter & Mobile App Development" (title)
@@ -581,12 +585,9 @@ const Registration: React.FC<RegistrationProps> = ({
         weeksToCommit: weeks,
         totalPrice: weeks * weeklyRate,
 
+        // ✅ only what rules allow
         pathId: selectedPathId,
         courseId: selectedCourse.courseId || undefined,
-
-        courseDurationWeeks: maxWeeks,
-        weeklyRate,
-        selectedCourseId,
       };
 
       const uid = await registrationStore.createAccount(
@@ -618,6 +619,13 @@ const Registration: React.FC<RegistrationProps> = ({
     (selectedPathId ? pathsById.get(selectedPathId)?.title : "") ||
     selectedCourse.title ||
     "Path";
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, () => {
+      // App ready
+    });
+    return unsubscribe;
+  }, []);
 
   return (
     <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
