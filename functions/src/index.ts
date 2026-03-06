@@ -1,12 +1,110 @@
 /* eslint-disable valid-jsdoc */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import {onRequest} from "firebase-functions/v2/https";
+import {onRequest, onCall, HttpsError} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import axios from "axios";
 import cors from "cors";
+import {logger} from "firebase-functions";
+import {getFirestore, FieldValue} from "firebase-admin/firestore";
 
 admin.initializeApp();
+
+const db = getFirestore();
 const corsHandler = cors({origin: true});
+
+type ContactPayload = {
+  name?: unknown;
+  email?: unknown;
+  message?: unknown;
+};
+
+const isValidEmail = (value: string): boolean => {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+};
+
+const normalizeSpaces = (value: string): string => {
+  return value.replace(/\s+/g, " ").trim();
+};
+
+export const sendContactMessage = onCall(
+  {
+    region: "us-central1",
+    // Uncomment this after App Check is set up on your web app:
+    // enforceAppCheck: true,
+  },
+  async (request) => {
+    const data = (request.data || {}) as ContactPayload;
+
+    const name = normalizeSpaces(String(data.name ?? ""));
+    const email = normalizeSpaces(String(data.email ?? "")).toLowerCase();
+    const message = normalizeSpaces(String(data.message ?? ""));
+
+    if (!name) {
+      throw new HttpsError("invalid-argument", "Name is required.");
+    }
+    if (name.length < 2) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Name must be at least 2 characters.",
+      );
+    }
+
+    if (!email) {
+      throw new HttpsError("invalid-argument", "Email is required.");
+    }
+    if (!isValidEmail(email)) {
+      throw new HttpsError("invalid-argument", "A valid email is required.");
+    }
+
+    if (!message) {
+      throw new HttpsError("invalid-argument", "Message is required.");
+    }
+    if (message.length < 10) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Message must be at least 10 characters.",
+      );
+    }
+    if (message.length > 3000) {
+      throw new HttpsError("invalid-argument", "Message is too long.");
+    }
+
+    try {
+      const docRef = await db.collection("contactMessages").add({
+        name,
+        email,
+        message,
+        status: "new",
+        source: "web-contact-form",
+        createdAt: FieldValue.serverTimestamp(),
+        auth: {
+          uid: request.auth?.uid || null,
+        },
+        appCheck: {
+          appId: request.app?.appId || null,
+        },
+      });
+
+      logger.info("Contact message saved", {
+        docId: docRef.id,
+        email,
+        hasAuth: !!request.auth,
+        hasAppCheck: !!request.app,
+      });
+
+      return {
+        success: true,
+        message: "Message sent successfully.",
+      };
+    } catch (error) {
+      logger.error("Failed to save contact message", error);
+      throw new HttpsError(
+        "internal",
+        "Could not send message right now. Please try again.",
+      );
+    }
+  },
+);
 
 const parseWeeksFromDuration = (duration: string, fallback = 4) => {
   const n = parseInt(String(duration || "").replace(/[^\d]/g, ""), 10);
@@ -191,7 +289,7 @@ export const verifyPaystackPayment = onRequest(
           return;
         }
 
-        const db = admin.firestore();
+        // const db = admin.firestore();
         const userRef = db.doc(`users/${uid}`);
 
         // ✅ idempotency lock: deterministic doc per reference

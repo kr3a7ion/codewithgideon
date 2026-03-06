@@ -1,6 +1,22 @@
-// components/ContinueRegistration.tsx ✅ Option A (pathId truth)
+// components/ContinueRegistration.tsx
+// ✅ Option A (pathId truth)
 // After login only: collect details + create /users/{uid} + go to payment
 import React, { useEffect, useMemo, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  ArrowRight,
+  UserRound,
+  Phone,
+  CalendarRange,
+  Users,
+  BookOpen,
+  CreditCard,
+  AlertCircle,
+  Loader2,
+  CheckCircle2,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 import { View } from "../src/App";
 import {
   registrationStore,
@@ -26,7 +42,7 @@ type CourseOption = {
 
 interface ContinueRegistrationProps {
   onNavigate: (view: View, extraData?: any) => void;
-  selectedPath: string; // supports legacy/pid/cid just like before
+  selectedPath: string;
 }
 
 const PINNED_COURSES_RAW: Omit<CourseOption, "pathId">[] = [
@@ -80,13 +96,21 @@ const parseSelectedPathInput = (selectedPath: string) => {
 };
 
 const FieldError = ({ msg }: { msg?: string }) =>
-  msg ? <p className="mt-2 text-[11px] font-bold text-red-600">{msg}</p> : null;
+  msg ? (
+    <p className="mt-2 text-xs font-semibold text-red-600 dark:text-red-400">
+      {msg}
+    </p>
+  ) : null;
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 18 },
+  show: { opacity: 1, y: 0 },
+};
 
 const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
   onNavigate,
   selectedPath,
 }) => {
-  // ✅ Auth-safe gating (prevents bounce back to login)
   const [authReady, setAuthReady] = useState(false);
   const [uid, setUid] = useState("");
   const [email, setEmail] = useState("");
@@ -101,7 +125,6 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
   }, []);
 
   useEffect(() => {
-    // Only redirect AFTER auth finishes hydrating
     if (authReady && !uid) onNavigate("student-login");
   }, [authReady, uid, onNavigate]);
 
@@ -155,9 +178,6 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
     return m;
   }, [activePaths]);
 
-  // -------------------------
-  // Load Paths
-  // -------------------------
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -183,9 +203,6 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
     };
   }, []);
 
-  // -------------------------
-  // Load Courses
-  // -------------------------
   useEffect(() => {
     if (pathsLoading) return;
     let mounted = true;
@@ -295,9 +312,6 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
     };
   }, [selectedPath, pathsLoading, pathsByTitle, pathsById]);
 
-  // -------------------------
-  // Load cohort for selectedPathId
-  // -------------------------
   useEffect(() => {
     let mounted = true;
 
@@ -473,7 +487,6 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
         courseId: selectedCourse.courseId || undefined,
       });
 
-      // ✅ clear only on success (prevents being stuck if save fails)
       localStorage.removeItem("cwg_registration_handoff");
       localStorage.removeItem("cwg_account_created");
 
@@ -507,226 +520,364 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
     [maxWeeks],
   );
 
-  // Optional: tiny loading shell while auth hydrates (prevents flashing)
   if (!authReady) {
     return (
-      <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
-        <div className="max-w-md mx-auto px-6">
-          <div className="bg-white dark:bg-slate-900 p-8 rounded-[2rem] shadow-2xl border border-gray-100 dark:border-slate-800 text-center">
-            <p className="text-sm font-bold text-slate-600 dark:text-slate-400">
-              Loading your account…
-            </p>
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-slate-950 px-6">
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-md w-full rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 shadow-2xl text-center"
+        >
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center mb-5">
+            <Loader2 className="w-7 h-7 text-blue-600 dark:text-blue-400 animate-spin" />
           </div>
-        </div>
+          <p className="text-sm font-bold text-slate-600 dark:text-slate-400">
+            Loading your account…
+          </p>
+        </motion.div>
       </div>
     );
   }
 
   return (
-    <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
-      <div className="max-w-2xl mx-auto px-6">
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-black text-blue-900 dark:text-white mb-4">
-            Continue Registration
-          </h1>
-          <p className="text-slate-600 dark:text-slate-400">
-            Confirm your details and course, then proceed to payment.
-          </p>
+    <div className="min-h-screen bg-white dark:bg-slate-950 overflow-hidden">
+      <div className="relative">
+        <div className="absolute top-[-10%] left-[-10%] w-[35%] h-[35%] rounded-full bg-blue-600/10 blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[35%] h-[35%] rounded-full bg-teal-500/10 blur-[120px]" />
+      </div>
 
-          <div className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-blue-100 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur">
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-              Cohort
-            </span>
-            <span className="text-xs font-bold text-blue-900 dark:text-teal-400">
-              {cohortLoading ? "Loading..." : cohort?.label || "Current Cohort"}
-            </span>
-          </div>
-
-          {!pathsLoading && pathsError && (
-            <div className="mt-6 text-left max-w-xl mx-auto p-4 rounded-2xl border bg-orange-50 border-orange-100 text-orange-800 dark:bg-orange-500/10 dark:border-orange-500/20 dark:text-orange-200">
-              <p className="text-xs font-black uppercase tracking-widest">
-                Paths not loading
-              </p>
-              <p className="mt-2 text-sm font-bold">{pathsError}</p>
-            </div>
-          )}
-
-          {!coursesLoading && coursesError && (
-            <div className="mt-4 text-left max-w-xl mx-auto p-4 rounded-2xl border bg-orange-50 border-orange-100 text-orange-800 dark:bg-orange-500/10 dark:border-orange-500/20 dark:text-orange-200">
-              <p className="text-xs font-black uppercase tracking-widest">
-                Courses not loading
-              </p>
-              <p className="mt-2 text-sm font-bold">{coursesError}</p>
-            </div>
-          )}
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {error && (
-              <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
-                {error}
+      <div className="max-w-6xl mx-auto px-6 py-12 lg:py-16">
+        <div className="grid grid-cols-1 lg:grid-cols-[1.05fr_0.95fr] gap-10 items-start">
+          {/* Left Side / Intro */}
+          <motion.div
+            initial="hidden"
+            animate="show"
+            variants={{
+              hidden: {},
+              show: { transition: { staggerChildren: 0.08 } },
+            }}
+            className="lg:sticky lg:top-8"
+          >
+            <motion.div variants={fadeUp}>
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 text-blue-600 dark:text-blue-400 text-xs font-black uppercase tracking-widest mb-6">
+                <Sparkles size={14} />
+                <span>Final step before payment</span>
               </div>
-            )}
 
-            <div>
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                Full Name
-              </label>
-              <input
-                required
-                name="fullName"
-                value={formData.fullName}
-                onChange={handleChange}
-                type="text"
-                autoComplete="name"
-                placeholder="John Doe"
-                className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
-              />
-              <FieldError msg={fieldErrors.fullName} />
-            </div>
+              <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-slate-900 dark:text-white leading-tight tracking-tight mb-5">
+                Continue
+                <br />
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-teal-500">
+                  Registration.
+                </span>
+              </h1>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                  Phone Number
-                </label>
-                <input
-                  required
-                  name="phone"
-                  value={formData.phone}
-                  onChange={handleChange}
-                  type="tel"
-                  inputMode="numeric"
-                  autoComplete="tel"
-                  placeholder="08012345678"
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
-                />
-                <p className="mt-1 text-[10px] text-slate-400">
-                  Digits only (10–15).
+              <p className="text-lg text-slate-500 dark:text-slate-400 leading-relaxed max-w-xl">
+                Confirm your personal details, choose the right learning path,
+                and continue securely to payment.
+              </p>
+            </motion.div>
+
+            <motion.div
+              variants={fadeUp}
+              className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4"
+            >
+              <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-5 shadow-sm">
+                <UserRound className="w-5 h-5 text-blue-500 mb-3" />
+                <p className="text-xs font-black uppercase tracking-widest text-slate-400">
+                  Account
                 </p>
-                <FieldError msg={fieldErrors.phone} />
+                <p className="mt-2 text-sm font-bold text-slate-900 dark:text-white break-all">
+                  {email || "Signed in"}
+                </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                  Age Range
-                </label>
-                <select
-                  name="ageRange"
-                  value={formData.ageRange}
-                  onChange={handleChange}
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white font-bold outline-none"
-                >
-                  <option value="Under 18">Under 18</option>
-                  <option value="18-24">18–24</option>
-                  <option value="25-34">25–34</option>
-                  <option value="35-44">35–44</option>
-                  <option value="45+">45+</option>
-                </select>
+              <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-5 shadow-sm">
+                <Users className="w-5 h-5 text-teal-500 mb-3" />
+                <p className="text-xs font-black uppercase tracking-widest text-slate-400">
+                  Cohort
+                </p>
+                <p className="mt-2 text-sm font-bold text-slate-900 dark:text-white">
+                  {cohortLoading
+                    ? "Loading..."
+                    : cohort?.label || "Current Cohort"}
+                </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                  Gender
-                </label>
-                <select
-                  name="gender"
-                  value={formData.gender}
-                  onChange={handleChange}
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white font-bold outline-none"
-                >
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Prefer not to say">Prefer not to say</option>
-                </select>
+              <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-5 shadow-sm">
+                <ShieldCheck className="w-5 h-5 text-orange-500 mb-3" />
+                <p className="text-xs font-black uppercase tracking-widest text-slate-400">
+                  Checkout
+                </p>
+                <p className="mt-2 text-sm font-bold text-slate-900 dark:text-white">
+                  Secure flow
+                </p>
               </div>
+            </motion.div>
 
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                  Select Path / Course
-                </label>
+            <motion.div variants={fadeUp} className="mt-8 space-y-4">
+              {!pathsLoading && pathsError && (
+                <div className="p-4 rounded-2xl border bg-orange-50 border-orange-100 text-orange-800 dark:bg-orange-500/10 dark:border-orange-500/20 dark:text-orange-200">
+                  <p className="text-xs font-black uppercase tracking-widest">
+                    Paths not loading
+                  </p>
+                  <p className="mt-2 text-sm font-bold">{pathsError}</p>
+                </div>
+              )}
 
-                <select
-                  value={selectedCourseId}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    setSelectedCourseId(id);
-                    const found = courseOptions.find((c) => c.id === id);
-                    if (found) setSelectedPathId(found.pathId);
-                  }}
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white font-bold outline-none"
-                  disabled={coursesLoading || pathsLoading}
-                >
-                  {courseOptions.map((c) => {
-                    const pTitle =
-                      pathsById.get(c.pathId)?.title || c.title || "Path";
-                    const suffix = c.source === "firestore" ? "" : " (Pinned)";
-                    return (
-                      <option key={`${c.source}-${c.id}`} value={c.id}>
-                        {pTitle} — {c.title}
-                        {suffix}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-            </div>
+              {!coursesLoading && coursesError && (
+                <div className="p-4 rounded-2xl border bg-orange-50 border-orange-100 text-orange-800 dark:bg-orange-500/10 dark:border-orange-500/20 dark:text-orange-200">
+                  <p className="text-xs font-black uppercase tracking-widest">
+                    Courses not loading
+                  </p>
+                  <p className="mt-2 text-sm font-bold">{coursesError}</p>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
 
-            <div className="p-6 bg-blue-50 dark:bg-blue-900/20 rounded-3xl border border-blue-100 dark:border-blue-800/50">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex-grow">
-                  <label className="block text-xs font-black text-blue-900 dark:text-teal-400 uppercase tracking-widest mb-2">
-                    Initial Commitment
-                  </label>
-
-                  <select
-                    name="weeksToCommit"
-                    value={formData.weeksToCommit}
-                    onChange={handleChange}
-                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-blue-200 dark:border-slate-700 rounded-xl text-blue-900 dark:text-white font-black outline-none"
+          {/* Right Side / Form */}
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45 }}
+            className="rounded-[2rem] lg:rounded-[2.5rem] border border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl shadow-2xl p-6 md:p-8 lg:p-10"
+          >
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <AnimatePresence mode="wait">
+                {error && (
+                  <motion.div
+                    key="continue-registration-error"
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-2xl flex items-start gap-3"
                   >
-                    {weeksOptions.map((w) => (
-                      <option key={w} value={String(w)}>
-                        {w} {w === 1 ? "Week" : "Weeks"} (₦
-                        {(w * weeklyRate).toLocaleString()})
-                      </option>
-                    ))}
-                  </select>
+                    <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                    <p className="text-red-600 dark:text-red-400 text-sm font-medium leading-relaxed">
+                      {error}
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-                  <p className="mt-2 text-[10px] text-slate-400">
-                    Max: {maxWeeks} weeks • Selected Path:{" "}
-                    <span className="font-black">{selectedPathTitle}</span>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-slate-700 dark:text-slate-300 ml-1">
+                  Full Name
+                </label>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <UserRound className="h-5 w-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                  </div>
+                  <input
+                    required
+                    name="fullName"
+                    value={formData.fullName}
+                    onChange={handleChange}
+                    type="text"
+                    autoComplete="name"
+                    placeholder="John Doe"
+                    className="block w-full pl-11 pr-4 py-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-slate-900 dark:text-white placeholder:text-slate-400"
+                  />
+                </div>
+                <FieldError msg={fieldErrors.fullName} />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-slate-700 dark:text-slate-300 ml-1">
+                    Phone Number
+                  </label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Phone className="h-5 w-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                    </div>
+                    <input
+                      required
+                      name="phone"
+                      value={formData.phone}
+                      onChange={handleChange}
+                      type="tel"
+                      inputMode="numeric"
+                      autoComplete="tel"
+                      placeholder="08012345678"
+                      className="block w-full pl-11 pr-4 py-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-slate-900 dark:text-white placeholder:text-slate-400"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400 ml-1">
+                    Digits only (10–15).
                   </p>
+                  <FieldError msg={fieldErrors.phone} />
                 </div>
 
-                <div className="text-right flex-shrink-0">
-                  <p className="text-[10px] font-black text-blue-900/50 dark:text-teal-400/50 uppercase tracking-widest">
-                    Total to Pay
-                  </p>
-                  <p className="text-2xl font-black text-blue-900 dark:text-white">
-                    ₦{currentTotal.toLocaleString()}
-                  </p>
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-slate-700 dark:text-slate-300 ml-1">
+                    Age Range
+                  </label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <CalendarRange className="h-5 w-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                    </div>
+                    <select
+                      name="ageRange"
+                      value={formData.ageRange}
+                      onChange={handleChange}
+                      className="block w-full pl-11 pr-4 py-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white font-bold outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="Under 18">Under 18</option>
+                      <option value="18-24">18–24</option>
+                      <option value="25-34">25–34</option>
+                      <option value="35-44">35–44</option>
+                      <option value="45+">45+</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-slate-700 dark:text-slate-300 ml-1">
+                    Gender
+                  </label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Users className="h-5 w-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                    </div>
+                    <select
+                      name="gender"
+                      value={formData.gender}
+                      onChange={handleChange}
+                      className="block w-full pl-11 pr-4 py-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white font-bold outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Prefer not to say">
+                        Prefer not to say
+                      </option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-slate-700 dark:text-slate-300 ml-1">
+                    Select Path / Course
+                  </label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <BookOpen className="h-5 w-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                    </div>
+                    <select
+                      value={selectedCourseId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setSelectedCourseId(id);
+                        const found = courseOptions.find((c) => c.id === id);
+                        if (found) setSelectedPathId(found.pathId);
+                      }}
+                      className="block w-full pl-11 pr-4 py-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white font-bold outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
+                      disabled={coursesLoading || pathsLoading}
+                    >
+                      {courseOptions.map((c) => {
+                        const pTitle =
+                          pathsById.get(c.pathId)?.title || c.title || "Path";
+                        const suffix =
+                          c.source === "firestore" ? "" : " (Pinned)";
+                        return (
+                          <option key={`${c.source}-${c.id}`} value={c.id}>
+                            {pTitle} — {c.title}
+                            {suffix}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <button
-              disabled={disableSubmit}
-              type="submit"
-              className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all disabled:opacity-50"
-            >
-              {isSubmitting ? "Saving..." : "Proceed to Payment"}
-            </button>
+              <motion.div
+                whileHover={{ y: -2 }}
+                className="p-5 md:p-6 bg-gradient-to-br from-blue-50 to-white dark:from-blue-900/20 dark:to-slate-900 rounded-3xl border border-blue-100 dark:border-slate-800"
+              >
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+                  <div className="flex-grow">
+                    <label className="text-sm font-bold text-blue-900 dark:text-teal-300 ml-1 block mb-2">
+                      Initial Commitment
+                    </label>
 
-            <button
-              type="button"
-              onClick={() => onNavigate("student-dashboard")}
-              className="w-full text-xs font-black uppercase tracking-widest text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 transition"
-            >
-              Cancel & Return
-            </button>
-          </form>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <CreditCard className="h-5 w-5 text-blue-500 dark:text-teal-400" />
+                      </div>
+                      <select
+                        name="weeksToCommit"
+                        value={formData.weeksToCommit}
+                        onChange={handleChange}
+                        className="block w-full pl-11 pr-4 py-4 bg-white dark:bg-slate-800 border border-blue-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white font-black outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        {weeksOptions.map((w) => (
+                          <option key={w} value={String(w)}>
+                            {w} {w === 1 ? "Week" : "Weeks"} (₦
+                            {(w * weeklyRate).toLocaleString()})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400 ml-1">
+                      Max: {maxWeeks} weeks • Selected Path:{" "}
+                      <span className="font-black text-slate-700 dark:text-slate-200">
+                        {selectedPathTitle}
+                      </span>
+                    </p>
+                  </div>
+
+                  <div className="md:text-right shrink-0">
+                    <p className="text-[10px] font-black text-blue-900/50 dark:text-teal-400/50 uppercase tracking-widest">
+                      Total to Pay
+                    </p>
+                    <p className="text-3xl font-black text-slate-900 dark:text-white mt-2">
+                      ₦{currentTotal.toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <motion.button
+                  whileHover={{ scale: disableSubmit ? 1 : 1.01 }}
+                  whileTap={{ scale: disableSubmit ? 1 : 0.98 }}
+                  disabled={disableSubmit}
+                  type="submit"
+                  className="w-full bg-slate-900 dark:bg-blue-600 hover:bg-slate-800 dark:hover:bg-blue-500 text-white font-bold py-4 rounded-2xl shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span>Saving... Please wait</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Proceed to Payment</span>
+                      <ArrowRight size={18} />
+                    </>
+                  )}
+                </motion.button>
+
+                <button
+                  type="button"
+                  onClick={() => onNavigate("student-dashboard")}
+                  className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold py-4 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+                >
+                  Cancel & Return
+                </button>
+              </div>
+
+              <div className="pt-2 text-center">
+                <div className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 dark:text-slate-500">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Your details are saved before payment continues</span>
+                </div>
+              </div>
+            </form>
+          </motion.div>
         </div>
       </div>
     </div>

@@ -5,14 +5,12 @@ import {
   registrationStore,
 } from "../services/registrationStore";
 import { auth, db } from "../services/firebase";
-
 import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
   User,
 } from "firebase/auth";
-
 import { doc, getDoc } from "firebase/firestore";
 
 const HANDOFF_KEY = "cwg_registration_handoff";

@@ -11,6 +11,42 @@ import {
   SyllabusWeek,
 } from "../services/registrationStore";
 
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  LayoutDashboard,
+  RefreshCw,
+  LogOut,
+  Settings2,
+  Database,
+  Users,
+  CircleDollarSign,
+  Clock3,
+  ShieldCheck,
+  FolderTree,
+  GraduationCap,
+  CalendarDays,
+  CreditCard,
+  Inbox,
+  Mail,
+  ExternalLink,
+  Copy,
+  MessageSquare,
+  Search,
+  AlertCircle,
+  X,
+} from "lucide-react";
+import {
+  collection,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  doc,
+  updateDoc,
+  deleteDoc,
+} from "firebase/firestore";
+import { db } from "../services/firebase";
+
 interface AdminDashboardProps {
   onNavigate: (view: View) => void;
   onLogout: () => void;
@@ -27,6 +63,21 @@ const findCohortDocIdByKey = (list: any[], cohortKey: string) => {
     (c) => String(c?.cohortKey || "").trim() === key,
   );
   return hit ? String(hit.id) : "";
+};
+type ContactMessageDoc = {
+  id: string;
+  name: string;
+  email: string;
+  message: string;
+  status?: string;
+  source?: string;
+  createdAt?: any;
+  auth?: {
+    uid?: string | null;
+  };
+  appCheck?: {
+    appId?: string | null;
+  };
 };
 
 type CourseForm = {
@@ -132,6 +183,28 @@ const sessionTimeToMs = (t: any) => {
   if (typeof t?.toMillis === "function") return t.toMillis();
   return Date.now();
 };
+const fadeUp = {
+  hidden: { opacity: 0, y: 18 },
+  show: { opacity: 1, y: 0 },
+};
+
+const toDateMs = (v: any): number => {
+  if (!v) return 0;
+  if (typeof v?.toMillis === "function") return v.toMillis();
+  if (typeof v?.seconds === "number") return v.seconds * 1000;
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const ms = Date.parse(v);
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  return 0;
+};
+
+const formatInboxDate = (v: any) => {
+  const ms = toDateMs(v);
+  if (!ms) return "Unknown date";
+  return new Date(ms).toLocaleString();
+};
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigate,
@@ -156,6 +229,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newPathTitle, setNewPathTitle] = useState("");
   const [editingPathId, setEditingPathId] = useState<string | null>(null);
   const [editingPathTitle, setEditingPathTitle] = useState("");
+
+  // -------------------------
+  // Inbox (Contact Messages)
+  // -------------------------
+  const [inboxMessages, setInboxMessages] = useState<ContactMessageDoc[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(true);
+  const [inboxError, setInboxError] = useState("");
+  const [selectedInboxId, setSelectedInboxId] = useState<string>("");
+  const [showInboxModal, setShowInboxModal] = useState(false);
 
   const pathsById = useMemo(() => {
     const m = new Map<string, PathDoc>();
@@ -203,7 +285,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setPathBusyId(null);
     }
   };
-  
 
   const startEditPath = (p: PathDoc) => {
     setEditingPathId(p.id);
@@ -296,6 +377,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [sessionBusyId, setSessionBusyId] = useState<string | null>(null);
   const [pendingBusyUid, setPendingBusyUid] = useState<string | null>(null);
   const [sessionsError, setSessionsError] = useState<string>("");
+  const [inboxFilter, setInboxFilter] = useState<
+    "all" | "new" | "read" | "resolved"
+  >("all");
 
   // global busy map for all buttons
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -373,6 +457,44 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setLoading(false);
     }
   };
+  const fetchInboxMessages = async () => {
+    setInboxLoading(true);
+    setInboxError("");
+
+    try {
+      const q = query(
+        collection(db, "contactMessages"),
+        orderBy("createdAt", "desc"),
+        limit(30),
+      );
+
+      const snap = await getDocs(q);
+
+      const list: ContactMessageDoc[] = snap.docs.map((doc) => ({
+        id: doc.id,
+        ...(doc.data() as Omit<ContactMessageDoc, "id">),
+      }));
+
+      setInboxMessages(list);
+
+      if (!selectedInboxId && list.length) {
+        setSelectedInboxId(list[0].id);
+      } else if (
+        selectedInboxId &&
+        !list.some((m) => m.id === selectedInboxId)
+      ) {
+        setSelectedInboxId(list[0]?.id || "");
+      }
+    } catch (e: any) {
+      console.error("fetchInboxMessages failed:", e);
+      setInboxMessages([]);
+      setInboxError(
+        e?.message || "Failed to load inbox. Check Firestore rules/index.",
+      );
+    } finally {
+      setInboxLoading(false);
+    }
+  };
 
   const fetchCourses = async () => {
     setCoursesLoading(true);
@@ -384,6 +506,44 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setCourses([]);
     } finally {
       setCoursesLoading(false);
+    }
+  };
+  const markInboxStatus = async (
+    id: string,
+    status: "new" | "read" | "resolved",
+  ) => {
+    if (!id) return;
+
+    try {
+      await updateDoc(doc(db, "contactMessages", id), {
+        status,
+      });
+
+      setInboxMessages((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, status } : m)),
+      );
+    } catch (e) {
+      console.error("markInboxStatus failed:", e);
+      alert("Failed to update message status.");
+    }
+  };
+
+  const deleteInboxMessage = async (id: string) => {
+    if (!id) return;
+    if (!confirm("Delete this message? This action cannot be undone.")) return;
+
+    try {
+      await deleteDoc(doc(db, "contactMessages", id));
+
+      setInboxMessages((prev) => prev.filter((m) => m.id !== id));
+
+      if (selectedInboxId === id) {
+        const remaining = inboxMessages.filter((m) => m.id !== id);
+        setSelectedInboxId(remaining[0]?.id || "");
+      }
+    } catch (e) {
+      console.error("deleteInboxMessage failed:", e);
+      alert("Failed to delete message.");
     }
   };
 
@@ -450,6 +610,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           fetchRegistrations(),
           fetchCourses(),
           fetchCohorts(),
+          fetchInboxMessages(),
         ]);
       } catch (e) {
         console.error("Admin init load failed:", e);
@@ -652,6 +813,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const selectedInboxMessage = useMemo(
+    () => inboxMessages.find((m) => m.id === selectedInboxId) || null,
+    [inboxMessages, selectedInboxId],
+  );
+
+  const unreadInboxCount = useMemo(
+    () =>
+      inboxMessages.filter(
+        (m) => String(m.status || "new").toLowerCase() === "new",
+      ).length,
+    [inboxMessages],
+  );
+
   // -------------------------
   // Courses actions
   // -------------------------
@@ -694,6 +868,29 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       console.error("toggleCourseExplore failed:", e);
     }
   };
+
+  const inboxCounts = useMemo(() => {
+    const all = inboxMessages.length;
+    const fresh = inboxMessages.filter(
+      (m) => String(m.status || "new").toLowerCase() === "new",
+    ).length;
+    const read = inboxMessages.filter(
+      (m) => String(m.status || "").toLowerCase() === "read",
+    ).length;
+    const resolved = inboxMessages.filter(
+      (m) => String(m.status || "").toLowerCase() === "resolved",
+    ).length;
+
+    return { all, new: fresh, read, resolved };
+  }, [inboxMessages]);
+
+  const filteredInboxMessages = useMemo(() => {
+    if (inboxFilter === "all") return inboxMessages;
+
+    return inboxMessages.filter(
+      (m) => String(m.status || "new").toLowerCase() === inboxFilter,
+    );
+  }, [inboxMessages, inboxFilter]);
 
   const openEditCourse = (c: CourseDoc) => {
     setCourseError("");
@@ -1021,7 +1218,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setSessionModalOpen(true);
   };
 
-
   const saveSession = async (e: React.FormEvent) => {
     e.preventDefault();
     setSessionError("");
@@ -1209,6 +1405,32 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </button>
     );
   };
+  useEffect(() => {
+    if (!selectedInboxMessage?.id) return;
+
+    const currentStatus = String(
+      selectedInboxMessage.status || "new",
+    ).toLowerCase();
+    if (currentStatus !== "new") return;
+
+    markInboxStatus(selectedInboxMessage.id, "read");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedInboxMessage?.id]);
+
+  useEffect(() => {
+    if (!filteredInboxMessages.length) {
+      setSelectedInboxId("");
+      return;
+    }
+
+    const stillVisible = filteredInboxMessages.some(
+      (m) => m.id === selectedInboxId,
+    );
+
+    if (!stillVisible) {
+      setSelectedInboxId(filteredInboxMessages[0].id);
+    }
+  }, [filteredInboxMessages, selectedInboxId]);
 
   // -------------------------
   // RETURN JSX (your UI preserved)
@@ -1216,153 +1438,169 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   return (
     <div className="py-12 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
       <div className="max-w-7xl mx-auto px-6">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-          <div>
-            <h1 className="text-3xl font-black text-blue-900 dark:text-white">
-              Admin Control Center
-            </h1>
-            <p className="text-slate-500 dark:text-slate-400">
-              Manage paths, cohorts, sessions, payments, and integrations
-            </p>
-          </div>
+        <motion.div
+          initial="hidden"
+          animate="show"
+          variants={{
+            hidden: {},
+            show: { transition: { staggerChildren: 0.06 } },
+          }}
+        >
+          {/* Header */}
+          <motion.div
+            variants={fadeUp}
+            className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8"
+          >
+            <div>
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-black uppercase tracking-widest mb-4">
+                <LayoutDashboard size={14} />
+                <span>Admin Control Center</span>
+              </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => {
-                fetchPaths();
-                fetchRegistrations();
-                fetchCourses();
-                fetchCohorts();
-              }}
-              className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
-            >
-              Refresh All
-            </button>
+              <h1 className="text-3xl md:text-4xl font-black text-blue-900 dark:text-white tracking-tight">
+                Admin Control Center
+              </h1>
+              <p className="text-slate-500 dark:text-slate-400 mt-2">
+                Manage paths, cohorts, sessions, payments, inbox, and
+                integrations
+              </p>
+            </div>
 
-            <button
-              onClick={handleSyncToSheets}
-              disabled={isSyncing}
-              className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
-                isSyncing
-                  ? "bg-gray-200 text-gray-500"
-                  : "bg-green-600 text-white hover:bg-green-700 shadow-md"
-              }`}
-            >
-              {isSyncing ? (
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M9 17v-2a2 2 0 012-2h2a2 2 0 012 2v2m-6-9a2 2 0 114 0 2 2 0 01-4 0zM9 21h6a2 2 0 002-2v-1a2 2 0 00-2-2H9a2 2 0 00-2 2v1a2 2 0 002 2z"
-                  />
-                </svg>
-              )}
-              Sync to Sheets
-            </button>
-
-            <button
-              onClick={() => setShowConfig(true)}
-              className="p-2.5 bg-white dark:bg-slate-900 text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 rounded-xl border border-gray-100 dark:border-slate-800 transition-colors"
-              title="Configure Sheet Binding"
-              aria-label="Configure Sheet Binding"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => {
+                  setInboxFilter("all");
+                  setShowInboxModal(true);
+                  if (!inboxMessages.length) fetchInboxMessages();
+                }}
+                className="relative p-2.5 bg-white dark:bg-slate-900 text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 rounded-xl border border-gray-100 dark:border-slate-800 transition-colors"
+                title="Open Inbox"
+                aria-label="Open Inbox"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                />
-              </svg>
-            </button>
+                <Inbox className="w-5 h-5" />
+                {unreadInboxCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-pink-600 text-white text-[10px] font-black flex items-center justify-center">
+                    {unreadInboxCount > 9 ? "9+" : unreadInboxCount}
+                  </span>
+                )}
+              </button>
+              <motion.button
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => {
+                  fetchPaths();
+                  fetchRegistrations();
+                  fetchCourses();
+                  fetchCohorts();
+                  fetchInboxMessages();
+                }}
+                className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition inline-flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Refresh All
+              </motion.button>
 
-            <div className="h-8 w-px bg-gray-200 dark:bg-slate-800 hidden md:block" />
+              <motion.button
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={handleSyncToSheets}
+                disabled={isSyncing}
+                className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
+                  isSyncing
+                    ? "bg-gray-200 text-gray-500"
+                    : "bg-green-600 text-white hover:bg-green-700 shadow-md"
+                }`}
+              >
+                {isSyncing ? <Spinner /> : <Database className="w-4 h-4" />}
+                Sync to Sheets
+              </motion.button>
 
-            <button
-              onClick={onLogout}
-              className="px-6 py-2.5 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 hover:opacity-90 rounded-xl text-xs font-black uppercase tracking-widest transition-colors"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
+              <button
+                onClick={() => setShowConfig(true)}
+                className="p-2.5 bg-white dark:bg-slate-900 text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 rounded-xl border border-gray-100 dark:border-slate-800 transition-colors"
+                title="Configure Sheet Binding"
+                aria-label="Configure Sheet Binding"
+              >
+                <Settings2 className="w-5 h-5" />
+              </button>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+              <div className="h-8 w-px bg-gray-200 dark:bg-slate-800 hidden md:block" />
+
+              <motion.button
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={onLogout}
+                className="px-6 py-2.5 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 hover:opacity-90 rounded-xl text-xs font-black uppercase tracking-widest transition-colors inline-flex items-center gap-2"
+              >
+                <LogOut className="w-4 h-4" />
+                Logout
+              </motion.button>
+            </div>
+          </motion.div>
+        </motion.div>
+
+        <motion.div
+          variants={fadeUp}
+          className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-8"
+        >
           {[
             {
               label: "Total Students",
               value: stats.total,
+              icon: Users,
               valueClass: "text-blue-900 dark:text-white",
             },
             {
               label: "Pending",
               value: stats.pending,
+              icon: Clock3,
               valueClass: "text-orange-600",
             },
             {
               label: "Complete",
               value: stats.complete,
+              icon: ShieldCheck,
               valueClass: "text-teal-600",
             },
             {
-              label: "Revenue (Complete)",
+              label: "Revenue",
               value: `₦${stats.revenue.toLocaleString()}`,
+              icon: CircleDollarSign,
               valueClass: "text-blue-900 dark:text-white",
             },
             {
               label: "Pending Payments",
               value: stats.pendingPaymentsCount,
+              icon: CreditCard,
               valueClass: "text-purple-600",
             },
-          ].map((s) => (
-            <div
-              key={s.label}
-              className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm"
-            >
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                {s.label}
-              </p>
-              <p className={`text-2xl font-black mt-2 ${s.valueClass}`}>
-                {s.value}
-              </p>
-            </div>
-          ))}
-        </div>
+            {
+              label: "Inbox (New)",
+              value: unreadInboxCount,
+              icon: Inbox,
+              valueClass: "text-pink-600",
+            },
+          ].map((s) => {
+            const Icon = s.icon;
+            return (
+              <motion.div
+                key={s.label}
+                whileHover={{ y: -2 }}
+                className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm"
+              >
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    {s.label}
+                  </p>
+                  <Icon className="w-4 h-4 text-slate-400" />
+                </div>
+                <p className={`text-2xl font-black mt-3 ${s.valueClass}`}>
+                  {s.value}
+                </p>
+              </motion.div>
+            );
+          })}
+        </motion.div>
 
         {/* PATHS MANAGER */}
         <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
@@ -1970,6 +2208,365 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
         </div>
+
+        {/* Inbox Modal */}
+        <AnimatePresence>
+          {showInboxModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[70] bg-slate-950/75 backdrop-blur-md p-3 md:p-6"
+            >
+              <motion.div
+                initial={{ opacity: 0, y: 20, scale: 0.985 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.985 }}
+                transition={{ duration: 0.2 }}
+                className="mx-auto h-[92vh] max-w-7xl rounded-[2rem] border border-white/10 bg-white dark:bg-slate-950 shadow-[0_20px_80px_rgba(0,0,0,0.35)] overflow-hidden"
+              >
+                {/* Top bar */}
+                <div className="relative border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-white via-slate-50 to-blue-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900/70">
+                  <div className="absolute inset-0 pointer-events-none opacity-60">
+                    <div className="absolute -top-10 right-20 h-28 w-28 rounded-full bg-blue-500/10 blur-2xl" />
+                    <div className="absolute -bottom-10 left-24 h-28 w-28 rounded-full bg-teal-500/10 blur-2xl" />
+                  </div>
+
+                  <div className="relative flex flex-col gap-4 px-5 py-5 md:px-7 md:py-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-pink-50 dark:bg-pink-500/10 border border-pink-100 dark:border-pink-500/20 text-pink-600 dark:text-pink-300 text-[10px] font-black uppercase tracking-[0.18em] mb-3">
+                          <Inbox className="w-3.5 h-3.5" />
+                          Contact Inbox
+                        </div>
+
+                        <h3 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
+                          Website Messages
+                        </h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                          Review enquiries, reply quickly, and keep support
+                          tidy.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={fetchInboxMessages}
+                          className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition inline-flex items-center gap-2"
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                          Refresh
+                        </button>
+
+                        <button
+                          onClick={() => setShowInboxModal(false)}
+                          className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+                          aria-label="Close Inbox"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Tabs */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {[
+                        { key: "all", label: "All", count: inboxCounts.all },
+                        { key: "new", label: "New", count: inboxCounts.new },
+                        { key: "read", label: "Read", count: inboxCounts.read },
+                        {
+                          key: "resolved",
+                          label: "Resolved",
+                          count: inboxCounts.resolved,
+                        },
+                      ].map((tab) => {
+                        const active = inboxFilter === tab.key;
+
+                        return (
+                          <button
+                            key={tab.key}
+                            onClick={() =>
+                              setInboxFilter(
+                                tab.key as "all" | "new" | "read" | "resolved",
+                              )
+                            }
+                            className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all inline-flex items-center gap-2 border ${
+                              active
+                                ? "bg-slate-900 dark:bg-teal-600 text-white border-slate-900 dark:border-teal-600 shadow-lg"
+                                : "bg-white/80 dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800"
+                            }`}
+                          >
+                            <span>{tab.label}</span>
+                            <span
+                              className={`min-w-[22px] h-[22px] px-1 rounded-full text-[10px] flex items-center justify-center ${
+                                active
+                                  ? "bg-white/15 text-white"
+                                  : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300"
+                              }`}
+                            >
+                              {tab.count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Body */}
+                <div className="grid h-[calc(92vh-158px)] grid-cols-1 xl:grid-cols-[380px_1fr]">
+                  {/* Left rail */}
+                  <div className="border-r border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 overflow-hidden">
+                    <div className="h-full overflow-auto p-4 space-y-3">
+                      {inboxError ? (
+                        <div className="p-4 rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-200 text-sm font-bold inline-flex items-start gap-3 w-full">
+                          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                          <span>{inboxError}</span>
+                        </div>
+                      ) : inboxLoading ? (
+                        <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 inline-flex items-center gap-3 w-full shadow-sm">
+                          <span className="h-4 w-4 rounded-full border-2 border-slate-300 dark:border-slate-600 border-t-blue-600 dark:border-t-teal-400 animate-spin" />
+                          Loading inbox…
+                        </div>
+                      ) : filteredInboxMessages.length === 0 ? (
+                        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 shadow-sm">
+                          No messages in this filter.
+                        </div>
+                      ) : (
+                        filteredInboxMessages.map((m) => {
+                          const isSelected = selectedInboxId === m.id;
+                          const status = String(
+                            m.status || "new",
+                          ).toLowerCase();
+
+                          return (
+                            <button
+                              key={m.id}
+                              onClick={() => setSelectedInboxId(m.id)}
+                              className={`w-full text-left rounded-3xl border p-4 transition-all shadow-sm ${
+                                isSelected
+                                  ? "border-blue-200 dark:border-teal-500/30 bg-white dark:bg-slate-900 ring-2 ring-blue-500/10 dark:ring-teal-500/10"
+                                  : "border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/70 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md"
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-600 to-teal-500 text-white flex items-center justify-center font-black text-sm shrink-0">
+                                      {(m.name || "?").charAt(0).toUpperCase()}
+                                    </div>
+
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-black text-slate-900 dark:text-white truncate">
+                                        {m.name || "Unknown sender"}
+                                      </p>
+                                      <p className="text-xs text-slate-400 font-medium truncate mt-0.5">
+                                        {m.email || "No email"}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <p className="mt-3 text-[12px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                                    {m.message || "No message"}
+                                  </p>
+                                </div>
+
+                                <span
+                                  className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shrink-0 ${
+                                    status === "new"
+                                      ? "bg-pink-50 border border-pink-200 text-pink-600 dark:bg-pink-500/10 dark:border-pink-500/20 dark:text-pink-300"
+                                      : status === "resolved"
+                                        ? "bg-teal-50 border border-teal-200 text-teal-600 dark:bg-teal-500/10 dark:border-teal-500/20 dark:text-teal-300"
+                                        : "bg-slate-100 border border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300"
+                                  }`}
+                                >
+                                  {status}
+                                </span>
+                              </div>
+
+                              <div className="mt-4 flex items-center justify-between gap-3">
+                                <span className="text-[10px] font-bold text-slate-400">
+                                  {formatInboxDate(m.createdAt)}
+                                </span>
+
+                                {isSelected ? (
+                                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 dark:text-teal-300">
+                                    Open
+                                  </span>
+                                ) : null}
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right detail */}
+                  <div className="bg-white dark:bg-slate-950 overflow-hidden">
+                    <div className="h-full overflow-auto p-5 md:p-7">
+                      {!selectedInboxMessage ? (
+                        <div className="h-full flex items-center justify-center">
+                          <div className="max-w-md text-center">
+                            <div className="w-16 h-16 mx-auto rounded-3xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mb-5">
+                              <Mail className="w-7 h-7" />
+                            </div>
+                            <h4 className="text-xl font-black text-slate-900 dark:text-white mb-2">
+                              Select a message
+                            </h4>
+                            <p className="text-slate-500 dark:text-slate-400">
+                              Open a conversation from the left to preview and
+                              manage it.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5 mb-6">
+                            <div className="min-w-0">
+                              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300 mb-4">
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                Conversation
+                              </div>
+
+                              <h3 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white break-words">
+                                {selectedInboxMessage.name || "Unknown sender"}
+                              </h3>
+
+                              <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 break-all">
+                                {selectedInboxMessage.email}
+                              </p>
+
+                              <p className="text-[11px] text-slate-400 font-bold mt-3">
+                                {formatInboxDate(
+                                  selectedInboxMessage.createdAt,
+                                )}
+                              </p>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                onClick={() =>
+                                  copyToClipboard(
+                                    selectedInboxMessage.email || "",
+                                  )
+                                }
+                                className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition inline-flex items-center gap-2"
+                              >
+                                <Copy className="w-4 h-4" />
+                                Copy Email
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  markInboxStatus(
+                                    selectedInboxMessage.id,
+                                    "read",
+                                  )
+                                }
+                                className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+                              >
+                                Mark Read
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  markInboxStatus(
+                                    selectedInboxMessage.id,
+                                    "resolved",
+                                  )
+                                }
+                                className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:bg-teal-500 transition"
+                              >
+                                Resolve
+                              </button>
+
+                              <a
+                                href={`mailto:${selectedInboxMessage.email}`}
+                                onClick={() =>
+                                  markInboxStatus(
+                                    selectedInboxMessage.id,
+                                    "resolved",
+                                  )
+                                }
+                                className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:bg-blue-800 transition inline-flex items-center gap-2"
+                              >
+                                <Mail className="w-4 h-4" />
+                                Reply
+                              </a>
+
+                              <button
+                                onClick={() =>
+                                  deleteInboxMessage(selectedInboxMessage.id)
+                                }
+                                className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:bg-red-500 transition"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            <div className="rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                Status
+                              </p>
+                              <p
+                                className={`text-sm font-black mt-2 ${
+                                  String(
+                                    selectedInboxMessage.status || "new",
+                                  ).toLowerCase() === "new"
+                                    ? "text-pink-600 dark:text-pink-300"
+                                    : String(
+                                          selectedInboxMessage.status || "",
+                                        ).toLowerCase() === "resolved"
+                                      ? "text-teal-600 dark:text-teal-300"
+                                      : "text-blue-900 dark:text-white"
+                                }`}
+                              >
+                                {selectedInboxMessage.status || "new"}
+                              </p>
+                            </div>
+
+                            <div className="rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                Source
+                              </p>
+                              <p className="text-sm font-black text-slate-900 dark:text-white mt-2">
+                                {selectedInboxMessage.source ||
+                                  "web-contact-form"}
+                              </p>
+                            </div>
+
+                            <div className="rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                Auth UID
+                              </p>
+                              <p className="text-sm font-black text-slate-900 dark:text-white mt-2 break-all">
+                                {selectedInboxMessage.auth?.uid || "Anonymous"}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-gradient-to-br from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 p-6 shadow-sm">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 inline-flex items-center gap-2">
+                              <MessageSquare className="w-4 h-4" />
+                              Message Body
+                            </p>
+                            <p className="text-[15px] text-slate-700 dark:text-slate-300 leading-7 whitespace-pre-wrap break-words">
+                              {selectedInboxMessage.message ||
+                                "No message content."}
+                            </p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Config Modal */}
         {showConfig && (
