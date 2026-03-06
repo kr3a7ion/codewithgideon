@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { View } from "../src/App";
-import { RegistrationEntry, registrationStore } from "../services/registrationStore";
+import {
+  RegistrationEntry,
+  registrationStore,
+} from "../services/registrationStore";
 import { auth, db } from "../services/firebase";
 
 import {
@@ -11,6 +14,32 @@ import {
 } from "firebase/auth";
 
 import { doc, getDoc } from "firebase/firestore";
+
+const HANDOFF_KEY = "cwg_registration_handoff";
+
+const safeJsonParse = (raw: string | null) => {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+function waitForAuthUid(auth: any, expectedUid: string, timeoutMs = 8000) {
+  return new Promise<void>((resolve, reject) => {
+    const start = Date.now();
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (u?.uid === expectedUid) {
+        unsub();
+        resolve();
+      } else if (Date.now() - start > timeoutMs) {
+        unsub();
+        reject(new Error("Auth state not attached yet"));
+      }
+    });
+  });
+}
 
 export const useAppLogic = () => {
   // 🧭 APP STATE
@@ -42,28 +71,35 @@ export const useAppLogic = () => {
       }
 
       try {
+        // 1) admin check
         const adminSnap = await getDoc(doc(db, "admins", user.uid));
 
         if (adminSnap.exists()) {
           setAdminUser(user);
           setStudentUser(null);
           setStudentProfile(null);
-        } else {
-          const userSnap = await getDoc(doc(db, "users", user.uid));
+          setIsLoadingAuth(false);
+          return;
+        }
 
-          if (!userSnap.exists()) {
-            await signOut(auth);
-            setIsLoadingAuth(false);
-            return;
-          }
+        // 2) student path (IMPORTANT CHANGE)
+        // If /users/{uid} does NOT exist yet, this is a "Step 2" student.
+        // Do NOT sign out — allow ContinueRegistration to create the profile doc.
+        const userSnap = await getDoc(doc(db, "users", user.uid));
 
-          setStudentUser(user);
+        setAdminUser(null);
+        setStudentUser(user);
+
+        if (userSnap.exists()) {
           setStudentProfile(userSnap.data() as RegistrationEntry);
-          setAdminUser(null);
+        } else {
+          setStudentProfile(null); // ✅ allow continue-registration flow
         }
       } catch (err) {
         console.error("Auth bootstrap failed:", err);
-        await signOut(auth);
+        setAdminUser(null);
+        setStudentUser(user || null);
+        setStudentProfile(null);
       } finally {
         setIsLoadingAuth(false);
       }
@@ -75,7 +111,9 @@ export const useAppLogic = () => {
   // 🌗 THEME INIT
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const prefersDark = window.matchMedia(
+      "(prefers-color-scheme: dark)",
+    ).matches;
     const dark = savedTheme === "dark" || (!savedTheme && prefersDark);
 
     setIsDark(dark);
@@ -91,21 +129,46 @@ export const useAppLogic = () => {
     });
   };
 
-  // 🧭 NAVIGATION (supports extraData payload)
+  // ✅ Helper: load registration handoff into state
+  const hydrateRegistrationFromHandoff = () => {
+    const raw = localStorage.getItem(HANDOFF_KEY);
+    const data = safeJsonParse(raw);
+    const handoff = data?.handoff ?? data;
+
+    if (handoff?.uid) {
+      setActiveRegistration(handoff);
+      if (handoff?.path) setSelectedPath(handoff.path);
+      return handoff;
+    }
+
+    return null;
+  };
+
+  // 🧭 NAVIGATION
   const navigateTo = (view: View, extraData?: any) => {
-    // Payment payload from StudentDashboard: { selectedPath, userData }
-    if (view === "payment" && extraData) {
-      if (extraData?.userData?.uid) {
-        setActiveRegistration(extraData.userData);
-        if (extraData.selectedPath) setSelectedPath(extraData.selectedPath);
-      } else if (extraData?.uid) {
-        // Sometimes userData passed directly
-        setActiveRegistration(extraData);
-        if (extraData.path) setSelectedPath(extraData.path);
+    if (view === "payment") {
+      if (extraData) {
+        if (extraData?.userData?.uid) {
+          setActiveRegistration(extraData.userData);
+          if (extraData.selectedPath) setSelectedPath(extraData.selectedPath);
+        } else if (extraData?.uid) {
+          setActiveRegistration(extraData);
+          if (extraData.path) setSelectedPath(extraData.path);
+        }
+      } else {
+        try {
+          const raw = localStorage.getItem(HANDOFF_KEY);
+          if (raw) {
+            const handoff = JSON.parse(raw);
+            if (handoff?.uid) {
+              setActiveRegistration(handoff);
+              if (handoff?.path) setSelectedPath(handoff.path);
+            }
+          }
+        } catch {}
       }
     }
 
-    // Curriculums path navigation uses a string
     if (typeof extraData === "string") {
       setSelectedPath(extraData);
     }
@@ -114,26 +177,27 @@ export const useAppLogic = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // 📝 REGISTRATION -> go to payment
+  // 📝 REGISTRATION
   const handleRegistrationSubmit = (data: any) => {
-    setActiveRegistration(data);
-    if (data?.path) setSelectedPath(data.path);
-    navigateTo("payment");
+    const handoff = data?.handoff ?? data;
+    if (handoff?.uid) setActiveRegistration(handoff);
+    if (handoff?.path) setSelectedPath(handoff.path);
+    navigateTo("student-login");
   };
 
-  // ✅ Called after payment success to update status + refresh profile
+  // ✅ Called after payment success
   const completePayment = async () => {
     if (!activeRegistration) return;
 
-    await registrationStore.updateStatus(activeRegistration.uid, "Complete");
-
-    // Refresh student profile if this user just paid
+    // Refresh latest profile from Firestore after backend verification
     if (studentUser?.uid === activeRegistration.uid) {
       const userDoc = await getDoc(doc(db, "users", activeRegistration.uid));
       if (userDoc.exists()) {
         setStudentProfile(userDoc.data() as RegistrationEntry);
       }
     }
+
+    localStorage.removeItem(HANDOFF_KEY);
   };
 
   // 🔐 ADMIN LOGIN
@@ -162,11 +226,23 @@ export const useAppLogic = () => {
   // 🎓 STUDENT LOGIN
   const loginStudent = async (email: string, password: string) => {
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      navigateTo("student-dashboard");
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+
+      await waitForAuthUid(auth, cred.user.uid, 15000);
+
+      // ✅ If profile exists -> dashboard
+      // ✅ If missing -> continue registration
+      const profile = await registrationStore.getUserProfile(cred.user.uid);
+
+      if (!profile) {
+        navigateTo("continue-registration");
+      } else {
+        navigateTo("student-dashboard");
+      }
+
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.message };
+      return { success: false, error: err?.message || "Login failed" };
     }
   };
 

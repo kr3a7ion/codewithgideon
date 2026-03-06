@@ -250,6 +250,12 @@ export const registrationStore = {
       .replace(/(^-|-$)/g, "");
   },
 
+  async getUserProfile(uid: string) {
+    const snap = await getDoc(doc(db, "users", uid));
+    if (!snap.exists()) return null;
+    return { uid: snap.id, ...(snap.data() as any) } as RegistrationEntry;
+  },
+
   /**
    * ✅ Legacy mapping (kept for backward-compat)
    * Used ONLY when pathId is missing.
@@ -653,114 +659,192 @@ export const registrationStore = {
     );
   },
 
+  // =========================
+  // AUTH-ONLY SIGNUP (Step 1)
+  // =========================
+  async createAuthOnly(
+    email: string,
+    password: string,
+  ): Promise<{ uid: string; email: string }> {
+    const em = String(email || "").trim();
+    if (!em) throw new Error("Email is required.");
+    if (!password || String(password).length < 6)
+      throw new Error("Password must be at least 6 characters.");
+
+    const userCredential = await createUserWithEmailAndPassword(
+      auth,
+      em,
+      password,
+    );
+    const user = userCredential.user;
+
+    // force token (good practice)
+    await user.getIdToken(true);
+
+    return { uid: user.uid, email: user.email || em };
+  },
+
+  // =========================
+  // COMPLETE PROFILE (Step 2)
+  // Creates /users/{uid} AFTER LOGIN
+  // =========================
+  async completeStudentProfileAfterLogin(
+    uid: string,
+    input: {
+      fullName: string;
+      phone: string;
+      ageRange: string;
+      gender: string;
+      weeksToCommit: number;
+      totalPrice: number;
+      path: string;
+      pathId?: string;
+      courseId?: string;
+    },
+  ): Promise<void> {
+    const user = auth.currentUser;
+    if (!user || user.uid !== uid) {
+      throw new Error("You must be signed in to complete registration.");
+    }
+
+    const fullName = String(input.fullName || "").trim();
+    if (fullName.length < 2) throw new Error("Full name is required.");
+
+    const phone = String(input.phone || "").trim();
+    if (phone.length < 6) throw new Error("Phone number is required.");
+
+    const pathTitle = String(input.path || "").trim();
+    if (!pathTitle) throw new Error("Path is required.");
+
+    // Resolve path title + cohort (pathId preferred)
+    let pathIdRaw = String(input.pathId || "").trim();
+    let resolvedPathTitle = pathTitle;
+
+    if (pathIdRaw) {
+      resolvedPathTitle = await this.resolvePathTitle(pathIdRaw, pathTitle);
+    } else {
+      const resolvedId = await this.resolvePathId(pathTitle);
+      if (resolvedId) pathIdRaw = resolvedId;
+    }
+
+    const finalPathId = pathIdRaw || undefined;
+
+    const activeCohort = finalPathId
+      ? await this.getActiveCohortForPathId(finalPathId)
+      : await this.getActiveCohortForPath(resolvedPathTitle);
+
+    const weeks = Math.max(1, Math.floor(Number(input.weeksToCommit || 1)));
+    const totalPrice = Number(input.totalPrice || 0);
+
+    const profile = stripUndefined({
+      uid,
+      role: "student",
+      status: "Pending", // still pending until payment verified
+      timestamp: Date.now(),
+
+      fullName,
+      email: String(user.email || "").trim() || "",
+      phone,
+      ageRange: String(input.ageRange || "").trim(),
+      gender: String(input.gender || "").trim(),
+
+      weeksToCommit: weeks,
+      totalPrice,
+
+      path: resolvedPathTitle,
+      ...(finalPathId ? { pathId: finalPathId } : {}),
+      ...(input.courseId ? { courseId: String(input.courseId).trim() } : {}),
+
+      ...(activeCohort?.cohortId ? { cohortId: activeCohort.cohortId } : {}),
+      ...(activeCohort?.label ? { cohortLabel: activeCohort.label } : {}),
+      ...(activeCohort?.cohortKey ? { cohortKey: activeCohort.cohortKey } : {}),
+
+      updatedAt: Date.now(),
+    });
+
+    // ✅ Create the doc once (after login, auth exists)
+    await setDoc(doc(db, "users", uid), profile, { merge: false });
+  },
+
   async createAccount(
     entry: NewStudentEntry,
     password: string,
   ): Promise<string> {
-    // Validate input early
     const email = String((entry as any).email || "").trim();
     if (!email) throw new Error("Email is required.");
 
-    try {
-      // Step 1: Ensure global auth readiness (once)
-      console.log("🔄 Waiting for auth readiness...");
-      await auth.authStateReady();
-      console.log("✅ Auth ready");
+    // 1) Create user (this signs in immediately, but state may lag)
+    const userCredential = await createUserWithEmailAndPassword(
+      auth,
+      email,
+      password,
+    );
+    const user = userCredential.user;
 
-      // Step 2: Create user (throws if email exists)
-      console.log("🔄 Creating user...");
-      const userCredential = await createUserWithEmailAndPassword(
-        auth,
-        email,
-        password,
-      );
-      const user = userCredential.user;
-      console.log(`✅ User created: ${user.uid}`);
-      await auth.updateCurrentUser(user);
+    // 2) Force token + WAIT for auth.currentUser to reflect new uid
+    await user.getIdToken(true);
+    await waitForAuthUid(auth, user.uid, 15000);
 
-      // Step 3: Refresh token once (ensures valid for Firestore)
-      console.log("🔄 Refreshing token...");
-      const tokenResult = await user.getIdTokenResult(true);
-      console.log(`✅ Token ready: ${tokenResult.token ? "valid" : "invalid"}`);
+    // 3) Resolve path + cohort
+    let pathIdRaw = String((entry as any).pathId || "").trim();
+    const pathTitleRaw = String((entry as any).path || "").trim();
 
-      // Step 4: Resolve path/cohort (these should be public reads or use token)
-      console.log("🔄 Resolving path/cohort...");
-      let pathIdRaw = String((entry as any).pathId || "").trim();
-      const pathTitleRaw = String((entry as any).path || "").trim();
+    let resolvedPathTitle = pathTitleRaw;
 
-      let resolvedPathTitle = pathTitleRaw;
-      if (pathIdRaw) {
-        resolvedPathTitle = await this.resolvePathTitle(
-          pathIdRaw,
-          pathTitleRaw,
-        );
-      } else {
-        const resolvedId = await this.resolvePathId(resolvedPathTitle);
-        if (resolvedId) pathIdRaw = resolvedId; // Update for final use
-      }
-
-      if (!resolvedPathTitle)
-        throw new Error(
-          "Path resolution failed. Provide valid pathId or path.",
-        );
-
-      const finalPathId = pathIdRaw;
-      const activeCohort = finalPathId
-        ? await this.getActiveCohortForPathId(finalPathId)
-        : await this.getActiveCohortForPath(resolvedPathTitle);
-
-      const resolvedPath =
-        resolvedPathTitle || String(activeCohort?.path || "").trim();
-      if (!resolvedPath) throw new Error("Path is required.");
-
-      const profileData = {
-        uid: user.uid,
-        role: "student",
-        status: "Pending",
-        timestamp: Date.now(),
-        fullName: String((entry as any).fullName || "Student").trim(),
-        email: user.email!,
-        phone: String((entry as any).phone || "000").trim(),
-        ageRange: String((entry as any).ageRange || "18+").trim(),
-        gender: String((entry as any).gender || "Other").trim(),
-        weeksToCommit: Math.max(
-          1,
-          Math.floor(Number((entry as any).weeksToCommit || 1)),
-        ),
-        totalPrice: Number((entry as any).totalPrice || 0),
-        path: resolvedPath,
-        // ✅ ONLY add if they have values
-        ...(finalPathId && { pathId: finalPathId }),
-        ...((entry as any).courseId && {
-          courseId: String((entry as any).courseId).trim(),
-        }),
-        ...(activeCohort?.cohortId && { cohortId: activeCohort.cohortId }),
-        ...(activeCohort?.label && { cohortLabel: activeCohort.label }),
-        ...(activeCohort?.cohortKey && { cohortKey: activeCohort.cohortKey }),
-      };
-
-      // ✅ Your stripUndefined will now work perfectly
-      const profile = stripUndefined(profileData);
-
-      // Step 6: Single Firestore write (now fully safe)
-      console.log("AUTH UID AT WRITE:", auth.currentUser?.uid);
-      console.log("DOC UID:", user.uid);
-      console.log("DATA UID:", profile.uid);
-      console.log("🔄 Writing profile...", profile);
-      console.log("🔍 FINAL PROFILE KEYS:", Object.keys(profile));
-      await user.getIdToken(true);
-      // ✅ WAIT until auth.currentUser is actually set
-      await waitForAuthUid(auth, user.uid);
-
-      await setDoc(doc(db, "users", user.uid), profile);
-      console.log(`✅ Profile saved for ${user.uid}`);
-
-      return user.uid;
-    } catch (error: any) {
-      console.error("❌ createAccount failed:", error);
-      // Re-throw for UI handling
-      throw new Error(error.message || "Account creation failed");
+    if (pathIdRaw) {
+      resolvedPathTitle = await this.resolvePathTitle(pathIdRaw, pathTitleRaw);
+    } else {
+      const resolvedId = await this.resolvePathId(resolvedPathTitle);
+      if (resolvedId) pathIdRaw = resolvedId;
     }
+
+    if (!resolvedPathTitle) throw new Error("Path resolution failed.");
+
+    const finalPathId = pathIdRaw;
+    const activeCohort = finalPathId
+      ? await this.getActiveCohortForPathId(finalPathId)
+      : await this.getActiveCohortForPath(resolvedPathTitle);
+
+    const resolvedPath =
+      resolvedPathTitle || String(activeCohort?.path || "").trim();
+    if (!resolvedPath) throw new Error("Path is required.");
+
+    const profile = stripUndefined({
+      uid: user.uid,
+      role: "student",
+      status: "Pending",
+      timestamp: Date.now(),
+
+      fullName: String((entry as any).fullName || "Student").trim(),
+      email: user.email || email,
+      phone: String((entry as any).phone || "").trim(),
+
+      ageRange: String((entry as any).ageRange || "18+").trim(),
+      gender: String((entry as any).gender || "Other").trim(),
+
+      weeksToCommit: Math.max(
+        1,
+        Math.floor(Number((entry as any).weeksToCommit || 1)),
+      ),
+      totalPrice: Number((entry as any).totalPrice || 0),
+
+      path: resolvedPath,
+      ...(finalPathId ? { pathId: finalPathId } : {}),
+      ...((entry as any).courseId
+        ? { courseId: String((entry as any).courseId).trim() }
+        : {}),
+
+      ...(activeCohort?.cohortId ? { cohortId: activeCohort.cohortId } : {}),
+      ...(activeCohort?.label ? { cohortLabel: activeCohort.label } : {}),
+      ...(activeCohort?.cohortKey ? { cohortKey: activeCohort.cohortKey } : {}),
+
+      updatedAt: Date.now(),
+    });
+
+    // 4) Write profile (rules require signed-in user matches doc id)
+    await setDoc(doc(db, "users", user.uid), profile, { merge: false });
+
+    return user.uid;
   },
 
   async login(email: string, password: string): Promise<string> {
@@ -768,7 +852,23 @@ export const registrationStore = {
     return cred.user.uid;
   },
 
-  async updateUserCohortFields(
+  // ✅ Student-safe: only fields your rules allow a student to change
+  async updateStudentEnrollmentFields(
+    uid: string,
+    patch: Partial<
+      Pick<RegistrationEntry, "cohortId" | "cohortLabel" | "cohortKey">
+    >,
+  ): Promise<void> {
+    const clean = stripUndefined({
+      ...patch,
+      updatedAt: Date.now(),
+    });
+
+    await updateDoc(doc(db, "users", uid), clean);
+  },
+
+  // ✅ Admin-only helper (keep if you need it in admin dashboard)
+  async adminUpdateUserEnrollmentMeta(
     uid: string,
     patch: Partial<
       Pick<
@@ -782,7 +882,7 @@ export const registrationStore = {
       >
     >,
   ): Promise<void> {
-    const clean: any = stripUndefined({
+    const clean = stripUndefined({
       ...patch,
       updatedAt: Date.now(),
     });
@@ -799,20 +899,28 @@ export const registrationStore = {
       reference: string;
     },
   ): Promise<void> {
+    const weeks = Math.max(1, Math.floor(Number(pending.weeks || 1)));
+    const amount = Math.max(0, Number(pending.amount || 0));
+    const reference = String(pending.reference || "").trim();
+
     await updateDoc(doc(db, "users", uid), {
       pendingPayment: {
         kind: pending.kind,
         status: "Pending",
-        weeks: pending.weeks,
-        amount: pending.amount,
-        reference: pending.reference,
+        weeks,
+        amount,
+        reference,
         createdAt: Date.now(),
       },
+      updatedAt: Date.now(),
     });
   },
 
   async clearPendingPayment(uid: string): Promise<void> {
-    await updateDoc(doc(db, "users", uid), { pendingPayment: deleteField() });
+    await updateDoc(doc(db, "users", uid), {
+      pendingPayment: deleteField(),
+      updatedAt: Date.now(),
+    });
   },
 
   async resetPassword(email: string): Promise<void> {
@@ -1242,6 +1350,13 @@ export const registrationStore = {
   async getUnlockedSessionsForStudent(
     profile: RegistrationEntry,
   ): Promise<SessionDoc[]> {
+    // 🔒 Gate access: if payment is pending or not enrolled, no sessions
+    const hasAnyPending =
+      profile?.status === "Pending" ||
+      profile?.pendingPayment?.status === "Pending";
+
+    if (hasAnyPending) return [];
+
     let cohortDocId = profile.cohortKey || profile.cohortId;
 
     if (!cohortDocId) {
@@ -1257,43 +1372,73 @@ export const registrationStore = {
     const paidWeeks = Math.max(0, Number(profile.weeksToCommit || 0));
     if (!cohortDocId || paidWeeks <= 0) return [];
 
-    // ✅ Preferred query: match by pathId if present
-    if (profile.pathId) {
+    // ✅ NOTE:
+    // Avoid composite index requirement by NOT doing orderBy("startsAt") in Firestore.
+    // We'll sort client-side.
+    try {
+      if (profile.pathId) {
+        const snap = await getDocs(
+          query(
+            this._sessionsCol(cohortDocId),
+            where("pathId", "==", profile.pathId),
+            where("isPublished", "==", true),
+            where("week", "<=", paidWeeks),
+            orderBy("week", "asc"),
+          ),
+        );
+
+        const items = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as any),
+        })) as SessionDoc[];
+
+        if (items.length > 0) {
+          return items.sort((a: any, b: any) => {
+            const am =
+              typeof a?.startsAt?.toMillis === "function"
+                ? a.startsAt.toMillis()
+                : 0;
+            const bm =
+              typeof b?.startsAt?.toMillis === "function"
+                ? b.startsAt.toMillis()
+                : 0;
+            return am - bm;
+          });
+        }
+      }
+
+      // Legacy fallback (path string)
       const snap = await getDocs(
         query(
           this._sessionsCol(cohortDocId),
-          where("pathId", "==", profile.pathId),
+          where("path", "==", profile.path),
           where("isPublished", "==", true),
           where("week", "<=", paidWeeks),
           orderBy("week", "asc"),
-          orderBy("startsAt", "asc"),
         ),
       );
 
-      const byId = snap.docs.map((d) => ({
+      const items = snap.docs.map((d) => ({
         id: d.id,
         ...(d.data() as any),
       })) as SessionDoc[];
-      // ✅ Fallback during migration: old sessions may not have pathId
-      if (byId.length > 0) return byId;
+
+      return items.sort((a: any, b: any) => {
+        const am =
+          typeof a?.startsAt?.toMillis === "function"
+            ? a.startsAt.toMillis()
+            : 0;
+        const bm =
+          typeof b?.startsAt?.toMillis === "function"
+            ? b.startsAt.toMillis()
+            : 0;
+        return am - bm;
+      });
+    } catch (e) {
+      // ✅ IMPORTANT: log it so you actually see index errors
+      console.error("getUnlockedSessionsForStudent failed:", e);
+      return [];
     }
-
-    // ✅ Legacy query: match by path string
-    const snap = await getDocs(
-      query(
-        this._sessionsCol(cohortDocId),
-        where("path", "==", profile.path),
-        where("isPublished", "==", true),
-        where("week", "<=", paidWeeks),
-        orderBy("week", "asc"),
-        orderBy("startsAt", "asc"),
-      ),
-    );
-
-    return snap.docs.map((d) => ({
-      id: d.id,
-      ...(d.data() as any),
-    })) as SessionDoc[];
   },
 
   // =========================

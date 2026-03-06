@@ -28,6 +28,21 @@ const parseWeeksFromDuration = (duration: string, fallback = 4) => {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 };
 
+const toMs = (v: any): number | null => {
+  if (!v) return null;
+  if (typeof v?.toMillis === "function") return v.toMillis(); // Timestamp
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === "number" && Number.isFinite(v)) return v; // ms
+  if (typeof v === "string") {
+    const ms = Date.parse(v);
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (typeof v === "object" && typeof v.seconds === "number") {
+    return v.seconds * 1000;
+  }
+  return null;
+};
+
 const parsePricePerWeek = (label: string, fallback = 10000) => {
   const s = String(label || "").toLowerCase();
   const hasK = s.includes("k");
@@ -88,7 +103,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
         });
 
         try {
-          await registrationStore.updateUserCohortFields(profile.uid, {
+          await registrationStore.updateStudentEnrollmentFields(profile.uid, {
             cohortId: active.cohortId,
             cohortLabel: active.label,
             cohortKey: active.cohortKey,
@@ -257,13 +272,22 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const totalProgramWeeks = Math.max(1, Number(courseMaxWeeks || 1));
 
   const progressPercent = clamp((paidWeeks / totalProgramWeeks) * 100, 0, 100);
+  const hasAnyPending =
+    profile?.status === "Pending" ||
+    profile?.pendingPayment?.status === "Pending";
 
-  const hasAnyPending = profile?.pendingPayment?.status === "Pending";
+  // const hasAnyPending = profile?.pendingPayment?.status === "Pending";
   const hasPendingTopUp =
-    hasAnyPending && profile?.pendingPayment?.kind === "topup";
+    profile?.pendingPayment?.status === "Pending" &&
+    profile?.pendingPayment?.kind === "topup";
+  // const hasPendingTopUp =
+  //   hasAnyPending && profile?.pendingPayment?.kind === "topup";
 
   const remainingWeeks = Math.max(0, totalProgramWeeks - paidWeeks);
-  const canTopUp = isEnrolled && remainingWeeks > 0 && !hasAnyPending;
+  const canTopUp =
+    isEnrolled &&
+    remainingWeeks > 0 &&
+    !(profile?.pendingPayment?.status === "Pending");
 
   const joinedDate = new Date(
     profile?.timestamp || Date.now(),
@@ -272,31 +296,76 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
   // -----------------------------
   // Next session + formatting
   // -----------------------------
+  const liveSession = useMemo(() => {
+    if (hasAnyPending) return null;
+
+    const nowMs = Date.now();
+
+    const live = (sessions || [])
+      .map((s) => {
+        const startMs = toMs((s as any).startsAt);
+        const endMs =
+          toMs((s as any).endsAt) ??
+          (startMs != null
+            ? startMs + Number((s as any).durationMins || 60) * 60 * 1000
+            : null);
+
+        return {
+          ...s,
+          _startMs: startMs ?? NaN,
+          _endMs: endMs ?? NaN,
+        };
+      })
+      .filter((s) => Number.isFinite(s._startMs) && Number.isFinite(s._endMs))
+      .find(
+        (s) => (s._startMs as number) <= nowMs && nowMs <= (s._endMs as number),
+      );
+
+    return live || null;
+  }, [sessions, hasAnyPending]);
+
   const nextSession = useMemo(() => {
+    if (hasAnyPending) return null;
+
     const nowMs = Date.now();
 
     const upcoming = (sessions || [])
-      .map((s) => ({
-        ...s,
-        _ms:
-          typeof (s as any)?.startsAt?.toMillis === "function"
-            ? (s as any).startsAt.toMillis()
-            : NaN,
-      }))
+      .map((s) => ({ ...s, _ms: toMs((s as any).startsAt) ?? NaN }))
       .filter((s) => Number.isFinite(s._ms))
-      .filter((s) => (s._ms as number) >= nowMs)
+      .filter((s) => (s._ms as number) > nowMs)
       .sort((a, b) => (a._ms as number) - (b._ms as number));
 
     return upcoming[0] || null;
-  }, [sessions]);
+  }, [sessions, hasAnyPending]);
+
+  const latestUnlockedSession = useMemo(() => {
+    if (hasAnyPending) return null;
+
+    const ordered = (sessions || [])
+      .map((s) => ({ ...s, _ms: toMs((s as any).startsAt) ?? NaN }))
+      .filter((s) => Number.isFinite(s._ms))
+      .sort((a, b) => (b._ms as number) - (a._ms as number));
+
+    return ordered[0] || null;
+  }, [sessions, hasAnyPending]);
+
+  const heroSession =
+    liveSession || nextSession || latestUnlockedSession || null;
+
+  const heroLabel = liveSession
+    ? "Live Now"
+    : nextSession
+      ? "Next Live Session"
+      : latestUnlockedSession
+        ? "Latest Unlocked Class"
+        : "Class Status";
+
+  const primaryJoinUrl = liveSession?.joinUrl || nextSession?.joinUrl || "";
+  const hasJoinableSession = !!primaryJoinUrl;
 
   const formatSessionTime = (s: SessionDoc) => {
-    const ms =
-      typeof (s as any)?.startsAt?.toMillis === "function"
-        ? (s as any).startsAt.toMillis()
-        : null;
+    const ms = toMs((s as any).startsAt);
     if (!ms) return "TBD";
-
     const d = new Date(ms);
     return `${d.toLocaleDateString()} • ${d.toLocaleTimeString([], {
       hour: "2-digit",
@@ -308,6 +377,12 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
     if (!url) return;
     window.open(url, "_blank", "noopener,noreferrer");
   };
+
+  const unlockedWeeks = hasAnyPending ? 0 : paidWeeks;
+  const unlockedSessions = useMemo(
+    () => (sessions || []).filter((s: any) => Number(s.week) <= unlockedWeeks),
+    [sessions, unlockedWeeks],
+  );
 
   // -----------------------------
   // ✅ NEW: money + sessions routing + session tags
@@ -541,69 +616,77 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
     );
   }
 
+
   return (
-    <div className="py-12 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
-      <div className="max-w-5xl mx-auto px-6">
+    <div className="py-10 md:py-12 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6">
         {/* Header */}
-        <div className="flex flex-col md:flex-row items-center justify-between mb-12 gap-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 md:mb-12 gap-6">
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-3xl bg-teal-500 text-white flex items-center justify-center font-black text-2xl shadow-lg border-4 border-white dark:border-slate-800">
+            <div className="w-14 h-14 md:w-16 md:h-16 rounded-3xl bg-teal-500 text-white flex items-center justify-center font-black text-2xl shadow-lg border-4 border-white dark:border-slate-800">
               {profile.fullName.charAt(0)}
             </div>
-            <div>
-              <h1 className="text-2xl font-black text-blue-900 dark:text-white">
+
+            <div className="min-w-0">
+              <h1 className="text-xl md:text-2xl font-black text-blue-900 dark:text-white truncate">
                 Welcome, {profile.fullName.split(" ")[0]}!
               </h1>
-              <p className="text-slate-500 dark:text-slate-400 text-sm">
+              <p className="text-slate-500 dark:text-slate-400 text-sm truncate">
                 {profile.email}
               </p>
 
-              <p className="text-[11px] text-slate-400 mt-1">
-                Cohort:{" "}
-                <span className="font-bold">
-                  {cohortLoading ? <CohortSkeleton /> : cohortLabel}
-                </span>{" "}
-                {!cohortLoading && cohortId !== "CWG-DEFAULT" && (
-                  <span className="font-mono">({cohortId})</span>
-                )}
-              </p>
-
-              <p className="text-[11px] text-slate-400 mt-1">
-                Plan:{" "}
-                <span className="font-bold">
-                  {courseLoading ? (
-                    <InlineSpinner label="Loading course…" />
-                  ) : (
-                    <>
-                      {totalProgramWeeks} weeks • ₦{weeklyRate.toLocaleString()}
-                      /wk
-                    </>
+              <div className="mt-2 space-y-1">
+                <p className="text-[11px] text-slate-400">
+                  Cohort:{" "}
+                  <span className="font-bold">
+                    {cohortLoading ? <CohortSkeleton /> : cohortLabel}
+                  </span>{" "}
+                  {!cohortLoading && cohortId !== "CWG-DEFAULT" && (
+                    <span className="font-mono">({cohortId})</span>
                   )}
-                </span>
-              </p>
+                </p>
+
+                <p className="text-[11px] text-slate-400">
+                  Plan:{" "}
+                  <span className="font-bold">
+                    {courseLoading ? (
+                      <InlineSpinner label="Loading course…" />
+                    ) : (
+                      <>
+                        {totalProgramWeeks} weeks • ₦
+                        {weeklyRate.toLocaleString()}
+                        /wk
+                      </>
+                    )}
+                  </span>
+                </p>
+              </div>
             </div>
           </div>
 
           <button
             onClick={onLogout}
-            className="px-6 py-2.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-50 hover:text-red-600 transition-all"
+            className="self-start md:self-auto px-6 py-2.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-50 hover:text-red-600 transition-all"
           >
             Logout
           </button>
         </div>
 
-        {/* Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Grid (✅ FIXED: main + sidebar are siblings) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8 items-start">
           {/* Main */}
-          <div className="lg:col-span-2 space-y-8">
+          <div className="lg:col-span-2 space-y-6 md:space-y-8">
             {/* Enrollment */}
-            <div className="bg-white dark:bg-slate-900 p-10 rounded-[2.5rem] shadow-xl border border-gray-100 dark:border-slate-800 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-8">
+            <div className="bg-white dark:bg-slate-900 p-6 md:p-10 rounded-[2.25rem] md:rounded-[2.5rem] shadow-xl border border-gray-100 dark:border-slate-800 relative overflow-hidden">
+              {/* soft accent */}
+              <div className="absolute -top-24 -right-24 h-64 w-64 rounded-full bg-blue-100/50 dark:bg-teal-500/10 blur-3xl" />
+
+              <div className="absolute top-0 right-0 p-6 md:p-8">
                 <span
                   className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
                     profile.status === "Complete"
-                      ? "bg-teal-50 text-teal-600"
-                      : "bg-orange-50 text-orange-600"
+                      ? "bg-teal-50 text-teal-600 dark:bg-teal-500/10 dark:text-teal-200"
+                      : "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-200"
                   }`}
                 >
                   {profile.status === "Complete"
@@ -614,20 +697,21 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 </span>
               </div>
 
-              <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4">
+              <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4 relative">
                 Current Enrollment
               </p>
-              <h2 className="text-3xl font-black text-blue-900 dark:text-white mb-8">
+
+              <h2 className="text-2xl md:text-3xl font-black text-blue-900 dark:text-white mb-6 md:mb-8 relative">
                 {profile.path}
               </h2>
 
-              <div className="space-y-6">
+              <div className="space-y-6 relative">
                 <div className="flex justify-between items-end">
                   <div>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
                       Weekly Access Paid
                     </p>
-                    <p className="text-2xl font-black text-blue-900 dark:text-teal-400">
+                    <p className="text-xl md:text-2xl font-black text-blue-900 dark:text-teal-400">
                       {paidWeeks} / {totalProgramWeeks} Weeks
                     </p>
                   </div>
@@ -638,14 +722,14 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
                 <div className="h-4 bg-gray-100 dark:bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-teal-500 rounded-full transition-all duration-1000"
+                    className="h-full bg-teal-500 rounded-full transition-all duration-700"
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
               </div>
 
-              <div className="mt-12 p-6 bg-blue-50 dark:bg-blue-900/20 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-6">
-                <div>
+              <div className="mt-8 md:mt-12 p-5 md:p-6 bg-blue-50 dark:bg-blue-900/20 rounded-3xl flex flex-col md:flex-row md:items-center md:justify-between gap-5 relative">
+                <div className="min-w-0">
                   <h4 className="font-bold text-blue-900 dark:text-white">
                     {hasAnyPending
                       ? "Finish your payment"
@@ -653,7 +737,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                         ? "Ready for more?"
                         : "You’re fully paid"}
                   </h4>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                     {hasAnyPending
                       ? "You have an incomplete payment. Continue to checkout to complete it before starting a new top-up."
                       : canTopUp
@@ -665,14 +749,14 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 {hasAnyPending ? (
                   <button
                     onClick={handleContinuePayment}
-                    className="px-8 py-4 bg-orange-600 hover:bg-orange-500 text-white font-black rounded-2xl shadow-xl transition-transform whitespace-nowrap hover:scale-105"
+                    className="px-8 py-4 bg-orange-600 hover:bg-orange-500 text-white font-black rounded-2xl shadow-xl transition-transform whitespace-nowrap hover:scale-[1.02] active:scale-[0.99]"
                   >
                     Continue to Payment
                   </button>
                 ) : canTopUp ? (
                   <button
                     onClick={() => setIsTopUpOpen(true)}
-                    className="px-8 py-4 bg-blue-900 dark:bg-teal-600 text-white font-black rounded-2xl shadow-xl hover:scale-105 transition-transform whitespace-nowrap"
+                    className="px-8 py-4 bg-blue-900 dark:bg-teal-600 text-white font-black rounded-2xl shadow-xl hover:scale-[1.02] active:scale-[0.99] transition-transform whitespace-nowrap"
                   >
                     Pay Remaining {remainingWeeks === 1 ? "Week" : "Weeks"} (
                     {remainingWeeks})
@@ -685,128 +769,280 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
               </div>
             </div>
 
-            {/* Next Live Session */}
-            <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] shadow-xl border border-gray-100 dark:border-slate-800">
-              <div className="flex items-start justify-between gap-6">
-                <div>
-                  <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
-                    Next Live Session
-                  </p>
+            {/* Live Class / Unlocked Sessions */}
+            <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-[2.25rem] md:rounded-[2.5rem] shadow-xl border border-gray-100 dark:border-slate-800 relative overflow-hidden">
+              <div className="absolute -top-24 -right-24 h-56 w-56 rounded-full bg-blue-100/40 dark:bg-teal-500/10 blur-2xl" />
+              <div className="absolute -bottom-24 -left-24 h-56 w-56 rounded-full bg-orange-100/30 dark:bg-blue-500/10 blur-2xl" />
 
-                  {sessionsLoading ? (
-                    <div className="text-slate-500 dark:text-slate-300">
-                      <InlineSpinner label="Loading sessions…" />
+              <div className="relative">
+                {/* Header row */}
+                <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-6">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap mb-3">
+                      <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">
+                        {heroLabel}
+                      </p>
+
+                      {!sessionsLoading &&
+                        !hasAnyPending &&
+                        sessions.length > 0 && (
+                          <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                            {sessions.length} Class
+                            {sessions.length > 1 ? "es" : ""} Unlocked
+                          </span>
+                        )}
+
+                      {liveSession && (
+                        <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-50 dark:bg-red-500/10 text-[10px] font-black uppercase tracking-widest text-red-600 dark:text-red-300 border border-red-100 dark:border-red-500/20">
+                          LIVE
+                        </span>
+                      )}
                     </div>
-                  ) : nextSession ? (
-                    <>
-                      <h3 className="text-xl font-black text-blue-900 dark:text-white">
-                        Week {nextSession.week}: {nextSession.title}
-                      </h3>
 
-                      {/* ✅ Tags (fixed key typing issue) */}
-                      <TagRow tags={getSessionTags(nextSession)} />
+                    {sessionsLoading ? (
+                      <div className="text-slate-500 dark:text-slate-300">
+                        <InlineSpinner label="Loading sessions…" />
+                      </div>
+                    ) : hasAnyPending ? (
+                      <>
+                        <h3 className="text-2xl md:text-3xl font-black text-blue-900 dark:text-white">
+                          Sessions are locked
+                        </h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-3 max-w-2xl leading-relaxed">
+                          Complete your payment to unlock your class schedule,
+                          class notes, and live session access.
+                        </p>
+                      </>
+                    ) : heroSession ? (
+                      <>
+                        <h3 className="text-2xl md:text-3xl font-black text-blue-900 dark:text-white leading-tight">
+                          Week {heroSession.week}: {heroSession.title}
+                        </h3>
 
-                      <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
-                        {formatSessionTime(nextSession)}
+                        <TagRow tags={getSessionTags(heroSession)} />
+
+                        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
+                          <div className="rounded-2xl bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-800 px-4 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                              Schedule
+                            </p>
+                            <p className="text-sm font-bold text-blue-900 dark:text-white mt-1">
+                              {formatSessionTime(heroSession)}
+                            </p>
+                          </div>
+
+                          <div className="rounded-2xl bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-800 px-4 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                              Track
+                            </p>
+                            <p className="text-sm font-bold text-blue-900 dark:text-white mt-1">
+                              {heroSession.path}
+                            </p>
+                          </div>
+                        </div>
+
+                        {!!heroSession.notes && (
+                          <div className="mt-4 p-4 rounded-2xl bg-blue-50/70 dark:bg-slate-800/40 border border-blue-100 dark:border-slate-800 max-w-2xl">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                              Class Detail
+                            </p>
+                            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                              {heroSession.notes}
+                            </p>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <h3 className="text-2xl font-black text-blue-900 dark:text-white">
+                          No classes published yet
+                        </h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-3 max-w-2xl leading-relaxed">
+                          Your cohort is active, but no class has been published
+                          yet. Once sessions are scheduled, they will appear
+                          here automatically.
+                        </p>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-col sm:flex-row xl:flex-col gap-3 xl:min-w-[220px]">
+                    {hasAnyPending ? (
+                      <button
+                        onClick={handleContinuePayment}
+                        className="px-6 py-4 rounded-2xl text-xs font-black uppercase tracking-widest bg-orange-600 hover:bg-orange-500 text-white shadow-lg transition"
+                      >
+                        Continue to Payment
+                      </button>
+                    ) : sessions.length > 0 ? (
+                      <>
+                        <button
+                          onClick={goToSessions}
+                          className="px-6 py-4 rounded-2xl text-xs font-black uppercase tracking-widest transition bg-blue-900 dark:bg-teal-600 text-white shadow-lg hover:opacity-95"
+                        >
+                          View All Classes
+                        </button>
+
+                        {hasJoinableSession ? (
+                          <button
+                            onClick={() => openJoin(primaryJoinUrl)}
+                            className="px-6 py-4 rounded-2xl text-xs font-black uppercase tracking-widest transition bg-teal-600 text-white hover:bg-teal-500 shadow-lg"
+                          >
+                            {liveSession
+                              ? "Join Live Class"
+                              : "Open Next Class"}
+                          </button>
+                        ) : (
+                          <button
+                            disabled
+                            className="px-6 py-4 rounded-2xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
+                          >
+                            No Join Link Yet
+                          </button>
+                        )}
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* Body */}
+                <div className="mt-8" id="unlocked-sessions">
+                  {sessionsLoading ? null : hasAnyPending ? (
+                    <div className="p-6 rounded-3xl bg-orange-50/60 dark:bg-orange-500/5 border border-orange-100 dark:border-orange-500/10">
+                      <div className="font-black text-blue-900 dark:text-white text-lg">
+                        Sessions are locked 🔒
+                      </div>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 mt-2 leading-relaxed">
+                        Your payment is pending. Once it’s completed, your
+                        unlocked sessions will appear here and you’ll be able to
+                        join live classes.
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-2 font-bold">
-                        {nextSession.path}
+                    </div>
+                  ) : sessions.length === 0 ? (
+                    <div className="p-6 rounded-3xl bg-gray-50 dark:bg-slate-800/30 border border-gray-100 dark:border-slate-800">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                        No unlocked sessions yet. Once sessions are published
+                        for your cohort, they’ll show here.
                       </p>
-                    </>
+                    </div>
                   ) : (
-                    <div className="text-slate-500 dark:text-slate-400">
-                      No upcoming sessions found yet.
+                    <div>
+                      <div className="flex items-center justify-between gap-4 mb-4">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Available Classes
+                        </p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Showing {Math.min(5, sessions.length)} of{" "}
+                          {sessions.length}
+                        </p>
+                      </div>
+
+                      <div className="space-y-4">
+                        {sessions.slice(0, 5).map((s) => (
+                          <div
+                            key={s.id}
+                            className="group p-5 rounded-[1.75rem] bg-gray-50 dark:bg-slate-800/40 border border-gray-100 dark:border-slate-800 hover:shadow-lg transition"
+                          >
+                            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-base font-black text-blue-900 dark:text-white">
+                                  Week {s.week}: {s.title}
+                                </p>
+
+                                <TagRow tags={getSessionTags(s)} />
+
+                                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                                  <div className="rounded-2xl bg-white dark:bg-slate-900/70 border border-gray-100 dark:border-slate-700 px-4 py-3">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                      Time
+                                    </p>
+                                    <p className="text-sm font-bold text-blue-900 dark:text-white mt-1">
+                                      {formatSessionTime(s)}
+                                    </p>
+                                  </div>
+
+                                  <div className="rounded-2xl bg-white dark:bg-slate-900/70 border border-gray-100 dark:border-slate-700 px-4 py-3">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                      Track
+                                    </p>
+                                    <p className="text-sm font-bold text-blue-900 dark:text-white mt-1">
+                                      {s.path}
+                                    </p>
+                                  </div>
+
+                                  <div className="rounded-2xl bg-white dark:bg-slate-900/70 border border-gray-100 dark:border-slate-700 px-4 py-3">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                      Access
+                                    </p>
+                                    <p className="text-sm font-bold text-blue-900 dark:text-white mt-1">
+                                      {s.joinUrl
+                                        ? "Join available"
+                                        : "No live link yet"}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                {!!s.notes && (
+                                  <div className="mt-4 p-4 rounded-2xl bg-blue-50/60 dark:bg-slate-900/40 border border-blue-100 dark:border-slate-800">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                                      Class Detail
+                                    </p>
+                                    <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                                      {s.notes}
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex flex-col sm:flex-row lg:flex-col gap-2 lg:min-w-[150px]">
+                                <button
+                                  onClick={goToSessions}
+                                  className="px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-blue-900 dark:text-white hover:opacity-90 transition"
+                                >
+                                  View Details
+                                </button>
+
+                                {s.joinUrl ? (
+                                  <button
+                                    onClick={() => openJoin(s.joinUrl)}
+                                    className="px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest bg-blue-900 dark:bg-teal-600 text-white hover:opacity-90 transition"
+                                  >
+                                    Join Class
+                                  </button>
+                                ) : (
+                                  <button
+                                    disabled
+                                    className="px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
+                                  >
+                                    No Join Link Yet
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {sessions.length > 5 && (
+                        <div className="mt-5 flex justify-center">
+                          <button
+                            onClick={goToSessions}
+                            className="px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-blue-900 dark:text-white hover:opacity-90 transition"
+                          >
+                            See Remaining {sessions.length - 5} Classes
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-
-                {/* Continue Learning always routes to sessions */}
-                <div className="flex flex-col items-end gap-2">
-                  <button
-                    onClick={goToSessions}
-                    className="px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition bg-blue-900 dark:bg-teal-600 text-white shadow-lg hover:opacity-95"
-                  >
-                    Continue Learning
-                  </button>
-
-                  <button
-                    disabled={!nextSession?.joinUrl}
-                    onClick={() => openJoin(nextSession?.joinUrl)}
-                    className={`px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition ${
-                      nextSession?.joinUrl
-                        ? "bg-teal-600 text-white hover:bg-teal-500 shadow-lg"
-                        : "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
-                    }`}
-                  >
-                    Join Live Class
-                  </button>
-
-                  <button
-                    onClick={goToSessions}
-                    className="text-xs font-black uppercase tracking-widest text-blue-900 dark:text-teal-400 hover:underline"
-                  >
-                    View all sessions
-                  </button>
-                </div>
-              </div>
-
-              {/* Unlocked list (preview) */}
-              <div className="mt-6">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
-                  Unlocked Sessions (Paid Weeks)
-                </p>
-
-                {sessionsLoading ? (
-                  <div className="text-slate-500 dark:text-slate-300">
-                    <InlineSpinner label="Loading…" />
-                  </div>
-                ) : sessions.length === 0 ? (
-                  <div className="text-sm text-slate-500 dark:text-slate-400">
-                    No unlocked sessions yet. Once sessions are published for
-                    your cohort and you’ve paid at least 1 week, they’ll show
-                    here.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {sessions.slice(0, 5).map((s) => (
-                      <div
-                        key={s.id}
-                        className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/40 border border-gray-100 dark:border-slate-800 flex items-center justify-between gap-4"
-                      >
-                        <div>
-                          <p className="text-sm font-black text-blue-900 dark:text-white">
-                            Week {s.week}: {s.title}
-                          </p>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                            {formatSessionTime(s)}
-                          </p>
-
-                          {/* Tags */}
-                          <TagRow tags={getSessionTags(s)} />
-                        </div>
-
-                        <button
-                          disabled={!s.joinUrl}
-                          onClick={() => openJoin(s.joinUrl)}
-                          className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition ${
-                            s.joinUrl
-                              ? "bg-blue-900 dark:bg-teal-600 text-white hover:opacity-90"
-                              : "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
-                          }`}
-                        >
-                          Join
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           </div>
-
-          {/* Sidebar */}
-          <div className="space-y-8">
-            <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] shadow-xl border border-gray-100 dark:border-slate-800">
+          {/* Sidebar (✅ now correct) */}
+          <div className="space-y-6 md:space-y-8 lg:sticky lg:top-6">
+            <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-[2.25rem] md:rounded-[2.5rem] shadow-xl border border-gray-100 dark:border-slate-800">
               <h3 className="text-sm font-black text-blue-900 dark:text-white mb-6 uppercase tracking-widest">
                 Your Plan
               </h3>
@@ -898,7 +1134,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
           </div>
         </div>
 
-        {/* Top-Up Modal */}
+        {/* Top-Up Modal (unchanged) */}
         {isTopUpOpen && canTopUp && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
             <div className="bg-white dark:bg-slate-900 max-w-md w-full p-8 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800">

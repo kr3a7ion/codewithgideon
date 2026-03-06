@@ -18,30 +18,33 @@ import Curriculums from '../components/Curriculums';
 import PathFlutter from '../components/PathFlutter';
 import PathWeb from '../components/PathWeb';
 import PathAI from '../components/PathAI';
-import Registration from '../components/Registration';
 import Payment from '../components/Payment';
 import AdminLogin from '../components/AdminLogin';
 import AdminDashboard from '../components/AdminDashboard';
 import StudentLogin from '../components/StudentLogin';
 import StudentDashboard from '../components/StudentDashboard';
 import { useAppLogic } from '../hooks/useAppLogic';
+import CreateAccount from '@/components/CreateAccount';
+import ContinueRegistration from '@/components/ContinueRegistration';
 
 export type View =
-  | 'home'
-  | 'contact'
-  | 'privacy'
-  | 'terms'
-  | 'refund'
-  | 'curriculums'
-  | 'path-flutter'
-  | 'path-web'
-  | 'path-ai'
-  | 'registration'
-  | 'payment'
-  | 'student-login'
-  | 'student-dashboard'
-  | 'admin-login'
-  | 'admin-dashboard';
+  | "home"
+  | "contact"
+  | "privacy"
+  | "terms"
+  | "refund"
+  | "curriculums"
+  | "path-flutter"
+  | "path-web"
+  | "path-ai"
+  | "registration"
+  | "payment"
+  | "student-login"
+  | "student-dashboard"
+  | "admin-login"
+  | "admin-dashboard"
+  | "create-account"
+  | "continue-registration";
 
 const App: React.FC = () => {
   const {
@@ -80,7 +83,7 @@ const App: React.FC = () => {
 
       <main className="flex-grow pt-20">
         {/* HOME */}
-        {currentView === 'home' && (
+        {currentView === "home" && (
           <>
             <Hero />
             <HowItWorks />
@@ -102,7 +105,7 @@ const App: React.FC = () => {
                   The next class starts soon—reserve your seat today.
                 </p>
                 <button
-                  onClick={() => navigateTo('curriculums')}
+                  onClick={() => navigateTo("curriculums")}
                   className="bg-orange-600 hover:bg-orange-700 text-white px-10 py-5 rounded-xl font-bold text-lg transition-all shadow-lg"
                 >
                   Join Code with Gideon
@@ -113,32 +116,42 @@ const App: React.FC = () => {
         )}
 
         {/* STATIC PAGES */}
-        {currentView === 'contact' && <Contact />}
-        {currentView === 'privacy' && <PrivacyPolicy />}
-        {currentView === 'terms' && <TermsOfService />}
-        {currentView === 'refund' && <RefundPolicy />}
+        {currentView === "contact" && <Contact />}
+        {currentView === "privacy" && <PrivacyPolicy />}
+        {currentView === "terms" && <TermsOfService />}
+        {currentView === "refund" && <RefundPolicy />}
 
         {/* CURRICULUM */}
-        {currentView === 'curriculums' && <Curriculums onNavigate={navigateTo} />}
-        {currentView === 'path-flutter' && <PathFlutter onNavigate={navigateTo} />}
-        {currentView === 'path-web' && <PathWeb onNavigate={navigateTo} />}
-        {currentView === 'path-ai' && <PathAI onNavigate={navigateTo} />}
+        {currentView === "curriculums" && (
+          <Curriculums onNavigate={navigateTo} />
+        )}
+        {currentView === "path-flutter" && (
+          <PathFlutter onNavigate={navigateTo} />
+        )}
+        {currentView === "path-web" && <PathWeb onNavigate={navigateTo} />}
+        {currentView === "path-ai" && <PathAI onNavigate={navigateTo} />}
 
         {/* REGISTRATION */}
-        {currentView === 'registration' && (
-          <Registration
-            onNavigate={navigateTo}
-            selectedPath={selectedPath}
-            onComplete={handleRegistrationSubmit}
-          />
+        {currentView === "create-account" && (
+          <CreateAccount onNavigate={navigateTo} />
         )}
 
+        {currentView === "continue-registration" &&
+          (isStudentLoggedIn ? (
+            <ContinueRegistration
+              onNavigate={navigateTo}
+              selectedPath={selectedPath}
+            />
+          ) : (
+            <StudentLogin onNavigate={navigateTo} onLogin={loginStudent} />
+          ))}
+
         {/* STUDENT AUTH */}
-        {currentView === 'student-login' && (
+        {currentView === "student-login" && (
           <StudentLogin onNavigate={navigateTo} onLogin={loginStudent} />
         )}
 
-        {currentView === 'student-dashboard' &&
+        {currentView === "student-dashboard" &&
           (isStudentLoggedIn ? (
             <StudentDashboard
               profile={studentProfile}
@@ -150,21 +163,21 @@ const App: React.FC = () => {
           ))}
 
         {/* PAYMENT */}
-        {currentView === 'payment' && (
-  <Payment
-    onNavigate={navigateTo}
-    selectedPath={(activeRegistration as any)?.path || selectedPath}
-    userData={activeRegistration as any}
-    onPaymentSuccess={completePayment}
-  />
-)}
+        {currentView === "payment" && (
+          <Payment
+            onNavigate={navigateTo}
+            selectedPath={(activeRegistration as any)?.path || selectedPath}
+            userData={activeRegistration as any}
+            onPaymentSuccess={completePayment}
+          />
+        )}
 
         {/* ADMIN AUTH */}
-        {currentView === 'admin-login' && (
+        {currentView === "admin-login" && (
           <AdminLogin onNavigate={navigateTo} onLogin={loginAdmin} />
         )}
 
-        {currentView === 'admin-dashboard' &&
+        {currentView === "admin-dashboard" &&
           (isAdminLoggedIn ? (
             <AdminDashboard onNavigate={navigateTo} onLogout={logoutAdmin} />
           ) : (

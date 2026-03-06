@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View } from "../src/App";
 import { registrationStore, CourseDoc } from "../services/registrationStore";
 import { usePaystackPayment } from "react-paystack";
+import { auth } from "../services/firebase";
 
 interface UserData {
   uid: string;
@@ -120,7 +121,8 @@ const Payment: React.FC<PaymentProps> = ({
   }, [userData, selectedPath]);
 
   const safePath = normalized.selectedPath || selectedPath;
-  const u = normalized.userData as UserData;
+  const u = normalized.userData as UserData | null;
+  const authUid = auth.currentUser?.uid || "";
 
   const [paymentState, setPaymentState] = useState<
     "idle" | "processing" | "verifying" | "success" | "failed"
@@ -148,37 +150,13 @@ const Payment: React.FC<PaymentProps> = ({
   const inFlightRef = useRef(false);
 
   // -----------------------------
-  // ✅ Guard: missing session
-  // -----------------------------
-  if (!u?.uid || !u?.email) {
-    return (
-      <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
-        <div className="bg-white dark:bg-slate-900 max-w-md w-full p-8 rounded-[2.5rem] shadow-xl border border-slate-200 dark:border-slate-800">
-          <h1 className="text-2xl font-black text-blue-900 dark:text-white mb-2">
-            Payment Session Missing
-          </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-300 mb-6">
-            The payment page didn’t receive your session data.
-          </p>
-
-          <button
-            onClick={() => onNavigate("student-dashboard")}
-            className="w-full bg-blue-900 hover:bg-blue-800 text-white font-black py-4 rounded-2xl shadow-lg"
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // -----------------------------
   // ✅ Load per-path cohort if missing (pathId preferred)
   // -----------------------------
   useEffect(() => {
     let mounted = true;
 
     const loadCohortForPath = async () => {
+      if (!u?.uid) return;
       if (u.cohortId && u.cohortLabel && u.cohortKey) return;
 
       try {
@@ -226,6 +204,7 @@ const Payment: React.FC<PaymentProps> = ({
 
     const loadCourseConfig = async () => {
       // if dashboard already passed weeklyRate & duration, use them
+      if (!u?.uid) return;
       if (u.courseDurationWeeks && u.weeklyRate) return;
 
       const pinned = PINNED.find(
@@ -419,6 +398,9 @@ const Payment: React.FC<PaymentProps> = ({
     topUpWeeks <= 0 ||
     !publicKey ||
     !FUNCTION_URL ||
+    !u?.uid ||
+    !authUid ||
+    authUid !== u.uid ||
     (u.isTopUp && maxAllowedWeeks <= 0);
 
   const verifyAndFinalize = async (paystackRef: string) => {
@@ -480,6 +462,7 @@ const Payment: React.FC<PaymentProps> = ({
       }
 
       setPaymentState("success");
+      localStorage.removeItem("cwg_registration_handoff"); // ✅ important
       onPaymentSuccess?.(newTotalWeeks);
     } catch (err: any) {
       console.error("Verification failed:", err);
@@ -505,32 +488,45 @@ const Payment: React.FC<PaymentProps> = ({
       setErrorMsg("");
       setDebugMsg("");
 
-      // store pending payment first (so Admin can see it)
-      await registrationStore.setPendingPayment(u.uid, {
+      const currentAuthUid = auth.currentUser?.uid || "";
+
+      console.log("AUTH UID:", currentAuthUid);
+      console.log("PAYMENT UID:", u.uid);
+
+      if (!currentAuthUid) {
+        throw new Error(
+          "Your login session is not ready. Please sign in again.",
+        );
+      }
+
+      if (currentAuthUid !== u.uid) {
+        throw new Error("Signed-in user does not match this payment session.");
+      }
+
+      const profile = await registrationStore.getUserProfile(currentAuthUid);
+      if (!profile) {
+        throw new Error(
+          "Your student profile is missing. Please complete registration first.",
+        );
+      }
+
+      console.log(
+        "This is the uid " + u.uid + " Now attempting set pending payment",
+      );
+
+      // ✅ store pending payment first (so Admin can see it)
+      await registrationStore.setPendingPayment(currentAuthUid, {
         kind: u.isTopUp ? "topup" : "initial",
         weeks: topUpWeeks,
         amount: totalPrice,
         reference,
       });
 
-      // ✅ optional: keep cohort/path meta consistent on user doc
-      try {
-        await registrationStore.updateUserCohortFields(u.uid, {
-          cohortId,
-          cohortLabel,
-          cohortKey,
-          pathId: u.pathId,
-          path: safePath,
-          courseId: u.courseId,
-        });
-      } catch (err) {
-        console.warn("updateUserCohortFields skipped:", err);
-      }
+      // ✅ Do NOT update cohort fields here anymore.
+      // ContinueRegistration already saved them.
 
-      // open Paystack modal
       initializePayment({
         onSuccess: async (res: any) => {
-          // Paystack returns a reference; prefer it
           const r = String(res?.reference || "").trim() || reference;
           await verifyAndFinalize(r);
         },
@@ -543,6 +539,9 @@ const Payment: React.FC<PaymentProps> = ({
       console.error("Payment init failed:", e);
       setPaymentState("failed");
       setErrorMsg(e?.message || "Could not start payment. Please try again.");
+      setDebugMsg(
+        `authUid=${auth.currentUser?.uid || "none"} | sessionUid=${u?.uid || "none"} | ref=${reference}`,
+      );
       inFlightRef.current = false;
     }
   };
@@ -569,6 +568,31 @@ const Payment: React.FC<PaymentProps> = ({
       </span>
     </div>
   );
+
+  // -----------------------------
+  // ✅ Guard: missing session
+  // -----------------------------
+  if (!u?.uid || !u?.email) {
+    return (
+      <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 max-w-md w-full p-8 rounded-[2.5rem] shadow-xl border border-slate-200 dark:border-slate-800">
+          <h1 className="text-2xl font-black text-blue-900 dark:text-white mb-2">
+            Payment Session Missing
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-300 mb-6">
+            The payment page didn’t receive your session data.
+          </p>
+
+          <button
+            onClick={() => onNavigate("student-dashboard")}
+            className="w-full bg-blue-900 hover:bg-blue-800 text-white font-black py-4 rounded-2xl shadow-lg"
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // -----------------------------
   // SUCCESS
@@ -947,6 +971,6 @@ const Payment: React.FC<PaymentProps> = ({
       </div>
     </div>
   );
-};
+};;
 
 export default Payment;

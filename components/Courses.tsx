@@ -301,7 +301,7 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
                       <button
                         onClick={() =>
                           onNavigate(
-                            "registration",
+                            "create-account",
                             toRegistrationParam(course, resolvedPathTitle),
                           )
                         }
