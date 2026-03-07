@@ -1,48 +1,591 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { View } from "../src/App";
+import { registrationStore, CourseDoc } from "../services/registrationStore";
+import { usePaystackPayment } from "react-paystack";
+import { auth } from "../services/firebase";
 
-import React, { useState } from 'react';
-import { View } from '../App';
+interface UserData {
+  uid: string;
+  email: string;
+
+  // legacy label (keep)
+  path: string;
+
+  // ✅ new fields
+  pathId?: string;
+  courseId?: string;
+
+  weeksToCommit: number | string;
+  reference?: string;
+  originalWeeks?: number;
+  isTopUp?: boolean;
+
+  cohortId?: string;
+  cohortLabel?: string;
+
+  // ✅ NEW: best doc id for /cohorts/{cohortKey}
+  cohortKey?: string;
+
+  // optional (if dashboard passed it)
+  courseDurationWeeks?: number;
+  weeklyRate?: number;
+}
+
+type PaymentIncoming =
+  | UserData
+  | { selectedPath?: string; userData?: UserData }
+  | null
+  | undefined;
 
 interface PaymentProps {
   onNavigate: (view: View) => void;
   selectedPath: string;
-  userData: any;
-  onPaymentSuccess?: () => void;
+  userData: PaymentIncoming;
+  onPaymentSuccess?: (newTotalWeeks: number) => void;
 }
 
-const Payment: React.FC<PaymentProps> = ({ onNavigate, selectedPath, userData, onPaymentSuccess }) => {
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
+const PINNED = [
+  { title: "Flutter & Mobile App Development", weeks: 12, rate: 10000 },
+  { title: "Web Development & WordPress", weeks: 8, rate: 10000 },
+  { title: "AI-Assisted Development", weeks: 4, rate: 10000 },
+];
 
-  // Default to 1 if something went wrong with the form data
-  const weeksToCommit = parseInt(userData?.weeksToCommit || '1');
-  const weeklyRate = 10000;
-  const totalPrice = weeksToCommit * weeklyRate;
+const parseWeeksFromDuration = (duration: string, fallback = 4) => {
+  const n = parseInt(String(duration || "").replace(/[^\d]/g, ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
 
-  const handlePayment = () => {
-    setIsProcessing(true);
-    // Simulate payment API call
-    setTimeout(() => {
-      setIsProcessing(false);
-      setIsSuccess(true);
-      if (onPaymentSuccess) onPaymentSuccess();
-    }, 2500);
+const parsePricePerWeek = (label: string, fallback = 10000) => {
+  const s = String(label || "").toLowerCase();
+  const hasK = s.includes("k");
+  const num = parseInt(s.replace(/[^\d]/g, ""), 10);
+  if (!Number.isFinite(num) || num <= 0) return fallback;
+  return hasK ? num * 1000 : num;
+};
+
+const clamp = (n: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, n));
+
+const Badge = ({
+  tone = "blue",
+  children,
+}: {
+  tone?: "blue" | "teal" | "orange" | "slate";
+  children: React.ReactNode;
+}) => {
+  const cls =
+    tone === "teal"
+      ? "bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-200 border-teal-100 dark:border-teal-500/20"
+      : tone === "orange"
+        ? "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-200 border-orange-100 dark:border-orange-500/20"
+        : tone === "slate"
+          ? "bg-slate-50 text-slate-700 dark:bg-slate-800/50 dark:text-slate-200 border-slate-200 dark:border-slate-700"
+          : "bg-blue-50 text-blue-900 dark:bg-blue-900/20 dark:text-teal-200 border-blue-100 dark:border-blue-800/40";
+
+  return (
+    <span
+      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${cls}`}
+    >
+      {children}
+    </span>
+  );
+};
+
+const Payment: React.FC<PaymentProps> = ({
+  onNavigate,
+  selectedPath,
+  userData,
+  onPaymentSuccess,
+}) => {
+  const FUNCTION_URL = import.meta.env.VITE_VERIFY_PAYSTACK_URL as string;
+  const publicKey = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY as string;
+
+  const normalized = useMemo(() => {
+    const anyData = userData as any;
+
+    if (anyData?.userData?.uid) {
+      return {
+        selectedPath: anyData.selectedPath || selectedPath,
+        userData: anyData.userData as UserData,
+      };
+    }
+
+    if (anyData?.uid) {
+      return {
+        selectedPath,
+        userData: anyData as UserData,
+      };
+    }
+
+    return { selectedPath, userData: null as any };
+  }, [userData, selectedPath]);
+
+  const safePath = normalized.selectedPath || selectedPath;
+  const u = normalized.userData as UserData | null;
+  const authUid = auth.currentUser?.uid || "";
+
+  const [paymentState, setPaymentState] = useState<
+    "idle" | "processing" | "verifying" | "success" | "failed"
+  >("idle");
+
+  const [errorMsg, setErrorMsg] = useState<string>("");
+  const [debugMsg, setDebugMsg] = useState<string>("");
+
+  // ✅ per-path cohort fallback (NOT /config/app global)
+  const [fallbackCohort, setFallbackCohort] = useState<{
+    cohortId: string;
+    cohortLabel: string;
+    cohortKey: string;
+  } | null>(null);
+
+  // ✅ course config in Payment too
+  const [courseMaxWeeks, setCourseMaxWeeks] = useState<number>(
+    u?.courseDurationWeeks || 4,
+  );
+  const [courseWeeklyRate, setCourseWeeklyRate] = useState<number>(
+    u?.weeklyRate || 10000,
+  );
+
+  // prevent double init
+  const inFlightRef = useRef(false);
+
+  // -----------------------------
+  // ✅ Load per-path cohort if missing (pathId preferred)
+  // -----------------------------
+  useEffect(() => {
+    let mounted = true;
+
+    const loadCohortForPath = async () => {
+      if (!u?.uid) return;
+      if (u.cohortId && u.cohortLabel && u.cohortKey) return;
+
+      try {
+        const inferredPathId =
+          u.pathId || (await registrationStore.resolvePathId(safePath));
+
+        const active = inferredPathId
+          ? await registrationStore.getActiveCohortForPathId(inferredPathId)
+          : await registrationStore.getActiveCohortForPath(safePath);
+
+        if (!mounted) return;
+
+        setFallbackCohort({
+          cohortId: active.cohortId,
+          cohortLabel: active.label,
+          cohortKey: active.cohortKey,
+        });
+      } catch (err) {
+        console.warn("loadCohortForPath failed:", err);
+        if (!mounted) return;
+        setFallbackCohort({
+          cohortId: "CWG-DEFAULT",
+          cohortLabel: "Current Cohort",
+          cohortKey: "CWG-DEFAULT",
+        });
+      }
+    };
+
+    loadCohortForPath();
+    return () => {
+      mounted = false;
+    };
+  }, [u.cohortId, u.cohortLabel, u.cohortKey, u.pathId, safePath]);
+
+  const cohortLabel =
+    u.cohortLabel || fallbackCohort?.cohortLabel || "Current Cohort";
+  const cohortId = u.cohortId || fallbackCohort?.cohortId || "CWG-DEFAULT";
+  const cohortKey = u.cohortKey || fallbackCohort?.cohortKey || "CWG-DEFAULT";
+
+  // -----------------------------
+  // ✅ Load course config (truth fields first: weeks + pricePerWeek)
+  // -----------------------------
+  useEffect(() => {
+    let mounted = true;
+
+    const loadCourseConfig = async () => {
+      // if dashboard already passed weeklyRate & duration, use them
+      if (!u?.uid) return;
+      if (u.courseDurationWeeks && u.weeklyRate) return;
+
+      const pinned = PINNED.find(
+        (p) =>
+          p.title.trim().toLowerCase() ===
+          String(safePath).trim().toLowerCase(),
+      );
+      if (pinned) {
+        if (!mounted) return;
+        setCourseMaxWeeks(pinned.weeks);
+        setCourseWeeklyRate(pinned.rate);
+        return;
+      }
+
+      try {
+        const list: CourseDoc[] = await registrationStore.getCourses();
+        const active = (list || []).filter(
+          (c) => (c as any).isActive !== false,
+        );
+
+        const found = active.find((c: any) => {
+          if (u.courseId) return String(c.id) === String(u.courseId);
+          if (u.pathId && c.pathId)
+            return String(c.pathId) === String(u.pathId);
+
+          return (
+            String(c.title || "")
+              .trim()
+              .toLowerCase() === String(safePath).trim().toLowerCase()
+          );
+        });
+
+        if (!mounted) return;
+
+        if (found) {
+          const w = Number((found as any).weeks);
+          const p = Number((found as any).pricePerWeek);
+
+          const weeks =
+            Number.isFinite(w) && w > 0
+              ? Math.floor(w)
+              : parseWeeksFromDuration(found.duration, 4);
+
+          const rate =
+            Number.isFinite(p) && p > 0
+              ? Math.floor(p)
+              : parsePricePerWeek(found.priceLabel || "₦10k/wk", 10000);
+
+          setCourseMaxWeeks(weeks);
+          setCourseWeeklyRate(rate);
+        } else {
+          setCourseMaxWeeks(4);
+          setCourseWeeklyRate(10000);
+        }
+      } catch (e) {
+        console.error("Failed to load course config:", e);
+        if (!mounted) return;
+        setCourseMaxWeeks(4);
+        setCourseWeeklyRate(10000);
+      }
+    };
+
+    loadCourseConfig();
+    return () => {
+      mounted = false;
+    };
+  }, [safePath, u.courseDurationWeeks, u.weeklyRate, u.courseId, u.pathId]);
+
+  // ✅ Weeks requested
+  const requestedWeeks = useMemo(() => {
+    const w =
+      typeof u.weeksToCommit === "string"
+        ? parseInt(u.weeksToCommit, 10)
+        : u.weeksToCommit;
+    return Number.isFinite(w) && w > 0 ? w : 1;
+  }, [u.weeksToCommit]);
+
+  const originalWeeks = u.originalWeeks ?? 0;
+
+  // ✅ correct cap logic
+  const maxAllowedWeeks = useMemo(() => {
+    if (!u.isTopUp) return Math.max(1, courseMaxWeeks);
+    const remaining = Math.max(0, courseMaxWeeks - originalWeeks);
+    return remaining;
+  }, [u.isTopUp, courseMaxWeeks, originalWeeks]);
+
+  const topUpWeeks = useMemo(() => {
+    if (maxAllowedWeeks <= 0) return 0;
+    return clamp(requestedWeeks, 1, maxAllowedWeeks);
+  }, [requestedWeeks, maxAllowedWeeks]);
+
+  const weeklyRate = courseWeeklyRate || 10000;
+  const totalPrice = topUpWeeks * weeklyRate;
+
+  const newTotalWeeks = u.isTopUp ? originalWeeks + topUpWeeks : topUpWeeks;
+
+  // ✅ stable reference
+  const referenceRef = useRef(
+    u.reference ||
+      `CWG_${Date.now().toString(36).toUpperCase()}_${Math.floor(
+        Math.random() * 1000,
+      )}`,
+  );
+  const reference = referenceRef.current;
+
+  // ✅ Paystack metadata (shows on Paystack transaction + helps debugging)
+  const paystackMetadata = useMemo(
+    () => ({
+      custom_fields: [
+        {
+          display_name: "Product",
+          variable_name: "product",
+          value: "CodeWithGideon",
+        },
+        { display_name: "UID", variable_name: "uid", value: u.uid },
+        {
+          display_name: "Kind",
+          variable_name: "kind",
+          value: u.isTopUp ? "topup" : "initial",
+        },
+        {
+          display_name: "Weeks",
+          variable_name: "weeks",
+          value: String(topUpWeeks),
+        },
+        { display_name: "Path", variable_name: "path", value: safePath },
+        {
+          display_name: "PathId",
+          variable_name: "pathId",
+          value: String(u.pathId || ""),
+        },
+        {
+          display_name: "CourseId",
+          variable_name: "courseId",
+          value: String(u.courseId || ""),
+        },
+        {
+          display_name: "CohortKey",
+          variable_name: "cohortKey",
+          value: String(cohortKey || ""),
+        },
+      ],
+      uid: u.uid,
+      kind: u.isTopUp ? "topup" : "initial",
+      weeks: topUpWeeks,
+      path: safePath,
+      pathId: u.pathId || null,
+      courseId: u.courseId || null,
+      cohortId,
+      cohortLabel,
+      cohortKey,
+      expectedAmountKobo: totalPrice * 100,
+      app: "codewithgideon-web",
+      ts: Date.now(),
+    }),
+    [
+      u.uid,
+      u.isTopUp,
+      topUpWeeks,
+      safePath,
+      u.pathId,
+      u.courseId,
+      cohortId,
+      cohortLabel,
+      cohortKey,
+      totalPrice,
+    ],
+  );
+
+  // ✅ IMPORTANT: include metadata in initializePayment config
+  const initializePayment = usePaystackPayment({
+    reference,
+    email: u.email,
+    amount: totalPrice * 100,
+    publicKey,
+    metadata: paystackMetadata as any,
+    channels: [
+      "card",
+      "bank",
+      "ussd",
+      "qr",
+      "mobile_money",
+      "bank_transfer",
+    ] as any,
+  });
+
+  const disablePay =
+    paymentState === "processing" ||
+    paymentState === "verifying" ||
+    totalPrice <= 0 ||
+    topUpWeeks <= 0 ||
+    !publicKey ||
+    !FUNCTION_URL ||
+    !u?.uid ||
+    !authUid ||
+    authUid !== u.uid ||
+    (u.isTopUp && maxAllowedWeeks <= 0);
+
+  const verifyAndFinalize = async (paystackRef: string) => {
+    try {
+      if (!FUNCTION_URL) throw new Error("Missing VITE_VERIFY_PAYSTACK_URL");
+      if (!publicKey) throw new Error("Missing VITE_PAYSTACK_PUBLIC_KEY");
+
+      setPaymentState("verifying");
+      setErrorMsg("");
+      setDebugMsg("");
+
+      const resp = await fetch(FUNCTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reference: paystackRef,
+          uid: u.uid,
+          expectedAmount: totalPrice * 100,
+          weeks: topUpWeeks,
+          kind: u.isTopUp ? "topup" : "initial",
+
+          // ✅ cohort (IMPORTANT)
+          cohortId,
+          cohortLabel,
+          cohortKey,
+
+          // ✅ path metadata
+          path: safePath,
+          pathId: u.pathId,
+          courseId: u.courseId,
+
+          // helpful metadata
+          courseMaxWeeks,
+          weeklyRate,
+        }),
+      });
+
+      const raw = await resp.text();
+
+      let json: any = null;
+      try {
+        json = raw ? JSON.parse(raw) : null;
+      } catch (err) {
+        throw new Error(
+          `Verify returned non-JSON. Status ${resp.status}. Body: ${raw.slice(
+            0,
+            250,
+          )}`,
+        );
+      }
+
+      if (!resp.ok || !json?.ok) {
+        const detail = json?.details
+          ? ` | details: ${JSON.stringify(json.details)}`
+          : "";
+        throw new Error(
+          (json?.error || `Verify failed (${resp.status})`) + detail,
+        );
+      }
+
+      setPaymentState("success");
+      onPaymentSuccess?.(newTotalWeeks);
+      localStorage.removeItem("cwg_registration_handoff"); // ✅ important
+    } catch (err: any) {
+      console.error("Verification failed:", err);
+      setPaymentState("failed");
+      setErrorMsg(
+        err?.message || "Transaction could not be verified. Please try again.",
+      );
+      setDebugMsg(
+        `ref=${paystackRef} | weeks=${topUpWeeks} | amount=${totalPrice} | uid=${u.uid}`,
+      );
+    } finally {
+      inFlightRef.current = false;
+    }
   };
 
-  if (isSuccess) {
+  const handlePayment = async () => {
+    try {
+      if (disablePay) return;
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+
+      setPaymentState("processing");
+      setErrorMsg("");
+      setDebugMsg("");
+
+      const currentAuthUid = auth.currentUser?.uid || "";
+
+      console.log("AUTH UID:", currentAuthUid);
+      console.log("PAYMENT UID:", u.uid);
+
+      if (!currentAuthUid) {
+        throw new Error(
+          "Your login session is not ready. Please sign in again.",
+        );
+      }
+
+      if (currentAuthUid !== u.uid) {
+        throw new Error("Signed-in user does not match this payment session.");
+      }
+
+      const profile = await registrationStore.getUserProfile(currentAuthUid);
+      if (!profile) {
+        throw new Error(
+          "Your student profile is missing. Please complete registration first.",
+        );
+      }
+
+      console.log(
+        "This is the uid " + u.uid + " Now attempting set pending payment",
+      );
+
+      // ✅ store pending payment first (so Admin can see it)
+      await registrationStore.setPendingPayment(currentAuthUid, {
+        kind: u.isTopUp ? "topup" : "initial",
+        weeks: topUpWeeks,
+        amount: totalPrice,
+        reference,
+      });
+
+      // ✅ Do NOT update cohort fields here anymore.
+      // ContinueRegistration already saved them.
+
+      initializePayment({
+        onSuccess: async (res: any) => {
+          const r = String(res?.reference || "").trim() || reference;
+          await verifyAndFinalize(r);
+        },
+        onClose: () => {
+          setPaymentState("idle");
+          inFlightRef.current = false;
+        },
+      });
+    } catch (e: any) {
+      console.error("Payment init failed:", e);
+      setPaymentState("failed");
+      setErrorMsg(e?.message || "Could not start payment. Please try again.");
+      setDebugMsg(
+        `authUid=${auth.currentUser?.uid || "none"} | sessionUid=${u?.uid || "none"} | ref=${reference}`,
+      );
+      inFlightRef.current = false;
+    }
+  };
+
+  const SummaryRow = ({
+    label,
+    value,
+    mono,
+  }: {
+    label: string;
+    value: React.ReactNode;
+    mono?: boolean;
+  }) => (
+    <div className="flex items-center justify-between gap-6 py-2">
+      <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">
+        {label}
+      </span>
+      <span
+        className={`text-sm font-bold text-blue-900 dark:text-white text-right ${
+          mono ? "font-mono break-all" : ""
+        }`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+
+  // -----------------------------
+  // ✅ Guard: missing session
+  // -----------------------------
+  if (!u?.uid || !u?.email) {
     return (
-      <div className="py-24 bg-white dark:bg-slate-900 min-h-screen transition-colors flex items-center justify-center">
-        <div className="max-w-md w-full px-6 text-center">
-          <div className="w-24 h-24 bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 rounded-full flex items-center justify-center mx-auto mb-8 animate-bounce">
-            <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-          </div>
-          <h1 className="text-4xl font-black text-blue-900 dark:text-white mb-4">Payment Successful!</h1>
-          <p className="text-slate-600 dark:text-slate-400 mb-10 leading-relaxed">
-            Welcome to the cohort, <span className="font-bold text-blue-900 dark:text-teal-400">{userData?.fullName}</span>. 
-            Check your email for instructions on how to access the mobile app and join your first live class.
+      <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 max-w-md w-full p-8 rounded-[2.5rem] shadow-xl border border-slate-200 dark:border-slate-800">
+          <h1 className="text-2xl font-black text-blue-900 dark:text-white mb-2">
+            Payment Session Missing
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-300 mb-6">
+            The payment page didn’t receive your session data.
           </p>
-          <button 
-            onClick={() => onNavigate('home')}
-            className="w-full bg-blue-900 dark:bg-teal-600 text-white font-black py-5 rounded-2xl shadow-xl transition-all"
+
+          <button
+            onClick={() => onNavigate("student-dashboard")}
+            className="w-full bg-blue-900 hover:bg-blue-800 text-white font-black py-4 rounded-2xl shadow-lg"
           >
             Back to Dashboard
           </button>
@@ -51,82 +594,383 @@ const Payment: React.FC<PaymentProps> = ({ onNavigate, selectedPath, userData, o
     );
   }
 
-  return (
-    <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
-      <div className="max-w-4xl mx-auto px-6">
-        <div className="text-center mb-12">
-          <div className="inline-flex items-center space-x-2 text-teal-600 dark:text-teal-400 font-bold text-sm uppercase tracking-widest mb-4">
-            <span className="opacity-40">Step 1</span>
-            <div className="w-12 h-1 bg-teal-600 rounded-full"></div>
-            <span>Step 2</span>
-            <div className="w-12 h-1 bg-teal-600 rounded-full"></div>
-          </div>
-          <h1 className="text-4xl font-black text-blue-900 dark:text-white mb-4">Complete Enrollment</h1>
-        </div>
+  // -----------------------------
+  // SUCCESS
+  // -----------------------------
+  if (paymentState === "success") {
+    return (
+      <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 max-w-lg w-full p-8 rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 relative overflow-hidden">
+          <div className="absolute -top-24 -right-24 h-56 w-56 rounded-full bg-teal-500/10 blur-2xl" />
+          <div className="absolute -bottom-24 -left-24 h-56 w-56 rounded-full bg-blue-900/10 blur-2xl" />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-          <div className="order-2 lg:order-1">
-             <div className="bg-white dark:bg-slate-900 p-8 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800">
-                <h3 className="text-xl font-bold text-blue-900 dark:text-white mb-6 uppercase text-xs tracking-widest border-b border-gray-50 dark:border-slate-800 pb-4">Order Breakdown</h3>
-                <div className="space-y-6">
-                  <div className="flex justify-between items-start">
-                    <div className="max-w-[70%]">
-                      <p className="font-bold text-blue-900 dark:text-white leading-tight mb-1">{userData?.path || selectedPath}</p>
-                      <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-tight">Access Rate: ₦{weeklyRate.toLocaleString()} / week</p>
-                    </div>
-                    <span className="font-bold text-blue-900 dark:text-teal-400">₦{weeklyRate.toLocaleString()}</span>
-                  </div>
-                  
-                  <div className="flex justify-between items-center py-4 px-4 bg-gray-50 dark:bg-slate-800/50 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-blue-900 text-white rounded-lg flex items-center justify-center font-bold text-xs">
-                        {weeksToCommit}
-                      </div>
-                      <span className="text-sm font-bold text-slate-600 dark:text-slate-300">Intended Weeks</span>
-                    </div>
-                    <span className="text-xs font-medium text-slate-400 italic">Pre-payment for selected duration</span>
-                  </div>
-
-                  <div className="flex justify-between items-center pt-6 border-t border-gray-50 dark:border-slate-800">
-                    <span className="text-sm font-bold text-slate-500">Subtotal ({weeksToCommit} Weeks)</span>
-                    <span className="text-sm font-bold text-slate-700 dark:text-slate-200">₦{totalPrice.toLocaleString()}.00</span>
-                  </div>
-                  <div className="flex justify-between items-center pt-6 border-t-2 border-dashed border-gray-100 dark:border-slate-800">
-                    <span className="text-lg font-black text-blue-900 dark:text-white">Total Due Now</span>
-                    <span className="text-2xl font-black text-teal-600">₦{totalPrice.toLocaleString()}</span>
-                  </div>
-                </div>
-             </div>
-          </div>
-
-          <div className="order-1 lg:order-2">
-            <div className="bg-white dark:bg-slate-900 p-8 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 h-full flex flex-col">
-              <h3 className="text-xl font-bold text-blue-900 dark:text-white mb-6 uppercase text-xs tracking-widest">Select Payment Method</h3>
-              
-              <div className="space-y-4 mb-10 flex-grow">
-                 <div className="p-5 bg-teal-50 dark:bg-teal-900/10 border-2 border-teal-500 rounded-2xl flex items-center justify-between cursor-pointer">
-                    <div className="flex items-center">
-                      <div className="w-6 h-6 bg-teal-500 rounded-full flex items-center justify-center mr-4">
-                        <div className="w-2 h-2 bg-white rounded-full"></div>
-                      </div>
-                      <span className="font-bold text-blue-900 dark:text-white">Secure Card / Paystack</span>
-                    </div>
-                 </div>
+          <div className="relative">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="h-12 w-12 flex items-center justify-center rounded-2xl bg-teal-100 dark:bg-teal-500/20">
+                <span className="text-teal-600 dark:text-teal-400 text-2xl font-black">
+                  ✓
+                </span>
               </div>
 
-              <button 
-                disabled={isProcessing}
+              <div>
+                <h1 className="text-2xl font-black text-blue-900 dark:text-white">
+                  Payment Verified 🎉
+                </h1>
+                <p className="text-sm text-slate-500 dark:text-slate-300">
+                  Your access has been activated successfully.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/40 backdrop-blur p-5 mb-6">
+              <div className="flex items-center justify-between gap-4">
+                <Badge tone="teal">ACTIVE</Badge>
+                <div className="text-right">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    Total Weeks
+                  </p>
+                  <p className="text-xl font-black text-blue-900 dark:text-white">
+                    {newTotalWeeks} / {courseMaxWeeks}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 border-t border-slate-200 dark:border-slate-800 pt-4">
+                <SummaryRow label="Cohort" value={cohortLabel} />
+                <SummaryRow label="Cohort Key" value={cohortKey} mono />
+                <SummaryRow label="Reference" value={reference} mono />
+              </div>
+            </div>
+
+            <div className="mb-6 p-5 rounded-2xl border border-teal-200 dark:border-teal-500/30 bg-teal-50 dark:bg-teal-500/10">
+              <h2 className="font-black text-blue-900 dark:text-white mb-2">
+                Next Step 🚀
+              </h2>
+              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                You can now continue inside your Student Dashboard and access
+                sessions based on your paid weeks.
+              </p>
+            </div>
+
+            <button
+              onClick={() => onNavigate("student-dashboard")}
+              className="w-full bg-blue-900 hover:bg-blue-800 text-white font-black py-4 rounded-2xl shadow-lg transition-transform hover:scale-[1.01] active:scale-[0.99]"
+            >
+              Go Back to Dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // -----------------------------
+  // VERIFYING
+  // -----------------------------
+  if (paymentState === "verifying") {
+    return (
+      <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 max-w-lg w-full p-8 rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 relative overflow-hidden">
+          <div className="absolute -top-24 -right-24 h-56 w-56 rounded-full bg-blue-900/10 blur-2xl" />
+
+          <div className="flex items-center gap-4 mb-6">
+            <div className="h-12 w-12 flex items-center justify-center rounded-2xl bg-blue-100 dark:bg-blue-500/15">
+              <span className="text-blue-900 dark:text-teal-400 text-2xl font-black">
+                ⏳
+              </span>
+            </div>
+
+            <div>
+              <h1 className="text-2xl font-black text-blue-900 dark:text-white">
+                Verifying Payment…
+              </h1>
+              <p className="text-sm text-slate-500 dark:text-slate-300">
+                Payment received. We’re confirming it securely with Paystack.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 p-5 mb-6">
+            <SummaryRow label="Cohort" value={cohortLabel} />
+            <SummaryRow label="Reference" value={reference} mono />
+            <SummaryRow
+              label="Amount"
+              value={`₦${totalPrice.toLocaleString()}`}
+            />
+          </div>
+
+          <div className="flex flex-col items-center justify-center gap-4 py-2">
+            <div className="h-12 w-12 rounded-full border-4 border-slate-200 dark:border-slate-700 border-t-blue-900 dark:border-t-teal-400 animate-spin" />
+            <p className="text-sm text-slate-600 dark:text-slate-300 text-center">
+              Please don’t close this page…
+            </p>
+            <div className="flex gap-1">
+              <span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600 animate-bounce [animation-delay:-0.2s]" />
+              <span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600 animate-bounce [animation-delay:-0.1s]" />
+              <span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600 animate-bounce" />
+            </div>
+          </div>
+
+          <button
+            onClick={() => onNavigate("student-dashboard")}
+            className="mt-6 w-full text-sm font-bold text-blue-900 dark:text-white underline"
+          >
+            I’ll come back later
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // -----------------------------
+  // FAILED
+  // -----------------------------
+  if (paymentState === "failed") {
+    return (
+      <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 max-w-lg w-full p-8 rounded-[2.5rem] shadow-2xl border border-red-200 dark:border-red-500/30">
+          <div className="flex items-center gap-4 mb-6">
+            <div className="h-12 w-12 flex items-center justify-center rounded-2xl bg-red-100 dark:bg-red-500/20">
+              <span className="text-red-600 dark:text-red-400 text-2xl font-black">
+                ✕
+              </span>
+            </div>
+
+            <div>
+              <h1 className="text-2xl font-black text-red-600 dark:text-red-400">
+                Payment Failed
+              </h1>
+              <p className="text-sm text-slate-500 dark:text-slate-300">
+                Transaction could not be verified. Please try again.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 p-4 text-sm mb-6">
+            <p className="font-black text-red-700 dark:text-red-200">
+              {errorMsg || "Verification failed."}
+            </p>
+            {debugMsg ? (
+              <p className="mt-2 text-[11px] font-mono text-red-700/80 dark:text-red-200/80 break-all">
+                {debugMsg}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              onClick={() => setPaymentState("idle")}
+              className="w-full bg-blue-900 hover:bg-blue-800 text-white font-black py-4 rounded-2xl shadow-lg"
+            >
+              Retry Payment
+            </button>
+
+            <button
+              onClick={() => onNavigate("student-dashboard")}
+              className="w-full bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-blue-900 dark:text-white font-black py-4 rounded-2xl"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // -----------------------------
+  // MAIN UI (Premium)
+  // -----------------------------
+  const kindLabel = u.isTopUp ? "Top-up" : "Initial Payment";
+
+  const capWarning =
+    u.isTopUp && maxAllowedWeeks <= 0
+      ? `You’ve already completed the full course duration (${courseMaxWeeks} weeks).`
+      : "";
+
+  const envWarning =
+    !FUNCTION_URL || !publicKey
+      ? "Payment environment variables are missing. Check VITE_VERIFY_PAYSTACK_URL and VITE_PAYSTACK_PUBLIC_KEY."
+      : "";
+
+  return (
+    <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen px-6">
+      <div className="max-w-5xl mx-auto">
+        <div className="text-center mb-10">
+          <h1 className="text-4xl font-black text-blue-900 dark:text-white">
+            Secure Checkout
+          </h1>
+          <p className="text-slate-500 dark:text-slate-300 mt-2">
+            Complete your payment to unlock your learning access 🚀
+          </p>
+
+          <div className="mt-5 flex items-center justify-center gap-2 flex-wrap">
+            <Badge tone="blue">{kindLabel}</Badge>
+            <Badge tone="slate">{safePath}</Badge>
+            <Badge tone="teal">{cohortLabel}</Badge>
+          </div>
+
+          <p className="text-[11px] text-slate-400 mt-3">
+            Weeks selected: <span className="font-bold">{topUpWeeks}</span> •
+            Max allowed: <span className="font-bold">{maxAllowedWeeks}</span> •
+            ₦{weeklyRate.toLocaleString()}/wk
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+          <div className="lg:col-span-3">
+            <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+              <div className="p-8 relative">
+                <div className="absolute -top-24 -right-24 h-56 w-56 rounded-full bg-teal-500/10 blur-2xl" />
+                <div className="absolute -bottom-24 -left-24 h-56 w-56 rounded-full bg-blue-900/10 blur-2xl" />
+
+                <div className="relative">
+                  <div className="flex items-start justify-between gap-6">
+                    <div>
+                      <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+                        Order Summary
+                      </p>
+                      <h2 className="text-2xl font-black text-blue-900 dark:text-white">
+                        {safePath}
+                      </h2>
+
+                      <p className="text-sm text-slate-500 dark:text-slate-300 mt-2">
+                        {u.isTopUp ? (
+                          <>
+                            You’re adding{" "}
+                            <span className="font-black text-blue-900 dark:text-white">
+                              {topUpWeeks} week(s)
+                            </span>{" "}
+                            to your existing access.
+                          </>
+                        ) : (
+                          <>
+                            This will activate{" "}
+                            <span className="font-black text-blue-900 dark:text-white">
+                              {topUpWeeks} week(s)
+                            </span>{" "}
+                            of access to sessions & recordings.
+                          </>
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="text-right">
+                      <p className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                        Total
+                      </p>
+                      <p className="text-3xl font-black text-teal-600">
+                        ₦{totalPrice.toLocaleString()}
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        {topUpWeeks} × ₦{weeklyRate.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/40 backdrop-blur p-6">
+                    <SummaryRow label="Cohort" value={cohortLabel} />
+                    <SummaryRow label="Cohort Key" value={cohortKey} mono />
+                    <SummaryRow label="Reference" value={reference} mono />
+                    {u.isTopUp ? (
+                      <>
+                        <SummaryRow
+                          label="Current Weeks"
+                          value={`${originalWeeks} / ${courseMaxWeeks}`}
+                        />
+                        <SummaryRow
+                          label="After Payment"
+                          value={`${newTotalWeeks} / ${courseMaxWeeks}`}
+                        />
+                      </>
+                    ) : (
+                      <SummaryRow
+                        label="After Payment"
+                        value={`${newTotalWeeks} / ${courseMaxWeeks}`}
+                      />
+                    )}
+                  </div>
+
+                  {(capWarning || envWarning) && (
+                    <div className="mt-6 p-4 rounded-2xl border border-orange-200 dark:border-orange-500/30 bg-orange-50 dark:bg-orange-500/10 text-orange-800 dark:text-orange-200 text-sm font-bold">
+                      {capWarning || envWarning}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-2">
+            <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 p-8">
+              <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-3">
+                Checkout
+              </p>
+
+              <div className="rounded-3xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 p-5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">
+                    Payable
+                  </span>
+                  <span className="text-xl font-black text-blue-900 dark:text-white">
+                    ₦{totalPrice.toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="mt-3 text-[11px] text-slate-500 dark:text-slate-300">
+                  <p>
+                    • Payment processor:{" "}
+                    <span className="font-bold">Paystack</span>
+                  </p>
+                  <p>
+                    • Email: <span className="font-mono">{u.email}</span>
+                  </p>
+                </div>
+              </div>
+
+              <button
+                disabled={disablePay}
                 onClick={handlePayment}
-                className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 text-lg"
+                className="mt-6 w-full bg-blue-900 hover:bg-blue-800 disabled:opacity-60 text-white font-black py-5 rounded-2xl shadow-lg transition-transform hover:scale-[1.01] active:scale-[0.99]"
               >
-                {isProcessing ? 'Authorizing...' : `Pay ₦${totalPrice.toLocaleString()}`}
+                {paymentState === "processing" ? (
+                  <div className="flex items-center justify-center gap-3">
+                    <span className="h-5 w-5 rounded-full border-2 border-white/50 border-t-white animate-spin" />
+                    <span>Opening Paystack…</span>
+                  </div>
+                ) : totalPrice <= 0 ? (
+                  "Nothing to Pay"
+                ) : (
+                  `Pay ₦${totalPrice.toLocaleString()}`
+                )}
               </button>
+
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-4 text-center">
+                Payments are processed securely via Paystack.
+              </p>
+
+              <button
+                onClick={() => onNavigate("student-dashboard")}
+                className="mt-6 w-full text-sm font-bold text-blue-900 dark:text-white underline"
+              >
+                Cancel & Return to Dashboard
+              </button>
+
+              {!publicKey || !FUNCTION_URL ? (
+                <div className="mt-6 text-[11px] font-mono text-slate-400 break-all">
+                  Missing env: {!publicKey ? "VITE_PAYSTACK_PUBLIC_KEY " : ""}
+                  {!FUNCTION_URL ? "VITE_VERIFY_PAYSTACK_URL" : ""}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-6 text-center text-[10px] text-slate-400">
+              If Paystack window doesn’t open, check pop-ups are allowed.
             </div>
           </div>
         </div>
       </div>
     </div>
   );
-};
+};;
 
 export default Payment;
