@@ -1,4 +1,3 @@
-// components/StudentDashboard.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -19,7 +18,6 @@ import {
   Sparkles,
   Layers3,
   TimerReset,
-  ChevronRight,
 } from "lucide-react";
 import { View } from "../src/App";
 import {
@@ -100,6 +98,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   const [isTopUpOpen, setIsTopUpOpen] = useState(false);
   const [topUpWeeks, setTopUpWeeks] = useState("1");
+  const [showAllClassesModal, setShowAllClassesModal] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -402,7 +401,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
     pathId: profile?.pathId,
   };
 
-  const goToSessions = () => onNavigate("sessions" as View, sessionsNavPayload);
+  const goToSessions = () => setShowAllClassesModal(true);
 
   const getSessionWindowMs = (s: SessionDoc) => {
     const startMs =
@@ -1020,15 +1019,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                                 ? "Join Live Class"
                                 : "Open Next Class"}
                             </motion.button>
-                          ) : (
-                            <button
-                              disabled
-                              className="px-6 py-4 rounded-2xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed inline-flex items-center justify-center gap-2"
-                            >
-                              <Lock className="w-4 h-4" />
-                              No Join Link Yet
-                            </button>
-                          )}
+                          ) : null}
                         </>
                       ) : null}
                     </div>
@@ -1059,7 +1050,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                       <div>
                         <div className="flex items-center justify-between gap-4 mb-4">
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                            Available Classes
+                            Quick Preview
                           </p>
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                             Showing {Math.min(5, sessions.length)} of{" "}
@@ -1115,7 +1106,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                                         <p className="text-sm font-bold text-blue-900 dark:text-white mt-1">
                                           {s.joinUrl
                                             ? "Join available"
-                                            : "No live link yet"}
+                                            : "Link coming soon"}
                                         </p>
                                       </div>
                                     </div>
@@ -1132,18 +1123,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                                     )}
                                   </div>
 
-                                  <div className="flex flex-col sm:flex-row lg:flex-col gap-2 lg:min-w-[170px]">
-                                    <motion.button
-                                      whileHover={{ scale: 1.02 }}
-                                      whileTap={{ scale: 0.98 }}
-                                      onClick={goToSessions}
-                                      className="px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-blue-900 dark:text-white hover:opacity-90 transition inline-flex items-center justify-center gap-2"
-                                    >
-                                      View Details
-                                      <ChevronRight className="w-3.5 h-3.5" />
-                                    </motion.button>
-
-                                    {s.joinUrl ? (
+                                  {s.joinUrl ? (
+                                    <div className="flex flex-col sm:flex-row lg:flex-col gap-2 lg:min-w-[170px]">
                                       <motion.button
                                         whileHover={{ scale: 1.02 }}
                                         whileTap={{ scale: 0.98 }}
@@ -1153,16 +1134,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                                         <PlayCircle className="w-3.5 h-3.5" />
                                         Join Class
                                       </motion.button>
-                                    ) : (
-                                      <button
-                                        disabled
-                                        className="px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed inline-flex items-center justify-center gap-2"
-                                      >
-                                        <Lock className="w-3.5 h-3.5" />
-                                        No Join Link Yet
-                                      </button>
-                                    )}
-                                  </div>
+                                    </div>
+                                  ) : null}
                                 </div>
                               </motion.div>
                             ))}
@@ -1303,6 +1276,165 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
             </motion.div>
           </div>
         </motion.div>
+        <AnimatePresence>
+          {showAllClassesModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-slate-950/80 backdrop-blur-sm"
+            >
+              <motion.div
+                initial={{ opacity: 0, y: 20, scale: 0.985 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.985 }}
+                transition={{ duration: 0.2 }}
+                className="w-full max-w-6xl h-[88vh] rounded-[2rem] md:rounded-[2.5rem] border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden"
+              >
+                <div className="relative border-b border-gray-100 dark:border-slate-800 px-5 md:px-7 py-5 md:py-6 bg-gradient-to-r from-white via-slate-50 to-blue-50 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950">
+                  <div className="absolute -top-12 right-10 h-28 w-28 rounded-full bg-blue-500/10 blur-2xl" />
+                  <div className="absolute -bottom-10 left-10 h-24 w-24 rounded-full bg-teal-500/10 blur-2xl" />
+
+                  <div className="relative flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20 text-blue-600 dark:text-blue-300 text-[10px] font-black uppercase tracking-[0.18em] mb-3">
+                        <BookOpen className="w-3.5 h-3.5" />
+                        Available Classes
+                      </div>
+
+                      <h3 className="text-2xl md:text-3xl font-black text-blue-900 dark:text-white tracking-tight">
+                        Your Unlocked Classes
+                      </h3>
+                      <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
+                        {sessions.length} class{sessions.length > 1 ? "es" : ""}{" "}
+                        available in your learning path.
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => setShowAllClassesModal(false)}
+                      className="shrink-0 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white transition"
+                      aria-label="Close classes modal"
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M6 18L18 6M6 6l12 12"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="h-[calc(88vh-112px)] overflow-auto px-5 md:px-7 py-5 md:py-6 bg-slate-50/70 dark:bg-slate-950/60">
+                  {sessions.length === 0 ? (
+                    <div className="h-full flex items-center justify-center">
+                      <div className="max-w-md text-center">
+                        <div className="w-16 h-16 mx-auto rounded-3xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mb-5">
+                          <BookOpen className="w-7 h-7" />
+                        </div>
+                        <h4 className="text-xl font-black text-blue-900 dark:text-white mb-2">
+                          No classes available yet
+                        </h4>
+                        <p className="text-slate-500 dark:text-slate-400">
+                          Once sessions are published for your cohort, they’ll
+                          appear here automatically.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 md:gap-5">
+                      <AnimatePresence initial={false}>
+                        {sessions.map((s, index) => (
+                          <motion.div
+                            key={s.id}
+                            initial={{ opacity: 0, y: 14 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            transition={{ delay: index * 0.03 }}
+                            className="group rounded-[1.75rem] border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 md:p-6 shadow-sm hover:shadow-lg transition-all"
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-3 mb-3">
+                                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-600 to-teal-500 text-white flex items-center justify-center font-black text-sm shadow-lg shrink-0">
+                                    W{s.week}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-lg font-black text-blue-900 dark:text-white leading-tight">
+                                      {s.title}
+                                    </p>
+                                    <p className="text-[11px] text-slate-400 font-bold uppercase tracking-widest mt-1">
+                                      Week {s.week}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <TagRow tags={getSessionTags(s)} />
+                              </div>
+
+                              {s.joinUrl ? (
+                                <motion.button
+                                  whileHover={{ scale: 1.02 }}
+                                  whileTap={{ scale: 0.98 }}
+                                  onClick={() => openJoin(s.joinUrl)}
+                                  className="shrink-0 px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-blue-900 dark:bg-teal-600 text-white hover:opacity-90 transition inline-flex items-center justify-center gap-2"
+                                >
+                                  <PlayCircle className="w-3.5 h-3.5" />
+                                  Join
+                                </motion.button>
+                              ) : null}
+                            </div>
+
+                            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 px-4 py-3">
+                                <p className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                  <Clock3 className="w-3.5 h-3.5" />
+                                  Schedule
+                                </p>
+                                <p className="text-sm font-bold text-blue-900 dark:text-white mt-1">
+                                  {formatSessionTime(s)}
+                                </p>
+                              </div>
+
+                              <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 px-4 py-3">
+                                <p className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                  <BookOpen className="w-3.5 h-3.5" />
+                                  Track
+                                </p>
+                                <p className="text-sm font-bold text-blue-900 dark:text-white mt-1">
+                                  {s.path}
+                                </p>
+                              </div>
+                            </div>
+
+                            {!!s.notes && (
+                              <div className="mt-4 rounded-2xl bg-blue-50/70 dark:bg-slate-800/40 border border-blue-100 dark:border-slate-800 p-4">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                                  Class Detail
+                                </p>
+                                <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                                  {s.notes}
+                                </p>
+                              </div>
+                            )}
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Top-Up Modal */}
         <AnimatePresence>

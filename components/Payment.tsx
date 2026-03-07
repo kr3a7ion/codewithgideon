@@ -462,8 +462,8 @@ const Payment: React.FC<PaymentProps> = ({
       }
 
       setPaymentState("success");
-      localStorage.removeItem("cwg_registration_handoff"); // ✅ important
       onPaymentSuccess?.(newTotalWeeks);
+      localStorage.removeItem("cwg_registration_handoff"); // ✅ important
     } catch (err: any) {
       console.error("Verification failed:", err);
       setPaymentState("failed");
