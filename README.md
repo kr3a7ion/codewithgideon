@@ -291,7 +291,7 @@ Responsibilities:
 Clone the repository:
 
 
-git clone https://github.com/yourusername/codewithgideon.git
+git clone https://github.com/kr3a7ion/codewithgideon.git
 
 
 Install dependencies:
