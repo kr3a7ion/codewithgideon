@@ -152,7 +152,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onNavigate, onLogin }) => {
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={isSubmitting}
                   className="block w-full pl-11 pr-4 py-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none transition-all text-slate-900 dark:text-white placeholder:text-slate-400 disabled:opacity-60"
-                  placeholder="admin@codewithgideon.com"
+                  placeholder="mail@example.com"
                 />
               </div>
             </div>

@@ -6,6 +6,10 @@ import axios from "axios";
 import cors from "cors";
 import {logger} from "firebase-functions";
 import {getFirestore, FieldValue} from "firebase-admin/firestore";
+import {defineSecret} from "firebase-functions/params";
+import * as crypto from "crypto";
+
+const PAYSTACK_SECRET_KEY = defineSecret("PAYSTACK_SECRET_KEY");
 
 admin.initializeApp();
 
@@ -224,7 +228,8 @@ export const verifyPaystackPayment = onRequest(
           return;
         }
 
-        const secret = process.env.PAYSTACK_SECRET_KEY;
+        // const secret = process.env.PAYSTACK_SECRET_KEY;
+        const secret = PAYSTACK_SECRET_KEY.value();
         if (!secret) {
           res.status(500).json({ok: false, error: "Paystack secret missing"});
           return;
@@ -488,5 +493,137 @@ export const verifyPaystackPayment = onRequest(
         });
       }
     });
+  },
+);
+
+export const paystackWebhook = onRequest(
+  {secrets: [PAYSTACK_SECRET_KEY]},
+  async (req, res) => {
+    try {
+      if (req.method !== "POST") {
+        res.status(405).send("Method not allowed");
+        return;
+      }
+
+      const secret = PAYSTACK_SECRET_KEY.value();
+
+      if (!secret) {
+        res.status(500).send("Secret missing");
+        return;
+      }
+
+      // 🔐 Verify Paystack signature
+      const hash = crypto
+        .createHmac("sha512", secret)
+        .update(JSON.stringify(req.body))
+        .digest("hex");
+
+      const signatureHeader = req.headers["x-paystack-signature"];
+      const signature =
+        typeof signatureHeader === "string" ? signatureHeader : "";
+
+      if (hash !== signature) {
+        logger.error("Invalid Paystack webhook signature");
+        res.status(401).send("Invalid signature");
+        return;
+      }
+
+      const event = req.body;
+
+      // Only process successful charges
+      if (event?.event !== "charge.success") {
+        res.status(200).send("Event ignored");
+        return;
+      }
+
+      const data = event.data;
+
+      const reference = safeString(data.reference);
+      const metadata = parseMetadata(data.metadata);
+
+      const uid = safeString(metadata?.uid || metadata?.userId);
+
+      if (!reference || !uid) {
+        logger.error("Webhook missing reference or uid", {reference, uid});
+        res.status(400).send("Missing reference or uid");
+        return;
+      }
+
+      // Fraud protection checks
+      if (data.status !== "success") {
+        logger.warn("Webhook payment not successful", {reference});
+        res.status(400).send("Invalid payment status");
+        return;
+      }
+
+      if (data.currency !== "NGN") {
+        logger.warn("Webhook invalid currency", {reference});
+        res.status(400).send("Invalid currency");
+        return;
+      }
+
+      if (!data.customer?.email) {
+        logger.warn("Webhook missing customer email", {reference});
+        res.status(400).send("Missing email");
+        return;
+      }
+
+      const eventId = safeString(event?.data?.id || event?.data?.reference);
+
+      if (!eventId) {
+        res.status(400).send("Missing event id");
+        return;
+      }
+
+      const webhookRef = db.collection("webhookEvents").doc(eventId);
+      const webhookSnap = await webhookRef.get();
+
+      // Prevent duplicate webhook processing
+      if (webhookSnap.exists) {
+        logger.info("Duplicate webhook ignored", {eventId});
+        res.status(200).send("Already processed");
+        return;
+      }
+
+      await webhookRef.set({
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        event: event.event,
+        reference,
+        uid,
+      });
+
+      logger.info("Webhook payment received", {reference, uid});
+
+      /**
+       * Verify with Paystack again (defense layer)
+       */
+      const verifyUrl =
+        "https://api.paystack.co/transaction/verify/" +
+        encodeURIComponent(reference);
+
+      const paystackResp = await axios.get(verifyUrl, {
+        headers: {Authorization: "Bearer " + secret},
+        timeout: 10000,
+      });
+
+      if (!paystackResp.data?.status) {
+        logger.error("Webhook verification failed", {
+          paystack: paystackResp.data,
+        });
+        res.status(400).send("Verification failed");
+        return;
+      }
+
+      logger.info("Webhook verification successful", {reference});
+
+      // NOTE:
+      // Firestore updates still handled by verifyPaystackPayment
+      // This webhook acts as a verification backup.
+
+      res.status(200).send("Webhook processed");
+    } catch (error) {
+      logger.error("Webhook error", error);
+      res.status(500).send("Webhook failure");
+    }
   },
 );
