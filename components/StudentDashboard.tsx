@@ -709,7 +709,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 {Math.round(progressPercent)}%
               </p>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                {paidWeeks} of {totalProgramWeeks} weeks paid
+                {paidWeeks} of {totalProgramWeeks} weeks
               </p>
             </div>
 

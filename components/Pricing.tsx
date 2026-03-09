@@ -93,7 +93,7 @@ const Pricing: React.FC<PricingProps> = ({ onNavigate }) => {
               </p>
             </div>
             <div className="flex-shrink-0 bg-white dark:bg-slate-800 px-4 py-2 rounded-lg border border-orange-200 dark:border-orange-700 font-bold text-orange-700 dark:text-orange-400 text-xs uppercase tracking-tighter">
-              15 Seats per Cohort
+              20 Seats per Cohort
             </div>
           </div>
         </div>
