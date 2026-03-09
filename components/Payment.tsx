@@ -296,8 +296,29 @@ const Payment: React.FC<PaymentProps> = ({
     return clamp(requestedWeeks, 1, maxAllowedWeeks);
   }, [requestedWeeks, maxAllowedWeeks]);
 
+  // -----------------------------
+  // PRICE CALCULATION
+  // -----------------------------
+
   const weeklyRate = courseWeeklyRate || 10000;
-  const totalPrice = topUpWeeks * weeklyRate;
+
+  // Base course cost
+  const basePrice = topUpWeeks * weeklyRate;
+
+  // Paystack processing fee
+  // Standard: 1.5% + ₦100
+  const percentFee = basePrice * 0.015;
+  const flatFee = 100;
+
+  const processingFee = Math.ceil(percentFee + flatFee);
+
+  // Total student pays
+  const totalPrice = basePrice + processingFee;
+
+  // Amounts in kobo (for Paystack + backend verification)
+  const totalPriceKobo = totalPrice * 100;
+  const basePriceKobo = basePrice * 100;
+  const processingFeeKobo = processingFee * 100;
 
   const newTotalWeeks = u.isTopUp ? originalWeeks + topUpWeeks : topUpWeeks;
 
@@ -356,7 +377,9 @@ const Payment: React.FC<PaymentProps> = ({
       cohortId,
       cohortLabel,
       cohortKey,
-      expectedAmountKobo: totalPrice * 100,
+      expectedAmountKobo: totalPriceKobo,
+      baseAmountKobo: basePriceKobo,
+      processingFeeKobo: processingFeeKobo,
       app: "codewithgideon-web",
       ts: Date.now(),
     }),
@@ -378,7 +401,7 @@ const Payment: React.FC<PaymentProps> = ({
   const initializePayment = usePaystackPayment({
     reference,
     email: u.email,
-    amount: totalPrice * 100,
+    amount: totalPriceKobo,
     publicKey,
     metadata: paystackMetadata as any,
     channels: [
@@ -412,13 +435,23 @@ const Payment: React.FC<PaymentProps> = ({
       setErrorMsg("");
       setDebugMsg("");
 
+      // Prevent duplicate verification
+      const alreadyVerified = sessionStorage.getItem(`pay_${paystackRef}`);
+
+      if (alreadyVerified) {
+        console.warn("Duplicate verification prevented");
+        return;
+      }
+
+      sessionStorage.setItem(`pay_${paystackRef}`, "1");
+
       const resp = await fetch(FUNCTION_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           reference: paystackRef,
           uid: u.uid,
-          expectedAmount: totalPrice * 100,
+          expectedAmount: totalPriceKobo,
           weeks: topUpWeeks,
           kind: u.isTopUp ? "topup" : "initial",
 
@@ -490,9 +523,6 @@ const Payment: React.FC<PaymentProps> = ({
 
       const currentAuthUid = auth.currentUser?.uid || "";
 
-      console.log("AUTH UID:", currentAuthUid);
-      console.log("PAYMENT UID:", u.uid);
-
       if (!currentAuthUid) {
         throw new Error(
           "Your login session is not ready. Please sign in again.",
@@ -510,9 +540,6 @@ const Payment: React.FC<PaymentProps> = ({
         );
       }
 
-      console.log(
-        "This is the uid " + u.uid + " Now attempting set pending payment",
-      );
 
       // ✅ store pending payment first (so Admin can see it)
       await registrationStore.setPendingPayment(currentAuthUid, {
@@ -858,12 +885,20 @@ const Payment: React.FC<PaymentProps> = ({
                       <p className="text-xs font-black text-slate-400 uppercase tracking-widest">
                         Total
                       </p>
+
                       <p className="text-3xl font-black text-teal-600">
                         ₦{totalPrice.toLocaleString()}
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        {topUpWeeks} × ₦{weeklyRate.toLocaleString()}
-                      </p>
+
+                      <div className="text-[11px] text-slate-400 mt-2 space-y-1">
+                        <p>
+                          Course ({topUpWeeks} × ₦{weeklyRate.toLocaleString()})
+                        </p>
+
+                        <p>Course Cost: ₦{basePrice.toLocaleString()}</p>
+
+                        <p>Processing Fee: ₦{processingFee.toLocaleString()}</p>
+                      </div>
                     </div>
                   </div>
 
@@ -911,9 +946,16 @@ const Payment: React.FC<PaymentProps> = ({
                   <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">
                     Payable
                   </span>
-                  <span className="text-xl font-black text-blue-900 dark:text-white">
-                    ₦{totalPrice.toLocaleString()}
-                  </span>
+                  <div className="text-right">
+                    <span className="text-xl font-black text-blue-900 dark:text-white">
+                      ₦{totalPrice.toLocaleString()}
+                    </span>
+
+                    <p className="text-[11px] text-slate-400">
+                      ₦{basePrice.toLocaleString()} + ₦
+                      {processingFee.toLocaleString()} fee
+                    </p>
+                  </div>
                 </div>
 
                 <div className="mt-3 text-[11px] text-slate-500 dark:text-slate-300">
@@ -940,7 +982,7 @@ const Payment: React.FC<PaymentProps> = ({
                 ) : totalPrice <= 0 ? (
                   "Nothing to Pay"
                 ) : (
-                  `Pay ₦${totalPrice.toLocaleString()}`
+                  `Pay ₦${totalPrice.toLocaleString()} Securely`
                 )}
               </button>
 
@@ -971,6 +1013,6 @@ const Payment: React.FC<PaymentProps> = ({
       </div>
     </div>
   );
-};;
+};
 
 export default Payment;
