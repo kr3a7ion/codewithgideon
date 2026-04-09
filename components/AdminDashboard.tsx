@@ -194,6 +194,20 @@ const fadeUp = {
   show: { opacity: 1, y: 0 },
 };
 
+const pageShellClass =
+  "py-10 md:py-12 min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-slate-100 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 transition-colors";
+const surfaceCardClass =
+  "rounded-[2rem] border border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 shadow-[0_12px_40px_rgba(15,23,42,0.08)] dark:shadow-[0_16px_40px_rgba(2,6,23,0.45)] backdrop-blur-sm";
+const sectionTitleClass =
+  "text-xl md:text-2xl font-black tracking-tight text-slate-900 dark:text-white";
+const sectionCopyClass = "text-sm text-slate-600 dark:text-slate-300";
+const subtleActionClass =
+  "px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition";
+const primaryActionClass =
+  "px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-900 text-white hover:bg-slate-700 dark:bg-teal-500 dark:text-slate-900 dark:hover:bg-teal-400 transition inline-flex items-center gap-2";
+const successActionClass =
+  "px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-emerald-600 text-white hover:bg-emerald-500 shadow-md transition inline-flex items-center gap-2";
+
 const toDateMs = (v: any): number => {
   if (!v) return 0;
   if (typeof v?.toMillis === "function") return v.toMillis();
@@ -1653,7 +1667,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // RETURN JSX (your UI preserved)
   // -------------------------
   return (
-    <div className="py-12 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
+    <div className={pageShellClass}>
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
           initial="hidden"
@@ -1674,10 +1688,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span>Admin Control Center</span>
               </div>
 
-              <h1 className="text-3xl md:text-4xl font-black text-blue-900 dark:text-white tracking-tight">
+              <h1 className="text-3xl md:text-5xl font-black text-slate-900 dark:text-white tracking-tight">
                 Admin Control Center
               </h1>
-              <p className="text-slate-500 dark:text-slate-400 mt-2">
+              <p className="text-slate-600 dark:text-slate-300 mt-2 max-w-2xl">
                 Manage paths, cohorts, sessions, payments, inbox, and
                 integrations
               </p>
@@ -1711,7 +1725,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   fetchCohorts();
                   fetchInboxMessages();
                 }}
-                className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition inline-flex items-center gap-2"
+                className={primaryActionClass}
               >
                 <RefreshCw className="w-4 h-4" />
                 Refresh All
@@ -1722,10 +1736,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 whileTap={{ scale: 0.98 }}
                 onClick={handleSyncToSheets}
                 disabled={isSyncing}
-                className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
+                className={`transition-all ${
                   isSyncing
-                    ? "bg-gray-200 text-gray-500"
-                    : "bg-green-600 text-white hover:bg-green-700 shadow-md"
+                    ? "px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-gray-200 text-gray-500 inline-flex items-center gap-2"
+                    : successActionClass
                 }`}
               >
                 {isSyncing ? <Spinner /> : <Database className="w-4 h-4" />}
@@ -1803,13 +1817,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <motion.div
                 key={s.label}
                 whileHover={{ y: -2 }}
-                className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm"
+                className="p-6 rounded-3xl border border-slate-200/70 dark:border-slate-800 bg-white/90 dark:bg-slate-900/85 shadow-[0_8px_20px_rgba(15,23,42,0.06)]"
               >
                 <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
                     {s.label}
                   </p>
-                  <Icon className="w-4 h-4 text-slate-400" />
+                  <Icon className="w-4 h-4 text-slate-500 dark:text-slate-400" />
                 </div>
                 <p className={`text-2xl font-black mt-3 ${s.valueClass}`}>
                   {s.value}
@@ -1819,6 +1833,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           })}
         </motion.div>
 
+        <div className={`mb-8 p-5 ${surfaceCardClass}`}>
         <div className="mb-8 rounded-[2rem] bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm p-5">
           <div className="flex items-center justify-between gap-4 mb-4">
             <div>
@@ -1935,14 +1950,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         {/* PATHS MANAGER */}
         {activeAdminSection === "paths" && (
+        <div className={`mb-8 p-8 ${surfaceCardClass}`}>
         {(activeAdminSection === "paths" || activeAdminSection === "cohorts") && (
         <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
-              <h2 className="text-xl font-black text-blue-900 dark:text-white">
+              <h2 className={sectionTitleClass}>
                 Paths Manager
               </h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
+              <p className={sectionCopyClass}>
                 Create and manage your learning paths (tracks). Everything else
                 (courses, cohorts, sessions) ties to these.
               </p>
@@ -1950,7 +1966,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             <button
               onClick={fetchPaths}
-              className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:opacity-90 transition"
+              className={subtleActionClass}
             >
               Refresh Paths
             </button>
@@ -2070,13 +2086,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           activeAdminSection === "cohorts" ||
           activeAdminSection === "sessions" ||
           activeAdminSection === "messages") && (
+        <div className={`mb-8 p-8 ${surfaceCardClass}`}>
         <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
-              <h2 className="text-xl font-black text-blue-900 dark:text-white">
+              <h2 className={sectionTitleClass}>
                 Active Cohort (Per Path)
               </h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
+              <p className={sectionCopyClass}>
                 New student registrations use the active cohort mapped to their
                 selected path.
               </p>
@@ -2186,20 +2203,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           activeAdminSection === "messages") && (
         <div className="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Cohorts */}
-          <div className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
+          <div className={`p-8 ${surfaceCardClass}`}>
             <div className="flex items-center justify-between gap-4 mb-6">
               <div>
-                <h2 className="text-xl font-black text-blue-900 dark:text-white">
+                <h2 className={sectionTitleClass}>
                   Cohorts
                 </h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
+                <p className={sectionCopyClass}>
                   Create cohorts and manage session schedules.
                 </p>
               </div>
 
               <button
                 onClick={fetchCohorts}
-                className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:opacity-90 transition"
+                className={subtleActionClass}
               >
                 Refresh
               </button>
@@ -2306,10 +2323,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           {/* Sessions */}
-          <div className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
+          <div className={`p-8 ${surfaceCardClass}`}>
             <div className="flex items-center justify-between gap-4 mb-6">
               <div>
-                <h2 className="text-xl font-black text-blue-900 dark:text-white">
+                <h2 className={sectionTitleClass}>
                   Live Sessions
                 </h2>
                 {sessionsError ? (
@@ -2317,7 +2334,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     {sessionsError}
                   </div>
                 ) : null}
-                <p className="text-sm text-slate-500 dark:text-slate-400">
+                <p className={sectionCopyClass}>
                   {selectedCohortId
                     ? (() => {
                         const selected = cohorts.find(
@@ -2442,6 +2459,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
 
         {activeAdminSection === "messages" && (
+          <div className={`mb-8 p-8 ${surfaceCardClass}`}>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+              <div>
+                <h2 className={sectionTitleClass}>
+                  Cohort Messaging
+                </h2>
+                <p className={sectionCopyClass}>
           <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
               <div>
@@ -2604,20 +2628,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         {/* Pending Payments Viewer */}
         {activeAdminSection === "payments" && (
+        <div className={`mb-8 p-8 ${surfaceCardClass}`}>
         <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex items-center justify-between gap-4 mb-6">
             <div>
-              <h2 className="text-xl font-black text-blue-900 dark:text-white">
+              <h2 className={sectionTitleClass}>
                 Pending Payments
               </h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
+              <p className={sectionCopyClass}>
                 Approve or clear pending Paystack references.
               </p>
             </div>
 
             <button
               onClick={fetchRegistrations}
-              className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:opacity-90 transition"
+              className={subtleActionClass}
             >
               Refresh
             </button>
@@ -3138,13 +3163,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         {/* Course Catalog */}
         {activeAdminSection === "courses" && (
+        <div className={`mb-8 p-8 ${surfaceCardClass}`}>
         <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
-              <h2 className="text-xl font-black text-blue-900 dark:text-white">
+              <h2 className={sectionTitleClass}>
                 Course Catalog
               </h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
+              <p className={sectionCopyClass}>
                 Add / edit courses shown on the landing page and explore pages.
               </p>
             </div>
@@ -3152,7 +3178,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="flex items-center gap-3">
               <button
                 onClick={fetchCourses}
-                className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:opacity-90 transition"
+                className={subtleActionClass}
               >
                 Refresh Courses
               </button>
@@ -3791,13 +3817,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         {/* Registrations Table */}
         {loading ? (
-          <div className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-10">
+          <div className={`p-10 ${surfaceCardClass}`}>
             <p className="text-slate-500 dark:text-slate-400">
               Loading registrations...
             </p>
           </div>
         ) : (
-          <div className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 overflow-hidden">
+          <div className={`overflow-hidden ${surfaceCardClass}`}>
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead className="bg-gray-50 dark:bg-slate-800/50 border-b border-gray-100 dark:border-slate-800">
