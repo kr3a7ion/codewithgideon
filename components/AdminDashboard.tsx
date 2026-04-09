@@ -1002,6 +1002,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const activeSectionMeta = adminSections.find(
     (section) => section.key === activeAdminSection,
   );
+  const adminSections = [
+    { key: "paths", label: "Paths & Active Cohort" },
+    { key: "cohorts", label: "Cohorts" },
+    { key: "sessions", label: "Sessions" },
+    { key: "messages", label: "Cohort Messaging" },
+    { key: "courses", label: "Courses" },
+    { key: "payments", label: "Pending Payments" },
+    { key: "registrations", label: "Registrations" },
+  ] as const;
 
   // -------------------------
   // Courses actions
@@ -1825,6 +1834,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </motion.div>
 
         <div className={`mb-8 p-5 ${surfaceCardClass}`}>
+        <div className="mb-8 rounded-[2rem] bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm p-5">
           <div className="flex items-center justify-between gap-4 mb-4">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
@@ -1838,6 +1848,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
                 <activeSectionMeta.icon className="w-4 h-4 text-slate-700 dark:text-slate-300" />
                 <span className="text-xs font-black uppercase tracking-widest text-slate-800 dark:text-slate-100">
+              <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-2xl bg-blue-50 dark:bg-teal-900/20 border border-blue-100 dark:border-teal-800/30">
+                <activeSectionMeta.icon className="w-4 h-4 text-blue-700 dark:text-teal-300" />
+                <span className="text-xs font-black uppercase tracking-widest text-blue-900 dark:text-white">
                   {activeSectionMeta.label}
                 </span>
               </div>
@@ -1867,6 +1880,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     active
                       ? section.activeClass
                       : section.inactiveClass
+                  className={`text-left p-4 rounded-2xl border transition ${
+                    active
+                      ? "bg-blue-900 dark:bg-teal-600 text-white border-blue-900 dark:border-teal-500 shadow-lg"
+                      : "bg-gray-50 dark:bg-slate-800/50 border-gray-100 dark:border-slate-700 hover:border-blue-200 dark:hover:border-teal-500/30"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -1876,6 +1893,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           active
                             ? "text-white"
                             : "text-current"
+                            : "text-blue-700 dark:text-teal-300"
                         }`}
                       />
                       <p
@@ -1883,6 +1901,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           active
                             ? "text-white"
                             : "text-current"
+                            : "text-blue-900 dark:text-white"
                         }`}
                       >
                         {section.label}
@@ -1893,6 +1912,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         active
                           ? "bg-white/15 text-white"
                           : `border ${section.badgeClass}`
+                          : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-300 border border-gray-100 dark:border-slate-700"
                       }`}
                     >
                       {section.badge}
@@ -1910,12 +1930,29 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               );
             })}
+        <div className="mb-8 p-2 rounded-3xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm">
+          <div className="flex flex-wrap gap-2">
+            {adminSections.map((section) => (
+              <button
+                key={section.key}
+                onClick={() => setActiveAdminSection(section.key)}
+                className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition ${
+                  activeAdminSection === section.key
+                    ? "bg-blue-900 dark:bg-teal-600 text-white shadow-md"
+                    : "bg-gray-50 dark:bg-slate-800 text-slate-500 dark:text-slate-300 hover:text-blue-900 dark:hover:text-white"
+                }`}
+              >
+                {section.label}
+              </button>
+            ))}
           </div>
         </div>
 
         {/* PATHS MANAGER */}
         {activeAdminSection === "paths" && (
         <div className={`mb-8 p-8 ${surfaceCardClass}`}>
+        {(activeAdminSection === "paths" || activeAdminSection === "cohorts") && (
+        <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <h2 className={sectionTitleClass}>
@@ -2050,6 +2087,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           activeAdminSection === "sessions" ||
           activeAdminSection === "messages") && (
         <div className={`mb-8 p-8 ${surfaceCardClass}`}>
+        <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <h2 className={sectionTitleClass}>
@@ -2161,6 +2199,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* Cohorts + Sessions Manager */}
         {(activeAdminSection === "cohorts" ||
           activeAdminSection === "sessions") && (
+          activeAdminSection === "sessions" ||
+          activeAdminSection === "messages") && (
         <div className="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Cohorts */}
           <div className={`p-8 ${surfaceCardClass}`}>
@@ -2426,6 +2466,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   Cohort Messaging
                 </h2>
                 <p className={sectionCopyClass}>
+          <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-xl font-black text-blue-900 dark:text-white">
+                  Cohort Messaging
+                </h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   Send announcements directly to students in the selected active
                   cohort.
                 </p>
@@ -2582,6 +2629,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* Pending Payments Viewer */}
         {activeAdminSection === "payments" && (
         <div className={`mb-8 p-8 ${surfaceCardClass}`}>
+        <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex items-center justify-between gap-4 mb-6">
             <div>
               <h2 className={sectionTitleClass}>
@@ -3116,6 +3164,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* Course Catalog */}
         {activeAdminSection === "courses" && (
         <div className={`mb-8 p-8 ${surfaceCardClass}`}>
+        <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <h2 className={sectionTitleClass}>
