@@ -573,12 +573,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     try {
       await deleteDoc(doc(db, "contactMessages", id));
 
-      setInboxMessages((prev) => prev.filter((m) => m.id !== id));
-
-      if (selectedInboxId === id) {
-        const remaining = inboxMessages.filter((m) => m.id !== id);
-        setSelectedInboxId(remaining[0]?.id || "");
-      }
+      setInboxMessages((prev) => {
+        const next = prev.filter((m) => m.id !== id);
+        setSelectedInboxId((current) =>
+          current === id ? (next[0]?.id ?? "") : current,
+        );
+        return next;
+      });
     } catch (e) {
       console.error("deleteInboxMessage failed:", e);
       alert("Failed to delete message.");
