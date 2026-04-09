@@ -9,6 +9,7 @@ import {
   ActiveCohortForPath,
   PathDoc,
   SyllabusWeek,
+  CohortMessageDoc,
 } from "../services/registrationStore";
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -34,6 +35,7 @@ import {
   Search,
   AlertCircle,
   X,
+  Send,
 } from "lucide-react";
 import {
   collection,
@@ -133,6 +135,7 @@ type SessionForm = {
   time: string;
   durationMins: number;
   joinUrl: string;
+  recordingUrl: string;
   notes: string;
 };
 
@@ -147,6 +150,7 @@ const emptySession: SessionForm = {
   time: "18:00",
   durationMins: 60,
   joinUrl: "",
+  recordingUrl: "",
   notes: "",
 };
 
@@ -238,6 +242,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [inboxError, setInboxError] = useState("");
   const [selectedInboxId, setSelectedInboxId] = useState<string>("");
   const [showInboxModal, setShowInboxModal] = useState(false);
+  const [activeAdminSection, setActiveAdminSection] = useState<
+    | "paths"
+    | "cohorts"
+    | "sessions"
+    | "messages"
+    | "courses"
+    | "payments"
+    | "registrations"
+  >("paths");
 
   const pathsById = useMemo(() => {
     const m = new Map<string, PathDoc>();
@@ -368,6 +381,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editingSession, setEditingSession] = useState<SessionDoc | null>(null);
   const [sessionForm, setSessionForm] = useState<SessionForm>(emptySession);
   const [sessionError, setSessionError] = useState("");
+  const [cohortMessages, setCohortMessages] = useState<CohortMessageDoc[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messageForm, setMessageForm] = useState({
+    title: "",
+    body: "",
+    ctaLabel: "",
+    ctaUrl: "",
+  });
+  const [messageError, setMessageError] = useState("");
 
   const [pathBusy, setPathBusy] = useState(false);
   const [courseBusy, setCourseBusy] = useState(false);
@@ -597,6 +619,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const fetchCohortMessages = async (cohortId: string) => {
+    if (!cohortId) {
+      setCohortMessages([]);
+      return;
+    }
+
+    setMessagesLoading(true);
+    try {
+      const list = await registrationStore.getCohortMessages(cohortId, 20);
+      setCohortMessages(list || []);
+    } catch (e) {
+      console.error("fetchCohortMessages failed:", e);
+      setCohortMessages([]);
+    } finally {
+      setMessagesLoading(false);
+    }
+  };
+
   // ✅ IMPORTANT: Paths first (Option A UI depends on it)
   useEffect(() => {
     let mounted = true;
@@ -624,7 +664,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, []);
 
   useEffect(() => {
-    if (selectedCohortId) fetchSessions(selectedCohortId);
+    if (selectedCohortId) {
+      fetchSessions(selectedCohortId);
+      fetchCohortMessages(selectedCohortId);
+    } else {
+      setCohortMessages([]);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCohortId]);
 
@@ -825,6 +870,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       ).length,
     [inboxMessages],
   );
+  const adminSections = [
+    { key: "paths", label: "Paths & Active Cohort" },
+    { key: "cohorts", label: "Cohorts" },
+    { key: "sessions", label: "Sessions" },
+    { key: "messages", label: "Cohort Messaging" },
+    { key: "courses", label: "Courses" },
+    { key: "payments", label: "Pending Payments" },
+    { key: "registrations", label: "Registrations" },
+  ] as const;
 
   // -------------------------
   // Courses actions
@@ -1212,6 +1266,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       time: toLocalTimeInput(ms),
       durationMins: Number((s as any).durationMins || 60),
       joinUrl: String((s as any).joinUrl || ""),
+      recordingUrl: String((s as any).recordingUrl || ""),
       notes: String((s as any).notes || ""),
     });
 
@@ -1252,6 +1307,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       startsAt,
       durationMins,
       joinUrl: sessionForm.joinUrl.trim(),
+      recordingUrl: sessionForm.recordingUrl.trim(),
       notes: sessionForm.notes.trim(),
     };
 
@@ -1293,6 +1349,49 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } finally {
       setSessionBusyId(null);
     }
+  };
+
+  const sendMessageToCohort = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMessageError("");
+
+    if (!selectedCohortId) {
+      setMessageError("Select a cohort first.");
+      return;
+    }
+
+    const title = messageForm.title.trim();
+    const body = messageForm.body.trim();
+    if (title.length < 3) {
+      setMessageError("Message title must be at least 3 characters.");
+      return;
+    }
+    if (body.length < 5) {
+      setMessageError("Message body must be at least 5 characters.");
+      return;
+    }
+
+    const cohortLabel =
+      cohorts.find((c) => c.id === selectedCohortId)?.label || selectedCohortId;
+
+    await runBusy("sendCohortMessage", async () => {
+      try {
+        await registrationStore.sendCohortMessage({
+          cohortId: selectedCohortId,
+          cohortLabel,
+          title,
+          body,
+          ctaLabel: messageForm.ctaLabel.trim(),
+          ctaUrl: messageForm.ctaUrl.trim(),
+          sentBy: "admin",
+        });
+        setMessageForm({ title: "", body: "", ctaLabel: "", ctaUrl: "" });
+        await fetchCohortMessages(selectedCohortId);
+      } catch (err: any) {
+        console.error("sendMessageToCohort failed:", err);
+        setMessageError(err?.message || "Failed to send cohort message.");
+      }
+    });
   };
 
   // -------------------------
@@ -1602,7 +1701,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           })}
         </motion.div>
 
+        <div className="mb-8 p-2 rounded-3xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm">
+          <div className="flex flex-wrap gap-2">
+            {adminSections.map((section) => (
+              <button
+                key={section.key}
+                onClick={() => setActiveAdminSection(section.key)}
+                className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition ${
+                  activeAdminSection === section.key
+                    ? "bg-blue-900 dark:bg-teal-600 text-white shadow-md"
+                    : "bg-gray-50 dark:bg-slate-800 text-slate-500 dark:text-slate-300 hover:text-blue-900 dark:hover:text-white"
+                }`}
+              >
+                {section.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* PATHS MANAGER */}
+        {(activeAdminSection === "paths" || activeAdminSection === "cohorts") && (
         <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
@@ -1730,8 +1848,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
         </div>
+        )}
 
         {/* Active Cohort (PER PATH) */}
+        {(activeAdminSection === "paths" ||
+          activeAdminSection === "cohorts" ||
+          activeAdminSection === "sessions" ||
+          activeAdminSection === "messages") && (
         <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
@@ -1839,8 +1962,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </p>
           </div>
         </div>
+        )}
 
         {/* Cohorts + Sessions Manager */}
+        {(activeAdminSection === "cohorts" ||
+          activeAdminSection === "sessions" ||
+          activeAdminSection === "messages") && (
         <div className="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Cohorts */}
           <div className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
@@ -2060,6 +2187,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             Join: {s.joinUrl}
                           </p>
                         ) : null}
+                        {(s as any).recordingUrl ? (
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 break-all">
+                            Recording: {(s as any).recordingUrl}
+                          </p>
+                        ) : null}
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -2091,8 +2223,137 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
           </div>
         </div>
+        )}
+
+        {activeAdminSection === "messages" && (
+          <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-xl font-black text-blue-900 dark:text-white">
+                  Cohort Messaging
+                </h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Send announcements directly to students in the selected active
+                  cohort.
+                </p>
+              </div>
+              <button
+                onClick={() => fetchCohortMessages(selectedCohortId)}
+                disabled={!selectedCohortId}
+                className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition ${
+                  !selectedCohortId
+                    ? "bg-gray-200 text-gray-500"
+                    : "bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:opacity-90"
+                }`}
+              >
+                Refresh Messages
+              </button>
+            </div>
+
+            <form onSubmit={sendMessageToCohort} className="space-y-4">
+              {messageError ? (
+                <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
+                  {messageError}
+                </div>
+              ) : null}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input
+                  value={messageForm.title}
+                  onChange={(e) =>
+                    setMessageForm((p) => ({ ...p, title: e.target.value }))
+                  }
+                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                  placeholder="Message title"
+                  required
+                />
+                <input
+                  value={messageForm.ctaUrl}
+                  onChange={(e) =>
+                    setMessageForm((p) => ({ ...p, ctaUrl: e.target.value }))
+                  }
+                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                  placeholder="Optional action link (https://...)"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <textarea
+                  value={messageForm.body}
+                  onChange={(e) =>
+                    setMessageForm((p) => ({ ...p, body: e.target.value }))
+                  }
+                  className="md:col-span-2 w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none min-h-[120px]"
+                  placeholder="Type announcement message for this cohort..."
+                  required
+                />
+                <div className="space-y-3">
+                  <input
+                    value={messageForm.ctaLabel}
+                    onChange={(e) =>
+                      setMessageForm((p) => ({
+                        ...p,
+                        ctaLabel: e.target.value,
+                      }))
+                    }
+                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                    placeholder="Optional CTA label"
+                  />
+                  <BusyButton
+                    type="submit"
+                    busy={busy.sendCohortMessage}
+                    disabled={!selectedCohortId}
+                    className="w-full px-4 py-4 rounded-2xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
+                    busyText="Sending..."
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <Send className="w-4 h-4" />
+                      Send Message
+                    </span>
+                  </BusyButton>
+                </div>
+              </div>
+            </form>
+
+            <div className="mt-6">
+              <h3 className="text-sm font-black uppercase tracking-widest text-slate-400 mb-3">
+                Recent Messages
+              </h3>
+              {messagesLoading ? (
+                <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
+                  Loading messages…
+                </div>
+              ) : cohortMessages.length === 0 ? (
+                <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
+                  No sent messages for this cohort yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {cohortMessages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className="p-4 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
+                    >
+                      <p className="text-sm font-black text-blue-900 dark:text-white">
+                        {msg.title}
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                        {formatInboxDate((msg as any).sentAt)} •{" "}
+                        {msg.cohortLabel}
+                      </p>
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mt-3 whitespace-pre-wrap">
+                        {msg.body}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Pending Payments Viewer */}
+        {activeAdminSection === "payments" && (
         <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex items-center justify-between gap-4 mb-6">
             <div>
@@ -2208,6 +2469,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
         </div>
+        )}
 
         {/* Inbox Modal */}
         <AnimatePresence>
@@ -2625,6 +2887,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
 
         {/* Course Catalog */}
+        {activeAdminSection === "courses" && (
         <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
@@ -2763,6 +3026,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
         </div>
+        )}
 
         {/* Course Modal */}
         {courseModalOpen && (
@@ -3164,7 +3428,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                 <div>
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                    Join URL (optional)
+                    Live Session URL (optional)
                   </label>
                   <input
                     value={sessionForm.joinUrl}
@@ -3173,6 +3437,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     }
                     className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
                     placeholder="Zoom/Meet link..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                    Recorded Session URL (optional)
+                  </label>
+                  <input
+                    value={sessionForm.recordingUrl}
+                    onChange={(e) =>
+                      setSessionForm((p) => ({
+                        ...p,
+                        recordingUrl: e.target.value,
+                      }))
+                    }
+                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                    placeholder="Loom/Drive/YouTube recording link..."
                   />
                 </div>
 
@@ -3213,6 +3494,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
+        {activeAdminSection === "registrations" && (
+          <>
         {/* Registrations Controls */}
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
@@ -3399,6 +3682,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </table>
             </div>
           </div>
+        )}
+          </>
         )}
 
         {/* Footer status (unchanged) */}
