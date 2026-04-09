@@ -36,6 +36,8 @@ import {
   AlertCircle,
   X,
   Send,
+  BellRing,
+  BookOpen,
 } from "lucide-react";
 import {
   collection,
@@ -870,6 +872,73 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       ).length,
     [inboxMessages],
   );
+  const adminSections = useMemo(
+    () =>
+      [
+        {
+          key: "paths",
+          label: "Paths",
+          description: "Track setup and active season",
+          icon: FolderTree,
+          badge: paths.length,
+        },
+        {
+          key: "cohorts",
+          label: "Cohorts",
+          description: "Manage cohort records",
+          icon: Users,
+          badge: cohorts.length,
+        },
+        {
+          key: "sessions",
+          label: "Sessions",
+          description: "Schedule and publish classes",
+          icon: CalendarDays,
+          badge: sessions.length,
+        },
+        {
+          key: "messages",
+          label: "Messaging",
+          description: "Send cohort announcements",
+          icon: BellRing,
+          badge: cohortMessages.length,
+        },
+        {
+          key: "courses",
+          label: "Courses",
+          description: "Course catalog management",
+          icon: BookOpen,
+          badge: courses.length,
+        },
+        {
+          key: "payments",
+          label: "Payments",
+          description: "Review pending confirmations",
+          icon: CreditCard,
+          badge: pendingPayments.length,
+        },
+        {
+          key: "registrations",
+          label: "Registrations",
+          description: "Student enrollment records",
+          icon: GraduationCap,
+          badge: filteredData.length,
+        },
+      ] as const,
+    [
+      cohortMessages.length,
+      cohorts.length,
+      courses.length,
+      filteredData.length,
+      paths.length,
+      pendingPayments.length,
+      sessions.length,
+    ],
+  );
+
+  const activeSectionMeta = adminSections.find(
+    (section) => section.key === activeAdminSection,
+  );
   const adminSections = [
     { key: "paths", label: "Paths & Active Cohort" },
     { key: "cohorts", label: "Cohorts" },
@@ -1701,6 +1770,81 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           })}
         </motion.div>
 
+        <div className="mb-8 rounded-[2rem] bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm p-5">
+          <div className="flex items-center justify-between gap-4 mb-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                Dashboard Navigation
+              </p>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                Choose a workspace and focus on one admin task at a time.
+              </p>
+            </div>
+            {activeSectionMeta ? (
+              <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-2xl bg-blue-50 dark:bg-teal-900/20 border border-blue-100 dark:border-teal-800/30">
+                <activeSectionMeta.icon className="w-4 h-4 text-blue-700 dark:text-teal-300" />
+                <span className="text-xs font-black uppercase tracking-widest text-blue-900 dark:text-white">
+                  {activeSectionMeta.label}
+                </span>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            {adminSections.map((section) => {
+              const Icon = section.icon;
+              const active = activeAdminSection === section.key;
+              return (
+                <button
+                  key={section.key}
+                  onClick={() => setActiveAdminSection(section.key)}
+                  className={`text-left p-4 rounded-2xl border transition ${
+                    active
+                      ? "bg-blue-900 dark:bg-teal-600 text-white border-blue-900 dark:border-teal-500 shadow-lg"
+                      : "bg-gray-50 dark:bg-slate-800/50 border-gray-100 dark:border-slate-700 hover:border-blue-200 dark:hover:border-teal-500/30"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Icon
+                        className={`w-4 h-4 ${
+                          active
+                            ? "text-white"
+                            : "text-blue-700 dark:text-teal-300"
+                        }`}
+                      />
+                      <p
+                        className={`text-xs font-black uppercase tracking-widest ${
+                          active
+                            ? "text-white"
+                            : "text-blue-900 dark:text-white"
+                        }`}
+                      >
+                        {section.label}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-[10px] min-w-[22px] h-[22px] px-1 rounded-full flex items-center justify-center font-black ${
+                        active
+                          ? "bg-white/15 text-white"
+                          : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-300 border border-gray-100 dark:border-slate-700"
+                      }`}
+                    >
+                      {section.badge}
+                    </span>
+                  </div>
+                  <p
+                    className={`text-xs mt-2 ${
+                      active
+                        ? "text-white/85"
+                        : "text-slate-500 dark:text-slate-400"
+                    }`}
+                  >
+                    {section.description}
+                  </p>
+                </button>
+              );
+            })}
         <div className="mb-8 p-2 rounded-3xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm">
           <div className="flex flex-wrap gap-2">
             {adminSections.map((section) => (
@@ -1720,6 +1864,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
 
         {/* PATHS MANAGER */}
+        {activeAdminSection === "paths" && (
         {(activeAdminSection === "paths" || activeAdminSection === "cohorts") && (
         <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
@@ -1966,6 +2111,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         {/* Cohorts + Sessions Manager */}
         {(activeAdminSection === "cohorts" ||
+          activeAdminSection === "sessions") && (
           activeAdminSection === "sessions" ||
           activeAdminSection === "messages") && (
         <div className="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -2256,6 +2402,40 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   {messageError}
                 </div>
               ) : null}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                    Target Cohort
+                  </label>
+                  <select
+                    value={selectedCohortId}
+                    onChange={(e) => setSelectedCohortId(e.target.value)}
+                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                  >
+                    <option value="" disabled>
+                      Select a cohort…
+                    </option>
+                    {cohorts.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="p-4 rounded-2xl bg-blue-50 dark:bg-teal-900/20 border border-blue-100 dark:border-teal-800/30">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-blue-700 dark:text-teal-300">
+                    Delivery Note
+                  </p>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 mt-2 leading-relaxed">
+                    Messages are written to{" "}
+                    <span className="font-black">
+                      cohorts/{selectedCohortId || "{cohortId}"}/messages
+                    </span>{" "}
+                    and can be consumed by the learner app.
+                  </p>
+                </div>
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <input
