@@ -881,6 +881,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           description: "Track setup and active season",
           icon: FolderTree,
           badge: paths.length,
+          tone: "indigo",
+          activeClass:
+            "bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/20",
+          inactiveClass:
+            "bg-indigo-50/60 text-indigo-900 border-indigo-100 hover:border-indigo-300 dark:bg-indigo-950/20 dark:text-indigo-200 dark:border-indigo-900/40 dark:hover:border-indigo-700/60",
+          badgeClass:
+            "bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-200 dark:border-indigo-700/50",
         },
         {
           key: "cohorts",
@@ -888,6 +895,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           description: "Manage cohort records",
           icon: Users,
           badge: cohorts.length,
+          tone: "teal",
+          activeClass:
+            "bg-teal-600 text-white border-teal-500 shadow-teal-500/20",
+          inactiveClass:
+            "bg-teal-50/60 text-teal-900 border-teal-100 hover:border-teal-300 dark:bg-teal-950/20 dark:text-teal-200 dark:border-teal-900/40 dark:hover:border-teal-700/60",
+          badgeClass:
+            "bg-teal-100 text-teal-700 border-teal-200 dark:bg-teal-900/40 dark:text-teal-200 dark:border-teal-700/50",
         },
         {
           key: "sessions",
@@ -895,6 +909,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           description: "Schedule and publish classes",
           icon: CalendarDays,
           badge: sessions.length,
+          tone: "sky",
+          activeClass:
+            "bg-sky-600 text-white border-sky-500 shadow-sky-500/20",
+          inactiveClass:
+            "bg-sky-50/60 text-sky-900 border-sky-100 hover:border-sky-300 dark:bg-sky-950/20 dark:text-sky-200 dark:border-sky-900/40 dark:hover:border-sky-700/60",
+          badgeClass:
+            "bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-700/50",
         },
         {
           key: "messages",
@@ -902,6 +923,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           description: "Send cohort announcements",
           icon: BellRing,
           badge: cohortMessages.length,
+          tone: "violet",
+          activeClass:
+            "bg-violet-600 text-white border-violet-500 shadow-violet-500/20",
+          inactiveClass:
+            "bg-violet-50/60 text-violet-900 border-violet-100 hover:border-violet-300 dark:bg-violet-950/20 dark:text-violet-200 dark:border-violet-900/40 dark:hover:border-violet-700/60",
+          badgeClass:
+            "bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-900/40 dark:text-violet-200 dark:border-violet-700/50",
         },
         {
           key: "courses",
@@ -909,6 +937,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           description: "Course catalog management",
           icon: BookOpen,
           badge: courses.length,
+          tone: "amber",
+          activeClass:
+            "bg-amber-500 text-white border-amber-400 shadow-amber-500/20",
+          inactiveClass:
+            "bg-amber-50/60 text-amber-900 border-amber-100 hover:border-amber-300 dark:bg-amber-950/20 dark:text-amber-200 dark:border-amber-900/40 dark:hover:border-amber-700/60",
+          badgeClass:
+            "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700/50",
         },
         {
           key: "payments",
@@ -916,6 +951,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           description: "Review pending confirmations",
           icon: CreditCard,
           badge: pendingPayments.length,
+          tone: "rose",
+          activeClass:
+            "bg-rose-600 text-white border-rose-500 shadow-rose-500/20",
+          inactiveClass:
+            "bg-rose-50/60 text-rose-900 border-rose-100 hover:border-rose-300 dark:bg-rose-950/20 dark:text-rose-200 dark:border-rose-900/40 dark:hover:border-rose-700/60",
+          badgeClass:
+            "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/40 dark:text-rose-200 dark:border-rose-700/50",
         },
         {
           key: "registrations",
@@ -923,6 +965,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           description: "Student enrollment records",
           icon: GraduationCap,
           badge: filteredData.length,
+          tone: "slate",
+          activeClass:
+            "bg-slate-700 text-white border-slate-600 shadow-slate-500/20",
+          inactiveClass:
+            "bg-slate-50 text-slate-900 border-slate-200 hover:border-slate-400 dark:bg-slate-800/60 dark:text-slate-100 dark:border-slate-700 dark:hover:border-slate-500",
+          badgeClass:
+            "bg-white text-slate-700 border-slate-200 dark:bg-slate-900/70 dark:text-slate-200 dark:border-slate-600",
         },
       ] as const,
     [
@@ -1781,6 +1830,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </p>
             </div>
             {activeSectionMeta ? (
+              <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
+                <activeSectionMeta.icon className="w-4 h-4 text-slate-700 dark:text-slate-300" />
+                <span className="text-xs font-black uppercase tracking-widest text-slate-800 dark:text-slate-100">
               <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-2xl bg-blue-50 dark:bg-teal-900/20 border border-blue-100 dark:border-teal-800/30">
                 <activeSectionMeta.icon className="w-4 h-4 text-blue-700 dark:text-teal-300" />
                 <span className="text-xs font-black uppercase tracking-widest text-blue-900 dark:text-white">
@@ -1788,6 +1840,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </span>
               </div>
             ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            {adminSections.map((section) => (
+              <span
+                key={`${section.key}-legend`}
+                className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${section.badgeClass}`}
+              >
+                {section.label}
+              </span>
+            ))}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
@@ -1798,6 +1861,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <button
                   key={section.key}
                   onClick={() => setActiveAdminSection(section.key)}
+                  className={`text-left p-4 rounded-2xl border transition-all ${
+                    active
+                      ? section.activeClass
+                      : section.inactiveClass
                   className={`text-left p-4 rounded-2xl border transition ${
                     active
                       ? "bg-blue-900 dark:bg-teal-600 text-white border-blue-900 dark:border-teal-500 shadow-lg"
@@ -1810,6 +1877,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         className={`w-4 h-4 ${
                           active
                             ? "text-white"
+                            : "text-current"
                             : "text-blue-700 dark:text-teal-300"
                         }`}
                       />
@@ -1817,6 +1885,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         className={`text-xs font-black uppercase tracking-widest ${
                           active
                             ? "text-white"
+                            : "text-current"
                             : "text-blue-900 dark:text-white"
                         }`}
                       >
@@ -1827,6 +1896,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       className={`text-[10px] min-w-[22px] h-[22px] px-1 rounded-full flex items-center justify-center font-black ${
                         active
                           ? "bg-white/15 text-white"
+                          : `border ${section.badgeClass}`
                           : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-300 border border-gray-100 dark:border-slate-700"
                       }`}
                     >
