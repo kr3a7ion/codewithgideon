@@ -939,6 +939,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const activeSectionMeta = adminSections.find(
     (section) => section.key === activeAdminSection,
   );
+  const adminSections = [
+    { key: "paths", label: "Paths & Active Cohort" },
+    { key: "cohorts", label: "Cohorts" },
+    { key: "sessions", label: "Sessions" },
+    { key: "messages", label: "Cohort Messaging" },
+    { key: "courses", label: "Courses" },
+    { key: "payments", label: "Pending Payments" },
+    { key: "registrations", label: "Registrations" },
+  ] as const;
 
   // -------------------------
   // Courses actions
@@ -1836,11 +1845,27 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               );
             })}
+        <div className="mb-8 p-2 rounded-3xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm">
+          <div className="flex flex-wrap gap-2">
+            {adminSections.map((section) => (
+              <button
+                key={section.key}
+                onClick={() => setActiveAdminSection(section.key)}
+                className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition ${
+                  activeAdminSection === section.key
+                    ? "bg-blue-900 dark:bg-teal-600 text-white shadow-md"
+                    : "bg-gray-50 dark:bg-slate-800 text-slate-500 dark:text-slate-300 hover:text-blue-900 dark:hover:text-white"
+                }`}
+              >
+                {section.label}
+              </button>
+            ))}
           </div>
         </div>
 
         {/* PATHS MANAGER */}
         {activeAdminSection === "paths" && (
+        {(activeAdminSection === "paths" || activeAdminSection === "cohorts") && (
         <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
@@ -2087,6 +2112,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* Cohorts + Sessions Manager */}
         {(activeAdminSection === "cohorts" ||
           activeAdminSection === "sessions") && (
+          activeAdminSection === "sessions" ||
+          activeAdminSection === "messages") && (
         <div className="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Cohorts */}
           <div className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
