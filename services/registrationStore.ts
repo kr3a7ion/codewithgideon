@@ -13,6 +13,7 @@ import {
   deleteField,
   orderBy,
   where,
+  limit,
   Timestamp,
   serverTimestamp,
 } from "firebase/firestore";
@@ -182,6 +183,7 @@ export type SessionDoc = {
   endsAt?: Timestamp;
 
   joinUrl?: string;
+  recordingUrl?: string;
   durationMins?: number;
   notes?: string;
 
@@ -235,6 +237,19 @@ export type ActiveCohortForPath = {
   label: string; // e.g. March 2026 Cohort
   seasonKey: string; // e.g. 2026-03
   updatedAt?: any;
+};
+
+export type CohortMessageDoc = {
+  id: string;
+  cohortId: string;
+  cohortLabel: string;
+  title: string;
+  body: string;
+  ctaLabel?: string;
+  ctaUrl?: string;
+  sentAt: any;
+  sentBy?: string;
+  status: "sent";
 };
 
 export const registrationStore = {
@@ -1032,6 +1047,9 @@ export const registrationStore = {
       startsAt,
       endsAt,
       joinUrl: input.joinUrl ? String(input.joinUrl).trim() : "",
+      recordingUrl: input.recordingUrl
+        ? String(input.recordingUrl).trim()
+        : "",
       durationMins:
         input.durationMins !== undefined
           ? Math.max(15, Math.floor(Number(input.durationMins)))
@@ -1163,6 +1181,8 @@ export const registrationStore = {
       clean.title = String(patch.title || "").trim();
     if (patch.joinUrl !== undefined)
       clean.joinUrl = String(patch.joinUrl || "").trim();
+    if ((patch as any).recordingUrl !== undefined)
+      clean.recordingUrl = String((patch as any).recordingUrl || "").trim();
     if (patch.isPublished !== undefined)
       clean.isPublished = !!patch.isPublished;
 
@@ -1197,6 +1217,57 @@ export const registrationStore = {
     sessionId: string,
   ): Promise<void> {
     await deleteDoc(doc(db, "cohorts", cohortDocId, "sessions", sessionId));
+  },
+
+  async sendCohortMessage(input: {
+    cohortId: string;
+    cohortLabel: string;
+    title: string;
+    body: string;
+    ctaLabel?: string;
+    ctaUrl?: string;
+    sentBy?: string;
+  }): Promise<string> {
+    const cohortId = String(input.cohortId || "").trim();
+    const cohortLabel = String(input.cohortLabel || "").trim();
+    const title = String(input.title || "").trim();
+    const body = String(input.body || "").trim();
+
+    if (!cohortId) throw new Error("Cohort is required.");
+    if (title.length < 3) throw new Error("Message title is too short.");
+    if (body.length < 5) throw new Error("Message body is too short.");
+
+    const payload = stripUndefined({
+      cohortId,
+      cohortLabel: cohortLabel || cohortId,
+      title,
+      body,
+      ctaLabel: String(input.ctaLabel || "").trim(),
+      ctaUrl: String(input.ctaUrl || "").trim(),
+      sentBy: String(input.sentBy || "").trim(),
+      sentAt: serverTimestamp(),
+      createdAt: Date.now(),
+      status: "sent" as const,
+    });
+
+    const ref = await addDoc(collection(db, "cohorts", cohortId, "messages"), payload);
+    return ref.id;
+  },
+
+  async getCohortMessages(cohortId: string, max = 20): Promise<CohortMessageDoc[]> {
+    const cleanId = String(cohortId || "").trim();
+    if (!cleanId) return [];
+
+    const safeLimit = Math.max(1, Math.min(50, Math.floor(Number(max) || 20)));
+    const snap = await getDocs(
+      query(
+        collection(db, "cohorts", cleanId, "messages"),
+        orderBy("createdAt", "desc"),
+        limit(safeLimit),
+      ),
+    );
+
+    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CohortMessageDoc[];
   },
 
   // =========================
