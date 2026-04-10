@@ -212,6 +212,20 @@ export const initializePaystackPayment = onRequest(
           body.metadata && typeof body.metadata === "object" ?
             body.metadata :
             undefined;
+        const meta = metadata || {};
+        const uid = safeString((meta as any).uid);
+        const kind: "initial" | "topup" =
+          safeString((meta as any).kind).toLowerCase() === "topup" ?
+            "topup" :
+            "initial";
+        const weeks = Math.max(
+          1,
+          Math.floor(Number((meta as any).weeks) || 1),
+        );
+        const pendingAmountNaira = Math.max(
+          0,
+          Math.round(amount / 100),
+        );
 
         if (!email || !isValidEmail(email)) {
           res.status(400).json({ok: false, error: "Valid email is required"});
@@ -262,6 +276,23 @@ export const initializePaystackPayment = onRequest(
             },
           },
         );
+
+        if (uid) {
+          await db.collection("users").doc(uid).set(
+            {
+              pendingPayment: {
+                kind,
+                status: "Pending",
+                weeks,
+                amount: pendingAmountNaira,
+                reference,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            {merge: true},
+          );
+        }
 
         if (!initResp.data?.status || !initResp.data?.data) {
           res.status(400).json({

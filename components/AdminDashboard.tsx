@@ -890,14 +890,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // ✅ IMPORTANT: Paths first (Option A UI depends on it)
-  useEffect(() => {
-    let mounted = true;
-
-    (async () => {
+  const handleRefreshAll = async () => {
+    await runBusy("refreshAll", async () => {
       try {
         await fetchPaths();
-        if (!mounted) return;
 
         await Promise.all([
           fetchRegistrations(),
@@ -905,6 +901,31 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           fetchCohorts(),
           fetchInboxMessages(),
         ]);
+
+        if (selectedCohortId) {
+          await Promise.all([
+            fetchSessions(selectedCohortId),
+            fetchCohortMessages(selectedCohortId),
+          ]);
+        }
+
+        if (selectedInboxMessage) {
+          await fetchInboxThread(selectedInboxMessage);
+        }
+      } catch (e) {
+        console.error("handleRefreshAll failed:", e);
+        alert("Failed to refresh all dashboard data.");
+      }
+    });
+  };
+
+  // ✅ IMPORTANT: Paths first (Option A UI depends on it)
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      try {
+        await handleRefreshAll();
       } catch (e) {
         console.error("Admin init load failed:", e);
       }
@@ -2030,17 +2051,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <motion.button
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={() => {
-                  fetchPaths();
-                  fetchRegistrations();
-                  fetchCourses();
-                  fetchCohorts();
-                  fetchInboxMessages();
-                }}
+                onClick={handleRefreshAll}
+                disabled={busy.refreshAll}
                 className={primaryActionClass}
               >
-                <RefreshCw className="w-4 h-4" />
-                Refresh All
+                {busy.refreshAll ? (
+                  <Spinner />
+                ) : (
+                  <RefreshCw className="w-4 h-4" />
+                )}
+                {busy.refreshAll ? "Refreshing..." : "Refresh All"}
               </motion.button>
 
               <motion.button
