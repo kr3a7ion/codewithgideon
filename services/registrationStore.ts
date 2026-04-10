@@ -1270,6 +1270,52 @@ export const registrationStore = {
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CohortMessageDoc[];
   },
 
+  async updateCohortMessage(
+    cohortId: string,
+    messageId: string,
+    updates: {
+      title?: string;
+      body?: string;
+      ctaLabel?: string;
+      ctaUrl?: string;
+    }
+  ): Promise<void> {
+    const cleanCohortId = String(cohortId || "").trim();
+    const cleanMessageId = String(messageId || "").trim();
+
+    if (!cleanCohortId) throw new Error("Cohort is required.");
+    if (!cleanMessageId) throw new Error("Message ID is required.");
+
+    const updatePayload = stripUndefined({
+      title: updates.title ? String(updates.title).trim() : undefined,
+      body: updates.body ? String(updates.body).trim() : undefined,
+      ctaLabel: updates.ctaLabel ? String(updates.ctaLabel).trim() : undefined,
+      ctaUrl: updates.ctaUrl ? String(updates.ctaUrl).trim() : undefined,
+      updatedAt: serverTimestamp(),
+    });
+
+    if (Object.keys(updatePayload).length === 0) {
+      throw new Error("No valid fields to update.");
+    }
+
+    await updateDoc(
+      doc(db, "cohorts", cleanCohortId, "messages", cleanMessageId),
+      updatePayload
+    );
+  },
+
+  async deleteCohortMessage(cohortId: string, messageId: string): Promise<void> {
+    const cleanCohortId = String(cohortId || "").trim();
+    const cleanMessageId = String(messageId || "").trim();
+
+    if (!cleanCohortId) throw new Error("Cohort is required.");
+    if (!cleanMessageId) throw new Error("Message ID is required.");
+
+    await deleteDoc(
+      doc(db, "cohorts", cleanCohortId, "messages", cleanMessageId)
+    );
+  },
+
   // =========================
   // COURSES (Admin-managed)
   // =========================

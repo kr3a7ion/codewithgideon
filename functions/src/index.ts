@@ -145,6 +145,16 @@ type VerifyBody = {
   weeklyRate?: number | string;
 };
 
+type InitializeBody = {
+  email?: string;
+  amount?: number | string;
+  reference?: string;
+  callbackUrl?: string;
+  currency?: string;
+  plan?: string;
+  metadata?: Record<string, unknown> | null;
+};
+
 /**
  * Returns a trimmed string for any input. Null/undefined become "".
  */
@@ -175,6 +185,113 @@ function parseMetadata(meta: unknown): Record<string, any> | null {
 
   return null;
 }
+
+export const initializePaystackPayment = onRequest(
+  {secrets: ["PAYSTACK_SECRET_KEY"]},
+  (req, res) => {
+    corsHandler(req, res, async () => {
+      if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+      }
+
+      try {
+        if (req.method !== "POST") {
+          res.status(405).json({ok: false, error: "Method not allowed"});
+          return;
+        }
+
+        const body = (req.body || {}) as InitializeBody;
+        const email = safeString(body.email).toLowerCase();
+        const reference = safeString(body.reference);
+        const callbackUrl = safeString(body.callbackUrl);
+        const currency = safeString(body.currency) || "NGN";
+        const plan = safeString(body.plan);
+        const amount = Number(body.amount);
+        const metadata =
+          body.metadata && typeof body.metadata === "object" ?
+            body.metadata :
+            undefined;
+
+        if (!email || !isValidEmail(email)) {
+          res.status(400).json({ok: false, error: "Valid email is required"});
+          return;
+        }
+
+        if (!reference) {
+          res.status(400).json({ok: false, error: "Reference is required"});
+          return;
+        }
+
+        if (!Number.isFinite(amount) || amount <= 0) {
+          res
+            .status(400)
+            .json({ok: false, error: "Valid amount is required"});
+          return;
+        }
+
+        const secret = PAYSTACK_SECRET_KEY.value();
+        if (!secret) {
+          res.status(500).json({ok: false, error: "Paystack secret missing"});
+          return;
+        }
+
+        const initResp = await axios.post(
+          "https://api.paystack.co/transaction/initialize",
+          {
+            email,
+            amount,
+            reference,
+            currency,
+            callback_url: callbackUrl || undefined,
+            plan: plan || undefined,
+            metadata,
+            channels: [
+              "card",
+              "bank",
+              "ussd",
+              "qr",
+              "mobile_money",
+              "bank_transfer",
+            ],
+          },
+          {
+            headers: {
+              "Authorization": "Bearer " + secret,
+              "Content-Type": "application/json",
+            },
+          },
+        );
+
+        if (!initResp.data?.status || !initResp.data?.data) {
+          res.status(400).json({
+            ok: false,
+            error: "Invalid Paystack initialization response",
+            details: initResp.data || null,
+          });
+          return;
+        }
+
+        res.json({
+          ok: true,
+          data: {
+            authorization_url: initResp.data.data.authorization_url,
+            access_code: initResp.data.data.access_code,
+            reference: initResp.data.data.reference || reference,
+          },
+        });
+      } catch (e: any) {
+        const axiosData = e?.response?.data;
+        logger.error("initializePaystackPayment error", e);
+        res.status(500).json({
+          ok: false,
+          error: "Could not initialize payment",
+          details: axiosData || e?.message || String(e),
+        });
+      }
+    });
+  },
+);
 
 export const verifyPaystackPayment = onRequest(
   {secrets: ["PAYSTACK_SECRET_KEY"]},

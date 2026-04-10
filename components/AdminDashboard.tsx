@@ -36,6 +36,8 @@ import {
   AlertCircle,
   X,
   Send,
+  Edit,
+  Trash2,
   BellRing,
   BookOpen,
 } from "lucide-react";
@@ -48,8 +50,10 @@ import {
   doc,
   updateDoc,
   deleteDoc,
+  addDoc,
+  serverTimestamp,
 } from "firebase/firestore";
-import { db } from "../services/firebase";
+import { auth, db } from "../services/firebase";
 
 interface AdminDashboardProps {
   onNavigate: (view: View) => void;
@@ -73,15 +77,35 @@ type ContactMessageDoc = {
   name: string;
   email: string;
   message: string;
+  lastMessage?: string;
   status?: string;
   source?: string;
   createdAt?: any;
+  updatedAt?: any;
+  repliedAt?: any;
+  fullName?: string;
+  senderName?: string;
+  senderEmail?: string;
+  uid?: string;
+  thread?: any[];
+  messages?: any[];
+  replies?: any[];
   auth?: {
     uid?: string | null;
   };
   appCheck?: {
     appId?: string | null;
   };
+};
+
+type InboxThreadMessage = {
+  id: string;
+  body: string;
+  senderType: "user" | "admin" | "system";
+  senderName: string;
+  senderEmail?: string;
+  createdAt?: any;
+  source?: string;
 };
 
 type CourseForm = {
@@ -226,6 +250,71 @@ const formatInboxDate = (v: any) => {
   return new Date(ms).toLocaleString();
 };
 
+const getInboxMessageBody = (message: any) =>
+  String(
+    message?.body ||
+      message?.message ||
+      message?.text ||
+      message?.content ||
+      message?.lastMessage ||
+      "",
+  ).trim();
+
+const getInboxDisplayName = (message: any) =>
+  String(
+    message?.name ||
+      message?.fullName ||
+      message?.senderName ||
+      message?.displayName ||
+      "",
+  ).trim() || "Unknown sender";
+
+const getInboxEmail = (message: any) =>
+  String(message?.email || message?.senderEmail || "").trim();
+
+const getInboxSourceLabel = (message: any) => {
+  const source = String(message?.source || "").trim().toLowerCase();
+  if (!source) return "web-contact-form";
+  if (source.includes("mobile")) return "mobile-app-chat";
+  if (source.includes("web")) return source;
+  return source;
+};
+
+const getInboxPreview = (message: any) =>
+  getInboxMessageBody(message) || "No message";
+
+const isAdminInboxMessage = (message: any) => {
+  const senderType = String(
+    message?.senderType || message?.senderRole || message?.role || "",
+  ).toLowerCase();
+  const source = String(message?.source || "").toLowerCase();
+  const sentBy = String(message?.sentBy || "").toLowerCase();
+
+  return (
+    senderType === "admin" ||
+    source === "admin-dashboard" ||
+    sentBy === "admin"
+  );
+};
+
+const normalizeInboxThreadMessage = (
+  raw: any,
+  fallbackId: string,
+): InboxThreadMessage | null => {
+  const body = getInboxMessageBody(raw);
+  if (!body) return null;
+
+  return {
+    id: String(raw?.id || fallbackId),
+    body,
+    senderType: isAdminInboxMessage(raw) ? "admin" : "user",
+    senderName: getInboxDisplayName(raw),
+    senderEmail: getInboxEmail(raw) || undefined,
+    createdAt: raw?.createdAt || raw?.sentAt || raw?.timestamp || null,
+    source: raw?.source,
+  };
+};
+
 const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigate,
   onLogout,
@@ -257,6 +346,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [inboxLoading, setInboxLoading] = useState(true);
   const [inboxError, setInboxError] = useState("");
   const [selectedInboxId, setSelectedInboxId] = useState<string>("");
+  const [inboxThread, setInboxThread] = useState<InboxThreadMessage[]>([]);
+  const [inboxThreadLoading, setInboxThreadLoading] = useState(false);
+  const [replyDraft, setReplyDraft] = useState("");
+  const [replyError, setReplyError] = useState("");
+  const [replyBusy, setReplyBusy] = useState(false);
   const [showInboxModal, setShowInboxModal] = useState(false);
   const [activeAdminSection, setActiveAdminSection] = useState<
     | "paths"
@@ -406,6 +500,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     ctaUrl: "",
   });
   const [messageError, setMessageError] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [messageBusyId, setMessageBusyId] = useState<string | null>(null);
 
   const [pathBusy, setPathBusy] = useState(false);
   const [courseBusy, setCourseBusy] = useState(false);
@@ -534,6 +630,93 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const fetchInboxThread = async (message: ContactMessageDoc | null) => {
+    if (!message?.id) {
+      setInboxThread([]);
+      return;
+    }
+
+    setInboxThreadLoading(true);
+    setReplyError("");
+
+    try {
+      const rootThread = [
+        normalizeInboxThreadMessage(
+          {
+            ...message,
+            senderType: "user",
+            senderName: getInboxDisplayName(message),
+            senderEmail: getInboxEmail(message),
+          },
+          `${message.id}-root`,
+        ),
+      ].filter(Boolean) as InboxThreadMessage[];
+
+      const embeddedThreadRaw = [
+        ...(Array.isArray(message.thread) ? message.thread : []),
+        ...(Array.isArray(message.messages) ? message.messages : []),
+        ...(Array.isArray(message.replies) ? message.replies : []),
+      ];
+
+      const embeddedThread = embeddedThreadRaw
+        .map((entry, index) =>
+          normalizeInboxThreadMessage(entry, `${message.id}-embedded-${index}`),
+        )
+        .filter(Boolean) as InboxThreadMessage[];
+
+      const q = query(
+        collection(db, "contactMessages", message.id, "messages"),
+        orderBy("createdAt", "asc"),
+        limit(100),
+      );
+      const snap = await getDocs(q);
+      const subcollectionThread = snap.docs
+        .map((threadDoc, index) =>
+          normalizeInboxThreadMessage(
+            {
+              id: threadDoc.id,
+              ...(threadDoc.data() as Record<string, any>),
+            },
+            `${message.id}-sub-${index}`,
+          ),
+        )
+        .filter(Boolean) as InboxThreadMessage[];
+
+      const merged = [...rootThread, ...embeddedThread, ...subcollectionThread]
+        .filter((entry, index, list) => {
+          return (
+            list.findIndex(
+              (candidate) =>
+                candidate.id === entry.id ||
+                (candidate.body === entry.body &&
+                  toDateMs(candidate.createdAt) === toDateMs(entry.createdAt) &&
+                  candidate.senderType === entry.senderType),
+            ) === index
+          );
+        })
+        .sort((a, b) => toDateMs(a.createdAt) - toDateMs(b.createdAt));
+
+      setInboxThread(merged);
+    } catch (e) {
+      console.error("fetchInboxThread failed:", e);
+      setInboxThread(
+        [
+          normalizeInboxThreadMessage(
+            {
+              ...message,
+              senderType: "user",
+              senderName: getInboxDisplayName(message),
+              senderEmail: getInboxEmail(message),
+            },
+            `${message.id}-fallback`,
+          ),
+        ].filter(Boolean) as InboxThreadMessage[],
+      );
+    } finally {
+      setInboxThreadLoading(false);
+    }
+  };
+
   const fetchCourses = async () => {
     setCoursesLoading(true);
     try {
@@ -583,6 +766,59 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } catch (e) {
       console.error("deleteInboxMessage failed:", e);
       alert("Failed to delete message.");
+    }
+  };
+
+  const sendInboxReply = async () => {
+    if (!selectedInboxMessage?.id || replyBusy) return;
+
+    const body = replyDraft.trim();
+    if (body.length < 2) {
+      setReplyError("Reply must be at least 2 characters.");
+      return;
+    }
+
+    setReplyBusy(true);
+    setReplyError("");
+
+    try {
+      const adminLabel =
+        auth.currentUser?.displayName ||
+        auth.currentUser?.email ||
+        "Admin Support";
+
+      await addDoc(
+        collection(db, "contactMessages", selectedInboxMessage.id, "messages"),
+        {
+          body,
+          message: body,
+          senderType: "admin",
+          senderRole: "admin",
+          senderName: adminLabel,
+          senderEmail: auth.currentUser?.email || "",
+          source: "admin-dashboard",
+          createdAt: serverTimestamp(),
+        },
+      );
+
+      await updateDoc(doc(db, "contactMessages", selectedInboxMessage.id), {
+        status: "resolved",
+        lastMessage: body,
+        lastMessageAt: serverTimestamp(),
+        repliedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      setReplyDraft("");
+      await Promise.all([
+        fetchInboxMessages(),
+        fetchInboxThread(selectedInboxMessage),
+      ]);
+    } catch (e: any) {
+      console.error("sendInboxReply failed:", e);
+      setReplyError(e?.message || "Failed to send reply.");
+    } finally {
+      setReplyBusy(false);
     }
   };
 
@@ -925,8 +1161,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           icon: CalendarDays,
           badge: sessions.length,
           tone: "sky",
-          activeClass:
-            "bg-sky-600 text-white border-sky-500 shadow-sky-500/20",
+          activeClass: "bg-sky-600 text-white border-sky-500 shadow-sky-500/20",
           inactiveClass:
             "bg-sky-50/60 text-sky-900 border-sky-100 hover:border-sky-300 dark:bg-sky-950/20 dark:text-sky-200 dark:border-sky-900/40 dark:hover:border-sky-700/60",
           badgeClass:
@@ -1003,15 +1238,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const activeSectionMeta = adminSections.find(
     (section) => section.key === activeAdminSection,
   );
-  const adminSections = [
-    { key: "paths", label: "Paths & Active Cohort" },
-    { key: "cohorts", label: "Cohorts" },
-    { key: "sessions", label: "Sessions" },
-    { key: "messages", label: "Cohort Messaging" },
-    { key: "courses", label: "Courses" },
-    { key: "payments", label: "Pending Payments" },
-    { key: "registrations", label: "Registrations" },
-  ] as const;
 
   // -------------------------
   // Courses actions
@@ -1527,6 +1753,80 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
   };
 
+  const startEditMessage = (msg: CohortMessageDoc) => {
+    setEditingMessageId(msg.id);
+    setMessageForm({
+      title: msg.title,
+      body: msg.body,
+      ctaLabel: msg.ctaLabel || "",
+      ctaUrl: msg.ctaUrl || "",
+    });
+  };
+
+  const cancelEditMessage = () => {
+    setEditingMessageId(null);
+    setMessageForm({ title: "", body: "", ctaLabel: "", ctaUrl: "" });
+  };
+
+  const updateMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMessageId || !selectedCohortId) return;
+
+    setMessageError("");
+    const title = messageForm.title.trim();
+    const body = messageForm.body.trim();
+
+    if (title.length < 3) {
+      setMessageError("Message title must be at least 3 characters.");
+      return;
+    }
+    if (body.length < 5) {
+      setMessageError("Message body must be at least 5 characters.");
+      return;
+    }
+
+    setMessageBusyId(editingMessageId);
+    try {
+      await registrationStore.updateCohortMessage(
+        selectedCohortId,
+        editingMessageId,
+        {
+          title,
+          body,
+          ctaLabel: messageForm.ctaLabel.trim(),
+          ctaUrl: messageForm.ctaUrl.trim(),
+        },
+      );
+      setEditingMessageId(null);
+      setMessageForm({ title: "", body: "", ctaLabel: "", ctaUrl: "" });
+      await fetchCohortMessages(selectedCohortId);
+    } catch (err: any) {
+      console.error("updateMessage failed:", err);
+      setMessageError(err?.message || "Failed to update message.");
+    } finally {
+      setMessageBusyId(null);
+    }
+  };
+
+  const deleteMessage = async (msgId: string) => {
+    if (!selectedCohortId) return;
+    if (!confirm("Delete this message? This action cannot be undone.")) return;
+
+    setMessageBusyId(msgId);
+    try {
+      await registrationStore.deleteCohortMessage(selectedCohortId, msgId);
+      if (editingMessageId === msgId) {
+        cancelEditMessage();
+      }
+      await fetchCohortMessages(selectedCohortId);
+    } catch (err: any) {
+      console.error("deleteMessage failed:", err);
+      setMessageError(err?.message || "Failed to delete message.");
+    } finally {
+      setMessageBusyId(null);
+    }
+  };
+
   // -------------------------
   // Pending payment actions
   // -------------------------
@@ -1650,6 +1950,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [selectedInboxMessage?.id]);
 
   useEffect(() => {
+    if (!selectedInboxMessage) {
+      setInboxThread([]);
+      setReplyDraft("");
+      setReplyError("");
+      return;
+    }
+
+    fetchInboxThread(selectedInboxMessage);
+  }, [selectedInboxMessage]);
+
+  useEffect(() => {
     if (!filteredInboxMessages.length) {
       setSelectedInboxId("");
       return;
@@ -1769,1845 +2080,1749 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </motion.button>
             </div>
           </motion.div>
-        </motion.div>
 
-        <motion.div
-          variants={fadeUp}
-          className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-8"
-        >
-          {[
-            {
-              label: "Total Students",
-              value: stats.total,
-              icon: Users,
-              valueClass: "text-blue-900 dark:text-white",
-            },
-            {
-              label: "Pending",
-              value: stats.pending,
-              icon: Clock3,
-              valueClass: "text-orange-600",
-            },
-            {
-              label: "Complete",
-              value: stats.complete,
-              icon: ShieldCheck,
-              valueClass: "text-teal-600",
-            },
-            {
-              label: "Revenue",
-              value: `₦${stats.revenue.toLocaleString()}`,
-              icon: CircleDollarSign,
-              valueClass: "text-blue-900 dark:text-white",
-            },
-            {
-              label: "Pending Payments",
-              value: stats.pendingPaymentsCount,
-              icon: CreditCard,
-              valueClass: "text-purple-600",
-            },
-            {
-              label: "Inbox (New)",
-              value: unreadInboxCount,
-              icon: Inbox,
-              valueClass: "text-pink-600",
-            },
-          ].map((s) => {
-            const Icon = s.icon;
-            return (
-              <motion.div
-                key={s.label}
-                whileHover={{ y: -2 }}
-                className="p-6 rounded-3xl border border-slate-200/70 dark:border-slate-800 bg-white/90 dark:bg-slate-900/85 shadow-[0_8px_20px_rgba(15,23,42,0.06)]"
-              >
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-                    {s.label}
-                  </p>
-                  <Icon className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                </div>
-                <p className={`text-2xl font-black mt-3 ${s.valueClass}`}>
-                  {s.value}
-                </p>
-              </motion.div>
-            );
-          })}
-        </motion.div>
-
-        <div className={`mb-8 p-5 ${surfaceCardClass}`}>
-        <div className="mb-8 rounded-[2rem] bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm p-5">
-          <div className="flex items-center justify-between gap-4 mb-4">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-                Dashboard Navigation
-              </p>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Choose a workspace and focus on one admin task at a time.
-              </p>
-            </div>
-            {activeSectionMeta ? (
-              <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
-                <activeSectionMeta.icon className="w-4 h-4 text-slate-700 dark:text-slate-300" />
-                <span className="text-xs font-black uppercase tracking-widest text-slate-800 dark:text-slate-100">
-              <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-2xl bg-blue-50 dark:bg-teal-900/20 border border-blue-100 dark:border-teal-800/30">
-                <activeSectionMeta.icon className="w-4 h-4 text-blue-700 dark:text-teal-300" />
-                <span className="text-xs font-black uppercase tracking-widest text-blue-900 dark:text-white">
-                  {activeSectionMeta.label}
-                </span>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 mb-4">
-            {adminSections.map((section) => (
-              <span
-                key={`${section.key}-legend`}
-                className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${section.badgeClass}`}
-              >
-                {section.label}
-              </span>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-            {adminSections.map((section) => {
-              const Icon = section.icon;
-              const active = activeAdminSection === section.key;
+          <motion.div
+            variants={fadeUp}
+            className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-8"
+          >
+            {[
+              {
+                label: "Total Students",
+                value: stats.total,
+                icon: Users,
+                valueClass: "text-blue-900 dark:text-white",
+              },
+              {
+                label: "Pending",
+                value: stats.pending,
+                icon: Clock3,
+                valueClass: "text-orange-600",
+              },
+              {
+                label: "Complete",
+                value: stats.complete,
+                icon: ShieldCheck,
+                valueClass: "text-teal-600",
+              },
+              {
+                label: "Revenue",
+                value: `₦${stats.revenue.toLocaleString()}`,
+                icon: CircleDollarSign,
+                valueClass: "text-blue-900 dark:text-white",
+              },
+              {
+                label: "Pending Payments",
+                value: stats.pendingPaymentsCount,
+                icon: CreditCard,
+                valueClass: "text-purple-600",
+              },
+              {
+                label: "Inbox (New)",
+                value: unreadInboxCount,
+                icon: Inbox,
+                valueClass: "text-pink-600",
+              },
+            ].map((s) => {
+              const Icon = s.icon;
               return (
-                <button
-                  key={section.key}
-                  onClick={() => setActiveAdminSection(section.key)}
-                  className={`text-left p-4 rounded-2xl border transition-all ${
-                    active
-                      ? section.activeClass
-                      : section.inactiveClass
-                  className={`text-left p-4 rounded-2xl border transition ${
-                    active
-                      ? "bg-blue-900 dark:bg-teal-600 text-white border-blue-900 dark:border-teal-500 shadow-lg"
-                      : "bg-gray-50 dark:bg-slate-800/50 border-gray-100 dark:border-slate-700 hover:border-blue-200 dark:hover:border-teal-500/30"
-                  }`}
+                <motion.div
+                  key={s.label}
+                  whileHover={{ y: -2 }}
+                  className="p-6 rounded-3xl border border-slate-200/70 dark:border-slate-800 bg-white/90 dark:bg-slate-900/85 shadow-[0_8px_20px_rgba(15,23,42,0.06)]"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <Icon
-                        className={`w-4 h-4 ${
-                          active
-                            ? "text-white"
-                            : "text-current"
-                            : "text-blue-700 dark:text-teal-300"
-                        }`}
-                      />
-                      <p
-                        className={`text-xs font-black uppercase tracking-widest ${
-                          active
-                            ? "text-white"
-                            : "text-current"
-                            : "text-blue-900 dark:text-white"
-                        }`}
-                      >
-                        {section.label}
-                      </p>
-                    </div>
-                    <span
-                      className={`text-[10px] min-w-[22px] h-[22px] px-1 rounded-full flex items-center justify-center font-black ${
-                        active
-                          ? "bg-white/15 text-white"
-                          : `border ${section.badgeClass}`
-                          : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-300 border border-gray-100 dark:border-slate-700"
-                      }`}
-                    >
-                      {section.badge}
-                    </span>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                      {s.label}
+                    </p>
+                    <Icon className="w-4 h-4 text-slate-500 dark:text-slate-400" />
                   </div>
-                  <p
-                    className={`text-xs mt-2 ${
-                      active
-                        ? "text-white/85"
-                        : "text-slate-500 dark:text-slate-400"
-                    }`}
-                  >
-                    {section.description}
+                  <p className={`text-2xl font-black mt-3 ${s.valueClass}`}>
+                    {s.value}
                   </p>
-                </button>
+                </motion.div>
               );
             })}
-        <div className="mb-8 p-2 rounded-3xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm">
-          <div className="flex flex-wrap gap-2">
-            {adminSections.map((section) => (
-              <button
-                key={section.key}
-                onClick={() => setActiveAdminSection(section.key)}
-                className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition ${
-                  activeAdminSection === section.key
-                    ? "bg-blue-900 dark:bg-teal-600 text-white shadow-md"
-                    : "bg-gray-50 dark:bg-slate-800 text-slate-500 dark:text-slate-300 hover:text-blue-900 dark:hover:text-white"
-                }`}
-              >
-                {section.label}
-              </button>
-            ))}
-          </div>
-        </div>
+          </motion.div>
 
-        {/* PATHS MANAGER */}
-        {activeAdminSection === "paths" && (
-        <div className={`mb-8 p-8 ${surfaceCardClass}`}>
-        {(activeAdminSection === "paths" || activeAdminSection === "cohorts") && (
-        <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <div>
-              <h2 className={sectionTitleClass}>
-                Paths Manager
-              </h2>
-              <p className={sectionCopyClass}>
-                Create and manage your learning paths (tracks). Everything else
-                (courses, cohorts, sessions) ties to these.
-              </p>
-            </div>
-
-            <button
-              onClick={fetchPaths}
-              className={subtleActionClass}
-            >
-              Refresh Paths
-            </button>
-          </div>
-
-          <div className="flex flex-col md:flex-row gap-3 mb-6">
-            <input
-              value={newPathTitle}
-              onChange={(e) => setNewPathTitle(e.target.value)}
-              className="flex-1 px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-              placeholder="New Path Title (e.g. Flutter Development)"
-            />
-            <BusyButton
-              busy={pathBusyId === "create"}
-              disabled={!newPathTitle.trim()}
-              onClick={createPath}
-              className="px-6 py-4 rounded-2xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:bg-teal-500 transition"
-              busyText="Adding..."
-            >
-              + Add Path
-            </BusyButton>
-          </div>
-
-          {pathsLoading ? (
-            <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
-              Loading paths…
-            </div>
-          ) : paths.length === 0 ? (
-            <div className="p-6 bg-orange-50 dark:bg-orange-500/10 rounded-2xl border border-orange-100 dark:border-orange-500/20 text-orange-800 dark:text-orange-200">
-              No paths yet. Create your first path above (recommended).
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {paths.map((p) => (
-                <div
-                  key={p.id}
-                  className="p-5 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      {editingPathId === p.id ? (
-                        <div className="space-y-3">
-                          <input
-                            value={editingPathTitle}
-                            onChange={(e) =>
-                              setEditingPathTitle(e.target.value)
-                            }
-                            className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-700 rounded-xl text-sm text-blue-900 dark:text-white outline-none"
-                          />
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={saveEditPath}
-                              className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
-                            >
-                              Save
-                            </button>
-                            <button
-                              onClick={cancelEditPath}
-                              className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:opacity-90 transition"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <>
-                          <p className="text-sm font-black text-blue-900 dark:text-white">
-                            {p.title}
-                          </p>
-                          <p className="text-[11px] text-slate-400 font-bold mt-1 break-all">
-                            ID: {p.id}
-                          </p>
-                        </>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => togglePathActive(p)}
-                        className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
-                          p.isActive !== false
-                            ? "bg-teal-50 border-teal-200 text-teal-600 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-400"
-                            : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
-                        }`}
-                      >
-                        {p.isActive !== false ? "Active" : "Inactive"}
-                      </button>
-
-                      {editingPathId !== p.id ? (
-                        <button
-                          onClick={() => startEditPath(p)}
-                          className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
-                        >
-                          Edit
-                        </button>
-                      ) : null}
-
-                      <BusyButton
-                        busy={pathBusyId === p.id}
-                        onClick={() => deletePath(p)}
-                        className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
-                        busyText="Deleting..."
-                      >
-                        Delete
-                      </BusyButton>
-                    </div>
-                  </div>
+          <div className={`mb-8 p-5 ${surfaceCardClass}`}>
+            <div className="flex items-center justify-between gap-4 mb-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                  Dashboard Navigation
+                </p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  Choose a workspace and focus on one admin task at a time.
+                </p>
+              </div>
+              {activeSectionMeta ? (
+                <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-2xl bg-blue-50 dark:bg-teal-900/20 border border-blue-100 dark:border-teal-800/30">
+                  <activeSectionMeta.icon className="w-4 h-4 text-blue-700 dark:text-teal-300" />
+                  <span className="text-xs font-black uppercase tracking-widest text-blue-900 dark:text-white">
+                    {activeSectionMeta.label}
+                  </span>
                 </div>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              {adminSections.map((section) => (
+                <span
+                  key={`${section.key}-legend`}
+                  className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${section.badgeClass}`}
+                >
+                  {section.label}
+                </span>
               ))}
             </div>
-          )}
-        </div>
-        )}
 
-        {/* Active Cohort (PER PATH) */}
-        {(activeAdminSection === "paths" ||
-          activeAdminSection === "cohorts" ||
-          activeAdminSection === "sessions" ||
-          activeAdminSection === "messages") && (
-        <div className={`mb-8 p-8 ${surfaceCardClass}`}>
-        <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <div>
-              <h2 className={sectionTitleClass}>
-                Active Cohort (Per Path)
-              </h2>
-              <p className={sectionCopyClass}>
-                New student registrations use the active cohort mapped to their
-                selected path.
-              </p>
-            </div>
-
-            <button
-              onClick={saveActiveCohort}
-              disabled={
-                cohortSaving ||
-                !activePathId ||
-                !activeSeasonKey.trim() ||
-                !activeSeasonLabel.trim()
-              }
-              className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition ${
-                cohortSaving
-                  ? "bg-gray-200 text-gray-500"
-                  : "bg-blue-900 text-white hover:opacity-90"
-              }`}
-            >
-              {cohortSaving ? "Saving..." : "Save Active Cohort"}
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                Path
-              </label>
-
-              <select
-                value={activePathId}
-                onChange={(e) => setActivePathId(e.target.value)}
-                className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-              >
-                {paths.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.title}
-                  </option>
-                ))}
-              </select>
-
-              {!paths.length ? (
-                <p className="text-[11px] text-orange-600 mt-2 font-bold">
-                  Create paths first (above), then set active cohort.
-                </p>
-              ) : null}
-            </div>
-
-            <div>
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                Season Key
-              </label>
-              <input
-                value={activeSeasonKey}
-                onChange={(e) => setActiveSeasonKey(e.target.value)}
-                className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                placeholder="e.g. 2026-03"
-              />
-              <p className="text-[11px] text-slate-400 mt-2 font-bold">
-                Used to build cohortKey:{" "}
-                <span className="text-slate-500">
-                  {computedCohortKey || "—"}
-                </span>
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                Season Label
-              </label>
-              <input
-                value={activeSeasonLabel}
-                onChange={(e) => setActiveSeasonLabel(e.target.value)}
-                className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                placeholder="e.g. March 2026 Cohort"
-              />
-              <p className="text-[11px] text-slate-400 mt-2 font-bold">
-                cohortId:{" "}
-                <span className="text-slate-500">
-                  {computedCohortId || "—"}
-                </span>
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-6 p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/40 border border-gray-100 dark:border-slate-800">
-            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              ✅ This sets the active cohort identity for this path:
-              <span className="font-black"> {computedCohortKey || "—"}</span>.
-              <br />
-              Sessions are stored under a cohort document (Doc ID) in{" "}
-              <span className="font-black">/cohorts</span> →{" "}
-              <span className="font-black">
-                {selectedCohortId || "Select a cohort above"}
-              </span>{" "}
-              and its <span className="font-black">/sessions</span>{" "}
-              subcollection.
-            </p>
-          </div>
-        </div>
-        )}
-
-        {/* Cohorts + Sessions Manager */}
-        {(activeAdminSection === "cohorts" ||
-          activeAdminSection === "sessions") && (
-          activeAdminSection === "sessions" ||
-          activeAdminSection === "messages") && (
-        <div className="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Cohorts */}
-          <div className={`p-8 ${surfaceCardClass}`}>
-            <div className="flex items-center justify-between gap-4 mb-6">
-              <div>
-                <h2 className={sectionTitleClass}>
-                  Cohorts
-                </h2>
-                <p className={sectionCopyClass}>
-                  Create cohorts and manage session schedules.
-                </p>
-              </div>
-
-              <button
-                onClick={fetchCohorts}
-                className={subtleActionClass}
-              >
-                Refresh
-              </button>
-            </div>
-
-            <button
-              onClick={addCohort}
-              disabled={!activePathId}
-              className={`w-full px-4 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition mb-6 ${
-                !activePathId
-                  ? "bg-gray-200 text-gray-500"
-                  : "bg-teal-600 text-white hover:bg-teal-500"
-              }`}
-            >
-              + Add Cohort From Active Path + Season
-            </button>
-
-            {cohortsLoading ? (
-              <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
-                Loading cohorts…
-              </div>
-            ) : cohorts.length === 0 ? (
-              <div className="p-5 bg-orange-50 dark:bg-orange-500/10 rounded-2xl border border-orange-100 dark:border-orange-500/20 text-orange-800 dark:text-orange-200">
-                No cohorts yet. Set active cohort first (above), then add
-                cohort.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {cohorts.map((c) => {
-                  const isSelected = selectedCohortId === c.id;
-                  const pathTitle = c.pathId
-                    ? pathsById.get(String(c.pathId))?.title
-                    : c.path || "";
-
-                  return (
-                    <button
-                      key={c.id}
-                      onClick={() => setSelectedCohortId(c.id)} // ✅ doc id
-                      className={`w-full text-left p-4 rounded-2xl border transition ${
-                        isSelected
-                          ? "border-blue-900 dark:border-teal-600 bg-blue-50 dark:bg-teal-900/20"
-                          : "border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              {adminSections.map((section) => {
+                const Icon = section.icon;
+                const active = activeAdminSection === section.key;
+                return (
+                  <button
+                    key={section.key}
+                    onClick={() => setActiveAdminSection(section.key)}
+                    className={`text-left p-4 rounded-2xl border transition-all ${
+                      active ? section.activeClass : section.inactiveClass
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Icon
+                          className={`w-4 h-4 ${
+                            active ? "text-white" : "text-current"
+                          }`}
+                        />
+                        <p
+                          className={`text-xs font-black uppercase tracking-widest ${
+                            active
+                              ? "text-white"
+                              : "text-slate-900 dark:text-white"
+                          }`}
+                        >
+                          {section.label}
+                        </p>
+                      </div>
+                      <span
+                        className={`text-[10px] min-w-[22px] h-[22px] px-1 rounded-full flex items-center justify-center font-black ${
+                          active
+                            ? "bg-white/15 text-white"
+                            : `border ${section.badgeClass}`
+                        }`}
+                      >
+                        {section.badge}
+                      </span>
+                    </div>
+                    <p
+                      className={`text-xs mt-2 ${
+                        active
+                          ? "text-white/85"
+                          : "text-slate-500 dark:text-slate-400"
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <p className="text-sm font-black text-blue-900 dark:text-white">
-                            {c.label}
-                          </p>
-
-                          {/* ✅ show doc id (real storage location) */}
-                          <p className="text-[11px] text-slate-400 font-bold mt-1 break-all">
-                            Doc ID: {c.id}
-                          </p>
-
-                          {/* ✅ show cohortKey if present (identity metadata) */}
-                          {c.cohortKey ? (
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold mt-1 break-all">
-                              cohortKey: {c.cohortKey}
-                              {c.cohortKey === c.id ? (
-                                <span className="ml-2 text-teal-600 font-black">
-                                  • matches Doc ID
-                                </span>
-                              ) : (
-                                <span className="ml-2 text-orange-600 font-black">
-                                  • differs from Doc ID
-                                </span>
-                              )}
-                            </p>
-                          ) : null}
-
-                          {/* ✅ show path identity */}
-                          {c.pathId || c.path ? (
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold mt-1">
-                              Path:{" "}
-                              <span className="text-slate-600 dark:text-slate-200">
-                                {pathTitle || "—"}
-                              </span>
-                              {c.pathId ? (
-                                <span className="ml-2 text-slate-400 break-all">
-                                  (pathId: {c.pathId})
-                                </span>
-                              ) : null}
-                            </p>
-                          ) : null}
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteCohort(c);
-                          }}
-                          className="px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+                      {section.description}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Sessions */}
-          <div className={`p-8 ${surfaceCardClass}`}>
-            <div className="flex items-center justify-between gap-4 mb-6">
-              <div>
-                <h2 className={sectionTitleClass}>
-                  Live Sessions
-                </h2>
-                {sessionsError ? (
-                  <div className="p-4 mb-4 rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-200 text-sm font-bold">
-                    {sessionsError}
-                  </div>
-                ) : null}
-                <p className={sectionCopyClass}>
-                  {selectedCohortId
-                    ? (() => {
-                        const selected = cohorts.find(
-                          (x) => x.id === selectedCohortId,
-                        );
-                        return (
-                          <>
-                            Cohort Doc ID:{" "}
-                            <span className="font-black">
-                              {selectedCohortId}
-                            </span>
-                            {selected?.cohortKey ? (
-                              <>
-                                {" "}
-                                • cohortKey:{" "}
-                                <span className="font-black">
-                                  {selected.cohortKey}
-                                </span>
-                              </>
-                            ) : null}
-                          </>
-                        );
-                      })()
-                    : "Select a cohort to manage sessions."}
-                </p>
-              </div>
-
-              <BusyButton
-                busy={false}
-                disabled={!selectedCohortId || sessionsLoading}
-                onClick={openAddSession}
-                className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition ${
-                  !selectedCohortId
-                    ? "bg-gray-200 text-gray-500"
-                    : "bg-blue-900 text-white hover:opacity-90"
-                }`}
-              >
-                + Add Session
-              </BusyButton>
-            </div>
-
-            {sessionsLoading ? (
-              <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
-                Loading sessions…
-              </div>
-            ) : sessions.length === 0 ? (
-              <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
-                No sessions yet. Add the first session.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {sessions.map((s) => (
-                  <div
-                    key={s.id}
-                    className="p-4 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-black text-blue-900 dark:text-white">
-                          {s.title}
-                        </p>
-                        <p className="text-[11px] text-slate-400 font-bold mt-1">
-                          {new Date(
-                            sessionTimeToMs((s as any).startsAt),
-                          ).toLocaleString()}{" "}
-                          • {Number((s as any).durationMins || 60)} mins • Week{" "}
-                          {(s as any).week || 1}
-                        </p>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                          Path: {(s as any).path || "—"}{" "}
-                          {(s as any).isPublished !== false ? (
-                            <span className="ml-2 text-teal-600 font-black">
-                              • Published
-                            </span>
-                          ) : (
-                            <span className="ml-2 text-orange-600 font-black">
-                              • Hidden
-                            </span>
-                          )}
-                        </p>
-                        {s.joinUrl ? (
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 break-all">
-                            Join: {s.joinUrl}
-                          </p>
-                        ) : null}
-                        {(s as any).recordingUrl ? (
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 break-all">
-                            Recording: {(s as any).recordingUrl}
-                          </p>
-                        ) : null}
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => openEditSession(s)}
-                          className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
-                        >
-                          Edit
-                        </button>
-                        <BusyButton
-                          busy={sessionBusyId === s.id}
-                          onClick={() => deleteSession(s)}
-                          className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
-                          busyText="Deleting..."
-                        >
-                          Delete
-                        </BusyButton>
-                      </div>
-                    </div>
-
-                    {s.notes ? (
-                      <p className="mt-3 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                        {s.notes}
-                      </p>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-        )}
-
-        {activeAdminSection === "messages" && (
-          <div className={`mb-8 p-8 ${surfaceCardClass}`}>
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-              <div>
-                <h2 className={sectionTitleClass}>
-                  Cohort Messaging
-                </h2>
-                <p className={sectionCopyClass}>
-          <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-              <div>
-                <h2 className="text-xl font-black text-blue-900 dark:text-white">
-                  Cohort Messaging
-                </h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Send announcements directly to students in the selected active
-                  cohort.
-                </p>
-              </div>
-              <button
-                onClick={() => fetchCohortMessages(selectedCohortId)}
-                disabled={!selectedCohortId}
-                className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition ${
-                  !selectedCohortId
-                    ? "bg-gray-200 text-gray-500"
-                    : "bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:opacity-90"
-                }`}
-              >
-                Refresh Messages
-              </button>
-            </div>
-
-            <form onSubmit={sendMessageToCohort} className="space-y-4">
-              {messageError ? (
-                <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
-                  {messageError}
-                </div>
-              ) : null}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* PATHS MANAGER */}
+          {activeAdminSection === "paths" && (
+            <div className={`mb-8 p-8 ${surfaceCardClass}`}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                 <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                    Target Cohort
-                  </label>
-                  <select
-                    value={selectedCohortId}
-                    onChange={(e) => setSelectedCohortId(e.target.value)}
-                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                  >
-                    <option value="" disabled>
-                      Select a cohort…
-                    </option>
-                    {cohorts.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="p-4 rounded-2xl bg-blue-50 dark:bg-teal-900/20 border border-blue-100 dark:border-teal-800/30">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-blue-700 dark:text-teal-300">
-                    Delivery Note
-                  </p>
-                  <p className="text-xs text-slate-600 dark:text-slate-300 mt-2 leading-relaxed">
-                    Messages are written to{" "}
-                    <span className="font-black">
-                      cohorts/{selectedCohortId || "{cohortId}"}/messages
-                    </span>{" "}
-                    and can be consumed by the learner app.
+                  <h2 className={sectionTitleClass}>Paths Manager</h2>
+                  <p className={sectionCopyClass}>
+                    Create and manage your learning paths (tracks). Everything
+                    else (courses, cohorts, sessions) ties to these.
                   </p>
                 </div>
+
+                <button onClick={fetchPaths} className={subtleActionClass}>
+                  Refresh Paths
+                </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="flex flex-col md:flex-row gap-3 mb-6">
                 <input
-                  value={messageForm.title}
-                  onChange={(e) =>
-                    setMessageForm((p) => ({ ...p, title: e.target.value }))
-                  }
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                  placeholder="Message title"
-                  required
+                  value={newPathTitle}
+                  onChange={(e) => setNewPathTitle(e.target.value)}
+                  className="flex-1 px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                  placeholder="New Path Title (e.g. Flutter Development)"
                 />
-                <input
-                  value={messageForm.ctaUrl}
-                  onChange={(e) =>
-                    setMessageForm((p) => ({ ...p, ctaUrl: e.target.value }))
-                  }
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                  placeholder="Optional action link (https://...)"
-                />
+                <BusyButton
+                  busy={pathBusyId === "create"}
+                  disabled={!newPathTitle.trim()}
+                  onClick={createPath}
+                  className="px-6 py-4 rounded-2xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:bg-teal-500 transition"
+                  busyText="Adding..."
+                >
+                  + Add Path
+                </BusyButton>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <textarea
-                  value={messageForm.body}
-                  onChange={(e) =>
-                    setMessageForm((p) => ({ ...p, body: e.target.value }))
-                  }
-                  className="md:col-span-2 w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none min-h-[120px]"
-                  placeholder="Type announcement message for this cohort..."
-                  required
-                />
-                <div className="space-y-3">
-                  <input
-                    value={messageForm.ctaLabel}
-                    onChange={(e) =>
-                      setMessageForm((p) => ({
-                        ...p,
-                        ctaLabel: e.target.value,
-                      }))
-                    }
-                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                    placeholder="Optional CTA label"
-                  />
-                  <BusyButton
-                    type="submit"
-                    busy={busy.sendCohortMessage}
-                    disabled={!selectedCohortId}
-                    className="w-full px-4 py-4 rounded-2xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
-                    busyText="Sending..."
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <Send className="w-4 h-4" />
-                      Send Message
-                    </span>
-                  </BusyButton>
-                </div>
-              </div>
-            </form>
-
-            <div className="mt-6">
-              <h3 className="text-sm font-black uppercase tracking-widest text-slate-400 mb-3">
-                Recent Messages
-              </h3>
-              {messagesLoading ? (
+              {pathsLoading ? (
                 <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
-                  Loading messages…
+                  Loading paths…
                 </div>
-              ) : cohortMessages.length === 0 ? (
-                <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
-                  No sent messages for this cohort yet.
+              ) : paths.length === 0 ? (
+                <div className="p-6 bg-orange-50 dark:bg-orange-500/10 rounded-2xl border border-orange-100 dark:border-orange-500/20 text-orange-800 dark:text-orange-200">
+                  No paths yet. Create your first path above (recommended).
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {cohortMessages.map((msg) => (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {paths.map((p) => (
                     <div
-                      key={msg.id}
-                      className="p-4 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
+                      key={p.id}
+                      className="p-5 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
                     >
-                      <p className="text-sm font-black text-blue-900 dark:text-white">
-                        {msg.title}
-                      </p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                        {formatInboxDate((msg as any).sentAt)} •{" "}
-                        {msg.cohortLabel}
-                      </p>
-                      <p className="text-sm text-slate-600 dark:text-slate-300 mt-3 whitespace-pre-wrap">
-                        {msg.body}
-                      </p>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          {editingPathId === p.id ? (
+                            <div className="space-y-3">
+                              <input
+                                value={editingPathTitle}
+                                onChange={(e) =>
+                                  setEditingPathTitle(e.target.value)
+                                }
+                                className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-700 rounded-xl text-sm text-blue-900 dark:text-white outline-none"
+                              />
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={saveEditPath}
+                                  className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  onClick={cancelEditPath}
+                                  className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:opacity-90 transition"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-sm font-black text-blue-900 dark:text-white">
+                                {p.title}
+                              </p>
+                              <p className="text-[11px] text-slate-400 font-bold mt-1 break-all">
+                                ID: {p.id}
+                              </p>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => togglePathActive(p)}
+                            className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
+                              p.isActive !== false
+                                ? "bg-teal-50 border-teal-200 text-teal-600 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-400"
+                                : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
+                            }`}
+                          >
+                            {p.isActive !== false ? "Active" : "Inactive"}
+                          </button>
+
+                          {editingPathId !== p.id ? (
+                            <button
+                              onClick={() => startEditPath(p)}
+                              className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
+                            >
+                              Edit
+                            </button>
+                          ) : null}
+
+                          <BusyButton
+                            busy={pathBusyId === p.id}
+                            onClick={() => deletePath(p)}
+                            className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
+                            busyText="Deleting..."
+                          >
+                            Delete
+                          </BusyButton>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          </div>
-        )}
-
-        {/* Pending Payments Viewer */}
-        {activeAdminSection === "payments" && (
-        <div className={`mb-8 p-8 ${surfaceCardClass}`}>
-        <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
-          <div className="flex items-center justify-between gap-4 mb-6">
-            <div>
-              <h2 className={sectionTitleClass}>
-                Pending Payments
-              </h2>
-              <p className={sectionCopyClass}>
-                Approve or clear pending Paystack references.
-              </p>
-            </div>
-
-            <button
-              onClick={fetchRegistrations}
-              className={subtleActionClass}
-            >
-              Refresh
-            </button>
-          </div>
-
-          {pendingPayments.length === 0 ? (
-            <div className="p-6 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
-              No pending payments right now.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-gray-50 dark:bg-slate-800/50 border-b border-gray-100 dark:border-slate-800">
-                  <tr>
-                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Student
-                    </th>
-                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Kind
-                    </th>
-                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Weeks
-                    </th>
-                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Amount
-                    </th>
-                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Reference
-                    </th>
-                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-gray-50 dark:divide-slate-800">
-                  {pendingPayments.map((r) => {
-                    const p = (r as any).pendingPayment;
-                    return (
-                      <tr
-                        key={r.uid}
-                        className="hover:bg-gray-50/50 dark:hover:bg-slate-800/30 transition-colors"
-                      >
-                        <td className="px-6 py-4">
-                          <p className="text-sm font-black text-blue-900 dark:text-white">
-                            {r.fullName}
-                          </p>
-                          <p className="text-xs text-slate-400 font-medium">
-                            {r.email}
-                          </p>
-                        </td>
-                        <td className="px-6 py-4 text-xs font-bold text-slate-600 dark:text-slate-300 uppercase">
-                          {p?.kind}
-                        </td>
-                        <td className="px-6 py-4 text-xs font-bold text-slate-600 dark:text-slate-300">
-                          {p?.weeks}
-                        </td>
-                        <td className="px-6 py-4 text-sm font-black text-blue-900 dark:text-teal-500">
-                          ₦{Number(p?.amount || 0).toLocaleString()}
-                        </td>
-                        <td className="px-6 py-4">
-                          <p className="text-xs text-slate-600 dark:text-slate-300 font-bold break-all">
-                            {p?.reference}
-                          </p>
-                          <button
-                            onClick={() =>
-                              copyToClipboard(String(p?.reference || ""))
-                            }
-                            className="mt-2 text-[10px] font-black uppercase tracking-widest text-blue-700 dark:text-blue-400 hover:underline"
-                          >
-                            Copy Ref
-                          </button>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2">
-                            <BusyButton
-                              busy={pendingBusyUid === r.uid}
-                              onClick={() => approvePending(r)}
-                              className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:opacity-90 transition"
-                              busyText="Approving..."
-                            >
-                              Approve
-                            </BusyButton>
-                            <BusyButton
-                              busy={pendingBusyUid === r.uid}
-                              onClick={() => clearPending(r.uid)}
-                              className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-orange-600 text-white hover:opacity-90 transition"
-                              busyText="Clearing..."
-                            >
-                              Clear
-                            </BusyButton>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
           )}
-        </div>
-        )}
 
-        {/* Inbox Modal */}
-        <AnimatePresence>
-          {showInboxModal && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[70] bg-slate-950/75 backdrop-blur-md p-3 md:p-6"
-            >
-              <motion.div
-                initial={{ opacity: 0, y: 20, scale: 0.985 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 12, scale: 0.985 }}
-                transition={{ duration: 0.2 }}
-                className="mx-auto h-[92vh] max-w-7xl rounded-[2rem] border border-white/10 bg-white dark:bg-slate-950 shadow-[0_20px_80px_rgba(0,0,0,0.35)] overflow-hidden"
-              >
-                {/* Top bar */}
-                <div className="relative border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-white via-slate-50 to-blue-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900/70">
-                  <div className="absolute inset-0 pointer-events-none opacity-60">
-                    <div className="absolute -top-10 right-20 h-28 w-28 rounded-full bg-blue-500/10 blur-2xl" />
-                    <div className="absolute -bottom-10 left-24 h-28 w-28 rounded-full bg-teal-500/10 blur-2xl" />
-                  </div>
-
-                  <div className="relative flex flex-col gap-4 px-5 py-5 md:px-7 md:py-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-pink-50 dark:bg-pink-500/10 border border-pink-100 dark:border-pink-500/20 text-pink-600 dark:text-pink-300 text-[10px] font-black uppercase tracking-[0.18em] mb-3">
-                          <Inbox className="w-3.5 h-3.5" />
-                          Contact Inbox
-                        </div>
-
-                        <h3 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
-                          Website Messages
-                        </h3>
-                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                          Review enquiries, reply quickly, and keep support
-                          tidy.
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={fetchInboxMessages}
-                          className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition inline-flex items-center gap-2"
-                        >
-                          <RefreshCw className="w-4 h-4" />
-                          Refresh
-                        </button>
-
-                        <button
-                          onClick={() => setShowInboxModal(false)}
-                          className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 transition"
-                          aria-label="Close Inbox"
-                        >
-                          <X className="w-5 h-5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Tabs */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      {[
-                        { key: "all", label: "All", count: inboxCounts.all },
-                        { key: "new", label: "New", count: inboxCounts.new },
-                        { key: "read", label: "Read", count: inboxCounts.read },
-                        {
-                          key: "resolved",
-                          label: "Resolved",
-                          count: inboxCounts.resolved,
-                        },
-                      ].map((tab) => {
-                        const active = inboxFilter === tab.key;
-
-                        return (
-                          <button
-                            key={tab.key}
-                            onClick={() =>
-                              setInboxFilter(
-                                tab.key as "all" | "new" | "read" | "resolved",
-                              )
-                            }
-                            className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all inline-flex items-center gap-2 border ${
-                              active
-                                ? "bg-slate-900 dark:bg-teal-600 text-white border-slate-900 dark:border-teal-600 shadow-lg"
-                                : "bg-white/80 dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800"
-                            }`}
-                          >
-                            <span>{tab.label}</span>
-                            <span
-                              className={`min-w-[22px] h-[22px] px-1 rounded-full text-[10px] flex items-center justify-center ${
-                                active
-                                  ? "bg-white/15 text-white"
-                                  : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300"
-                              }`}
-                            >
-                              {tab.count}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Body */}
-                <div className="grid h-[calc(92vh-158px)] grid-cols-1 xl:grid-cols-[380px_1fr]">
-                  {/* Left rail */}
-                  <div className="border-r border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 overflow-hidden">
-                    <div className="h-full overflow-auto p-4 space-y-3">
-                      {inboxError ? (
-                        <div className="p-4 rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-200 text-sm font-bold inline-flex items-start gap-3 w-full">
-                          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                          <span>{inboxError}</span>
-                        </div>
-                      ) : inboxLoading ? (
-                        <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 inline-flex items-center gap-3 w-full shadow-sm">
-                          <span className="h-4 w-4 rounded-full border-2 border-slate-300 dark:border-slate-600 border-t-blue-600 dark:border-t-teal-400 animate-spin" />
-                          Loading inbox…
-                        </div>
-                      ) : filteredInboxMessages.length === 0 ? (
-                        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 shadow-sm">
-                          No messages in this filter.
-                        </div>
-                      ) : (
-                        filteredInboxMessages.map((m) => {
-                          const isSelected = selectedInboxId === m.id;
-                          const status = String(
-                            m.status || "new",
-                          ).toLowerCase();
-
-                          return (
-                            <button
-                              key={m.id}
-                              onClick={() => setSelectedInboxId(m.id)}
-                              className={`w-full text-left rounded-3xl border p-4 transition-all shadow-sm ${
-                                isSelected
-                                  ? "border-blue-200 dark:border-teal-500/30 bg-white dark:bg-slate-900 ring-2 ring-blue-500/10 dark:ring-teal-500/10"
-                                  : "border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/70 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md"
-                              }`}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-600 to-teal-500 text-white flex items-center justify-center font-black text-sm shrink-0">
-                                      {(m.name || "?").charAt(0).toUpperCase()}
-                                    </div>
-
-                                    <div className="min-w-0">
-                                      <p className="text-sm font-black text-slate-900 dark:text-white truncate">
-                                        {m.name || "Unknown sender"}
-                                      </p>
-                                      <p className="text-xs text-slate-400 font-medium truncate mt-0.5">
-                                        {m.email || "No email"}
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  <p className="mt-3 text-[12px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
-                                    {m.message || "No message"}
-                                  </p>
-                                </div>
-
-                                <span
-                                  className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shrink-0 ${
-                                    status === "new"
-                                      ? "bg-pink-50 border border-pink-200 text-pink-600 dark:bg-pink-500/10 dark:border-pink-500/20 dark:text-pink-300"
-                                      : status === "resolved"
-                                        ? "bg-teal-50 border border-teal-200 text-teal-600 dark:bg-teal-500/10 dark:border-teal-500/20 dark:text-teal-300"
-                                        : "bg-slate-100 border border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300"
-                                  }`}
-                                >
-                                  {status}
-                                </span>
-                              </div>
-
-                              <div className="mt-4 flex items-center justify-between gap-3">
-                                <span className="text-[10px] font-bold text-slate-400">
-                                  {formatInboxDate(m.createdAt)}
-                                </span>
-
-                                {isSelected ? (
-                                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 dark:text-teal-300">
-                                    Open
-                                  </span>
-                                ) : null}
-                              </div>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Right detail */}
-                  <div className="bg-white dark:bg-slate-950 overflow-hidden">
-                    <div className="h-full overflow-auto p-5 md:p-7">
-                      {!selectedInboxMessage ? (
-                        <div className="h-full flex items-center justify-center">
-                          <div className="max-w-md text-center">
-                            <div className="w-16 h-16 mx-auto rounded-3xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mb-5">
-                              <Mail className="w-7 h-7" />
-                            </div>
-                            <h4 className="text-xl font-black text-slate-900 dark:text-white mb-2">
-                              Select a message
-                            </h4>
-                            <p className="text-slate-500 dark:text-slate-400">
-                              Open a conversation from the left to preview and
-                              manage it.
-                            </p>
-                          </div>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5 mb-6">
-                            <div className="min-w-0">
-                              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300 mb-4">
-                                <MessageSquare className="w-3.5 h-3.5" />
-                                Conversation
-                              </div>
-
-                              <h3 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white break-words">
-                                {selectedInboxMessage.name || "Unknown sender"}
-                              </h3>
-
-                              <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 break-all">
-                                {selectedInboxMessage.email}
-                              </p>
-
-                              <p className="text-[11px] text-slate-400 font-bold mt-3">
-                                {formatInboxDate(
-                                  selectedInboxMessage.createdAt,
-                                )}
-                              </p>
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-2">
-                              <button
-                                onClick={() =>
-                                  copyToClipboard(
-                                    selectedInboxMessage.email || "",
-                                  )
-                                }
-                                className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition inline-flex items-center gap-2"
-                              >
-                                <Copy className="w-4 h-4" />
-                                Copy Email
-                              </button>
-
-                              <button
-                                onClick={() =>
-                                  markInboxStatus(
-                                    selectedInboxMessage.id,
-                                    "read",
-                                  )
-                                }
-                                className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
-                              >
-                                Mark Read
-                              </button>
-
-                              <button
-                                onClick={() =>
-                                  markInboxStatus(
-                                    selectedInboxMessage.id,
-                                    "resolved",
-                                  )
-                                }
-                                className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:bg-teal-500 transition"
-                              >
-                                Resolve
-                              </button>
-
-                              <a
-                                href={`mailto:${selectedInboxMessage.email}`}
-                                onClick={() =>
-                                  markInboxStatus(
-                                    selectedInboxMessage.id,
-                                    "resolved",
-                                  )
-                                }
-                                className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:bg-blue-800 transition inline-flex items-center gap-2"
-                              >
-                                <Mail className="w-4 h-4" />
-                                Reply
-                              </a>
-
-                              <button
-                                onClick={() =>
-                                  deleteInboxMessage(selectedInboxMessage.id)
-                                }
-                                className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:bg-red-500 transition"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                            <div className="rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                Status
-                              </p>
-                              <p
-                                className={`text-sm font-black mt-2 ${
-                                  String(
-                                    selectedInboxMessage.status || "new",
-                                  ).toLowerCase() === "new"
-                                    ? "text-pink-600 dark:text-pink-300"
-                                    : String(
-                                          selectedInboxMessage.status || "",
-                                        ).toLowerCase() === "resolved"
-                                      ? "text-teal-600 dark:text-teal-300"
-                                      : "text-blue-900 dark:text-white"
-                                }`}
-                              >
-                                {selectedInboxMessage.status || "new"}
-                              </p>
-                            </div>
-
-                            <div className="rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                Source
-                              </p>
-                              <p className="text-sm font-black text-slate-900 dark:text-white mt-2">
-                                {selectedInboxMessage.source ||
-                                  "web-contact-form"}
-                              </p>
-                            </div>
-
-                            <div className="rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                Auth UID
-                              </p>
-                              <p className="text-sm font-black text-slate-900 dark:text-white mt-2 break-all">
-                                {selectedInboxMessage.auth?.uid || "Anonymous"}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-gradient-to-br from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 p-6 shadow-sm">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 inline-flex items-center gap-2">
-                              <MessageSquare className="w-4 h-4" />
-                              Message Body
-                            </p>
-                            <p className="text-[15px] text-slate-700 dark:text-slate-300 leading-7 whitespace-pre-wrap break-words">
-                              {selectedInboxMessage.message ||
-                                "No message content."}
-                            </p>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Config Modal */}
-        {showConfig && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
-            <div className="bg-white dark:bg-slate-900 max-w-lg w-full p-8 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 relative">
-              <button
-                onClick={() => setShowConfig(false)}
-                className="absolute top-6 right-6 text-slate-400 hover:text-blue-900 dark:hover:text-slate-200 transition"
-                aria-label="Close"
-              >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    d="M6 18L18 6M6 6l12 12"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-
-              <h3 className="text-xl font-black text-blue-900 dark:text-white mb-4">
-                Sheet Binding Setup
-              </h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-                Connect your registrations directly to a Google Sheet.
-              </p>
-
-              <form onSubmit={handleSaveWebhook} className="space-y-4">
+          {/* Active Cohort (PER PATH) */}
+          {(activeAdminSection === "paths" ||
+            activeAdminSection === "cohorts" ||
+            activeAdminSection === "sessions" ||
+            activeAdminSection === "messages") && (
+            <div className={`mb-8 p-8 ${surfaceCardClass}`}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                 <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                    Google Apps Script URL
-                  </label>
-                  <input
-                    required
-                    type="url"
-                    value={webhookUrl}
-                    onChange={(e) => setWebhookUrl(e.target.value)}
-                    placeholder="https://script.google.com/macros/s/.../exec"
-                    className="w-full px-5 py-3 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl text-sm text-slate-800 dark:text-slate-100"
-                  />
+                  <h2 className={sectionTitleClass}>
+                    Active Cohort (Per Path)
+                  </h2>
+                  <p className={sectionCopyClass}>
+                    New student registrations use the active cohort mapped to
+                    their selected path.
+                  </p>
                 </div>
+
                 <button
-                  type="submit"
-                  className="w-full py-4 bg-blue-900 text-white font-bold rounded-xl shadow-lg hover:opacity-95 transition"
+                  onClick={saveActiveCohort}
+                  disabled={
+                    cohortSaving ||
+                    !activePathId ||
+                    !activeSeasonKey.trim() ||
+                    !activeSeasonLabel.trim()
+                  }
+                  className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition ${
+                    cohortSaving
+                      ? "bg-gray-200 text-gray-500"
+                      : "bg-blue-900 text-white hover:opacity-90"
+                  }`}
                 >
-                  Save Configuration
+                  {cohortSaving ? "Saving..." : "Save Active Cohort"}
                 </button>
-              </form>
-            </div>
-          </div>
-        )}
+              </div>
 
-        {/* Course Catalog */}
-        {activeAdminSection === "courses" && (
-        <div className={`mb-8 p-8 ${surfaceCardClass}`}>
-        <div className="mb-8 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl border border-gray-100 dark:border-slate-800 p-8">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <div>
-              <h2 className={sectionTitleClass}>
-                Course Catalog
-              </h2>
-              <p className={sectionCopyClass}>
-                Add / edit courses shown on the landing page and explore pages.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={fetchCourses}
-                className={subtleActionClass}
-              >
-                Refresh Courses
-              </button>
-
-              <button
-                onClick={openAddCourse}
-                disabled={!paths.length}
-                className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition ${
-                  !paths.length
-                    ? "bg-gray-200 text-gray-500"
-                    : "bg-teal-600 text-white hover:bg-teal-500"
-                }`}
-              >
-                + Add Course
-              </button>
-            </div>
-          </div>
-
-          {!paths.length ? (
-            <div className="p-6 bg-orange-50 dark:bg-orange-500/10 rounded-2xl border border-orange-100 dark:border-orange-500/20 text-orange-800 dark:text-orange-200 mb-6">
-              Create at least one Path first. Courses must belong to a Path.
-            </div>
-          ) : null}
-
-          {coursesLoading ? (
-            <div className="p-6 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
-              Loading courses…
-            </div>
-          ) : courses.length === 0 ? (
-            <div className="p-6 bg-orange-50 dark:bg-orange-500/10 rounded-2xl border border-orange-100 dark:border-orange-500/20 text-orange-800 dark:text-orange-200">
-              No courses found yet. Click <b>Add Course</b> to create the first
-              one.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {courses.map((c) => {
-                const weeks =
-                  (c as any).weeks ?? parseWeeks(c.duration || "4 Weeks");
-                const ppw =
-                  ((c as any).pricePerWeek ??
-                    parsePricePerWeek(c.priceLabel || "₦10k/wk")) ||
-                  10000;
-                const label = c.priceLabel || formatPriceLabel(ppw);
-
-                const pTitle = (c as any).pathId
-                  ? pathsById.get(String((c as any).pathId))?.title
-                  : null;
-
-                return (
-                  <div
-                    key={c.id}
-                    className="p-5 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-black text-blue-900 dark:text-white">
-                          {c.title}
-                        </p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
-                          {c.description}
-                        </p>
-                        <p className="text-[11px] text-slate-400 mt-2 font-bold">
-                          {weeks} Weeks • {c.sessions} • {c.level} • {label}
-                        </p>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-bold">
-                          Path:{" "}
-                          <span className="text-slate-600 dark:text-slate-200">
-                            {pTitle || "—"}
-                          </span>
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => toggleCourseLanding(c)}
-                          className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
-                            (c as any).showOnLanding !== false
-                              ? "bg-teal-50 border-teal-200 text-teal-600 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-400"
-                              : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
-                          }`}
-                          title="Toggle landing page visibility"
-                        >
-                          {(c as any).showOnLanding !== false
-                            ? "Landing: ON"
-                            : "Landing: OFF"}
-                        </button>
-
-                        <button
-                          onClick={() => toggleCourseExplore(c)}
-                          className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
-                            (c as any).showInExplore !== false
-                              ? "bg-blue-50 border-blue-200 text-blue-700 dark:bg-slate-800/40 dark:border-slate-700 dark:text-blue-300"
-                              : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
-                          }`}
-                          title="Toggle Explore All Paths visibility"
-                        >
-                          {(c as any).showInExplore !== false
-                            ? "Explore: ON"
-                            : "Explore: OFF"}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-end gap-2 mt-4">
-                      <button
-                        onClick={() => openEditCourse(c)}
-                        className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => deleteCourse(c)}
-                        className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-        )}
-
-        {/* Course Modal */}
-        {courseModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
-            <div className="bg-white dark:bg-slate-900 max-w-2xl w-full p-8 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 relative">
-              <button
-                onClick={closeCourseModal}
-                className="absolute top-6 right-6 text-slate-400 hover:text-blue-900 dark:hover:text-slate-200 transition"
-                aria-label="Close"
-              >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    d="M6 18L18 6M6 6l12 12"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-
-              <h3 className="text-xl font-black text-blue-900 dark:text-white mb-2">
-                {editingCourse ? "Edit Course" : "Add New Course"}
-              </h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-                This updates what students see across your site.
-              </p>
-
-              <form onSubmit={saveCourse} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                    Image URL (optional)
-                  </label>
-                  <input
-                    value={courseForm.imageUrl}
-                    onChange={(e) =>
-                      setCourseForm((p) => ({ ...p, imageUrl: e.target.value }))
-                    }
-                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                    placeholder="https://... (jpeg/png/webp)"
-                  />
-
-                  {/* Optional preview (safe) */}
-                  {courseForm.imageUrl?.trim() ? (
-                    <div className="mt-3 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700">
-                      <img
-                        src={courseForm.imageUrl.trim()}
-                        alt="Course preview"
-                        className="w-full h-40 object-cover"
-                        onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).style.display =
-                            "none";
-                        }}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-                {courseError && (
-                  <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
-                    {courseError}
-                  </div>
-                )}
-
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
                     Path
                   </label>
+
                   <select
-                    value={courseForm.pathId}
-                    onChange={(e) =>
-                      setCourseForm((p) => ({ ...p, pathId: e.target.value }))
-                    }
+                    value={activePathId}
+                    onChange={(e) => setActivePathId(e.target.value)}
                     className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                    required
                   >
-                    <option value="" disabled>
-                      Select a path…
-                    </option>
                     {paths.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.title}
                       </option>
                     ))}
                   </select>
+
+                  {!paths.length ? (
+                    <p className="text-[11px] text-orange-600 mt-2 font-bold">
+                      Create paths first (above), then set active cohort.
+                    </p>
+                  ) : null}
                 </div>
 
                 <div>
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                    Title
+                    Season Key
                   </label>
                   <input
-                    value={courseForm.title}
-                    onChange={(e) =>
-                      setCourseForm((p) => ({ ...p, title: e.target.value }))
-                    }
+                    value={activeSeasonKey}
+                    onChange={(e) => setActiveSeasonKey(e.target.value)}
                     className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                    placeholder="e.g. UI/UX for Developers"
-                    required
+                    placeholder="e.g. 2026-03"
                   />
+                  <p className="text-[11px] text-slate-400 mt-2 font-bold">
+                    Used to build cohortKey:{" "}
+                    <span className="text-slate-500">
+                      {computedCohortKey || "—"}
+                    </span>
+                  </p>
                 </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                    Season Label
+                  </label>
+                  <input
+                    value={activeSeasonLabel}
+                    onChange={(e) => setActiveSeasonLabel(e.target.value)}
+                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                    placeholder="e.g. March 2026 Cohort"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-2 font-bold">
+                    cohortId:{" "}
+                    <span className="text-slate-500">
+                      {computedCohortId || "—"}
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6 p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/40 border border-gray-100 dark:border-slate-800">
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  ✅ This sets the active cohort identity for this path:
+                  <span className="font-black">
+                    {" "}
+                    {computedCohortKey || "—"}
+                  </span>
+                  .
+                  <br />
+                  Sessions are stored under a cohort document (Doc ID) in{" "}
+                  <span className="font-black">/cohorts</span> →{" "}
+                  <span className="font-black">
+                    {selectedCohortId || "Select a cohort above"}
+                  </span>{" "}
+                  and its <span className="font-black">/sessions</span>{" "}
+                  subcollection.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Cohorts + Sessions Manager */}
+          {(activeAdminSection === "cohorts" ||
+            activeAdminSection === "sessions" ||
+            activeAdminSection === "messages") && (
+            <div className="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Cohorts */}
+              <div className={`p-8 ${surfaceCardClass}`}>
+                <div className="flex items-center justify-between gap-4 mb-6">
+                  <div>
+                    <h2 className={sectionTitleClass}>Cohorts</h2>
+                    <p className={sectionCopyClass}>
+                      Create cohorts and manage session schedules.
+                    </p>
+                  </div>
+
+                  <button onClick={fetchCohorts} className={subtleActionClass}>
+                    Refresh
+                  </button>
+                </div>
+
+                <button
+                  onClick={addCohort}
+                  disabled={!activePathId}
+                  className={`w-full px-4 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition mb-6 ${
+                    !activePathId
+                      ? "bg-gray-200 text-gray-500"
+                      : "bg-teal-600 text-white hover:bg-teal-500"
+                  }`}
+                >
+                  + Add Cohort From Active Path + Season
+                </button>
+
+                {cohortsLoading ? (
+                  <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
+                    Loading cohorts…
+                  </div>
+                ) : cohorts.length === 0 ? (
+                  <div className="p-5 bg-orange-50 dark:bg-orange-500/10 rounded-2xl border border-orange-100 dark:border-orange-500/20 text-orange-800 dark:text-orange-200">
+                    No cohorts yet. Set active cohort first (above), then add
+                    cohort.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {cohorts.map((c) => {
+                      const isSelected = selectedCohortId === c.id;
+                      const pathTitle = c.pathId
+                        ? pathsById.get(String(c.pathId))?.title
+                        : c.path || "";
+
+                      return (
+                        <button
+                          key={c.id}
+                          onClick={() => setSelectedCohortId(c.id)} // ✅ doc id
+                          className={`w-full text-left p-4 rounded-2xl border transition ${
+                            isSelected
+                              ? "border-blue-900 dark:border-teal-600 bg-blue-50 dark:bg-teal-900/20"
+                              : "border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <p className="text-sm font-black text-blue-900 dark:text-white">
+                                {c.label}
+                              </p>
+
+                              {/* ✅ show doc id (real storage location) */}
+                              <p className="text-[11px] text-slate-400 font-bold mt-1 break-all">
+                                Doc ID: {c.id}
+                              </p>
+
+                              {/* ✅ show cohortKey if present (identity metadata) */}
+                              {c.cohortKey ? (
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold mt-1 break-all">
+                                  cohortKey: {c.cohortKey}
+                                  {c.cohortKey === c.id ? (
+                                    <span className="ml-2 text-teal-600 font-black">
+                                      • matches Doc ID
+                                    </span>
+                                  ) : (
+                                    <span className="ml-2 text-orange-600 font-black">
+                                      • differs from Doc ID
+                                    </span>
+                                  )}
+                                </p>
+                              ) : null}
+
+                              {/* ✅ show path identity */}
+                              {c.pathId || c.path ? (
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold mt-1">
+                                  Path:{" "}
+                                  <span className="text-slate-600 dark:text-slate-200">
+                                    {pathTitle || "—"}
+                                  </span>
+                                  {c.pathId ? (
+                                    <span className="ml-2 text-slate-400 break-all">
+                                      (pathId: {c.pathId})
+                                    </span>
+                                  ) : null}
+                                </p>
+                              ) : null}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteCohort(c);
+                              }}
+                              className="px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Sessions */}
+              <div className={`p-8 ${surfaceCardClass}`}>
+                <div className="flex items-center justify-between gap-4 mb-6">
+                  <div>
+                    <h2 className={sectionTitleClass}>Live Sessions</h2>
+                    {sessionsError ? (
+                      <div className="p-4 mb-4 rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-200 text-sm font-bold">
+                        {sessionsError}
+                      </div>
+                    ) : null}
+                    <p className={sectionCopyClass}>
+                      {selectedCohortId
+                        ? (() => {
+                            const selected = cohorts.find(
+                              (x) => x.id === selectedCohortId,
+                            );
+                            return (
+                              <>
+                                Cohort Doc ID:{" "}
+                                <span className="font-black">
+                                  {selectedCohortId}
+                                </span>
+                                {selected?.cohortKey ? (
+                                  <>
+                                    {" "}
+                                    • cohortKey:{" "}
+                                    <span className="font-black">
+                                      {selected.cohortKey}
+                                    </span>
+                                  </>
+                                ) : null}
+                              </>
+                            );
+                          })()
+                        : "Select a cohort to manage sessions."}
+                    </p>
+                  </div>
+
+                  <BusyButton
+                    busy={false}
+                    disabled={!selectedCohortId || sessionsLoading}
+                    onClick={openAddSession}
+                    className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition ${
+                      !selectedCohortId
+                        ? "bg-gray-200 text-gray-500"
+                        : "bg-blue-900 text-white hover:opacity-90"
+                    }`}
+                  >
+                    + Add Session
+                  </BusyButton>
+                </div>
+
+                {sessionsLoading ? (
+                  <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
+                    Loading sessions…
+                  </div>
+                ) : sessions.length === 0 ? (
+                  <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
+                    No sessions yet. Add the first session.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {sessions.map((s) => (
+                      <div
+                        key={s.id}
+                        className="p-4 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-black text-blue-900 dark:text-white">
+                              {s.title}
+                            </p>
+                            <p className="text-[11px] text-slate-400 font-bold mt-1">
+                              {new Date(
+                                sessionTimeToMs((s as any).startsAt),
+                              ).toLocaleString()}{" "}
+                              • {Number((s as any).durationMins || 60)} mins •
+                              Week {(s as any).week || 1}
+                            </p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                              Path: {(s as any).path || "—"}{" "}
+                              {(s as any).isPublished !== false ? (
+                                <span className="ml-2 text-teal-600 font-black">
+                                  • Published
+                                </span>
+                              ) : (
+                                <span className="ml-2 text-orange-600 font-black">
+                                  • Hidden
+                                </span>
+                              )}
+                            </p>
+                            {s.joinUrl ? (
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 break-all">
+                                Join: {s.joinUrl}
+                              </p>
+                            ) : null}
+                            {(s as any).recordingUrl ? (
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 break-all">
+                                Recording: {(s as any).recordingUrl}
+                              </p>
+                            ) : null}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => openEditSession(s)}
+                              className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
+                            >
+                              Edit
+                            </button>
+                            <BusyButton
+                              busy={sessionBusyId === s.id}
+                              onClick={() => deleteSession(s)}
+                              className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
+                              busyText="Deleting..."
+                            >
+                              Delete
+                            </BusyButton>
+                          </div>
+                        </div>
+
+                        {s.notes ? (
+                          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                            {s.notes}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Cohort Messaging */}
+          {activeAdminSection === "messages" && (
+            <div className={`mb-8 p-8 ${surfaceCardClass}`}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                <div>
+                  <h2 className={sectionTitleClass}>Cohort Messaging</h2>
+                  <p className={sectionCopyClass}>
+                    Send announcements directly to students in the selected
+                    active cohort.
+                  </p>
+                </div>
+                <button
+                  onClick={() => fetchCohortMessages(selectedCohortId)}
+                  disabled={!selectedCohortId}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition ${
+                    !selectedCohortId
+                      ? "bg-gray-200 text-gray-500"
+                      : "bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:opacity-90"
+                  }`}
+                >
+                  Refresh Messages
+                </button>
+              </div>
+
+              <form
+                onSubmit={
+                  editingMessageId ? updateMessage : sendMessageToCohort
+                }
+                className="space-y-4"
+              >
+                {messageError ? (
+                  <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
+                    {messageError}
+                  </div>
+                ) : null}
+
+                {editingMessageId && (
+                  <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl text-sm text-blue-800 dark:text-blue-300 font-semibold border border-blue-100 dark:border-blue-800 flex items-center justify-between">
+                    <span>✏️ Editing message</span>
+                    <button
+                      type="button"
+                      onClick={cancelEditMessage}
+                      className="text-xs font-black text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Duration
+                      Target Cohort
                     </label>
-                    <input
-                      onBlur={() => {
-                        const w = parseWeeks(courseForm.duration);
-                        setCourseForm((p) => ({
-                          ...p,
-                          weeks: w,
-                          duration: `${w} Weeks`,
-                          syllabus: normalizeSyllabus(p.syllabus, w),
-                        }));
-                      }}
-                      value={courseForm.duration}
-                      onChange={(e) =>
-                        setCourseForm((p) => ({
-                          ...p,
-                          duration: e.target.value,
-                        }))
-                      }
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                      placeholder="e.g. 6 Weeks"
-                      required
-                    />
-                    <p className="text-[11px] text-slate-400 mt-2 font-bold">
-                      Weeks (truth): {courseForm.weeks}
+                    <select
+                      value={selectedCohortId}
+                      onChange={(e) => setSelectedCohortId(e.target.value)}
+                      disabled={editingMessageId !== null}
+                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none disabled:opacity-50"
+                    >
+                      <option value="" disabled>
+                        Select a cohort…
+                      </option>
+                      {cohorts.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-blue-50 dark:bg-teal-900/20 border border-blue-100 dark:border-teal-800/30">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-700 dark:text-teal-300">
+                      Delivery Note
+                    </p>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-2 leading-relaxed">
+                      Messages are written to{" "}
+                      <span className="font-black">
+                        cohorts/{selectedCohortId || "{cohortId}"}/messages
+                      </span>{" "}
+                      and can be consumed by the learner app.
                     </p>
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Sessions
-                    </label>
-                    <input
-                      value={courseForm.sessions}
-                      onChange={(e) =>
-                        setCourseForm((p) => ({
-                          ...p,
-                          sessions: e.target.value,
-                        }))
-                      }
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                      placeholder="e.g. 2× Weekly"
-                      required
-                    />
-                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                    Description
-                  </label>
-                  <textarea
-                    value={courseForm.description}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input
+                    value={messageForm.title}
                     onChange={(e) =>
-                      setCourseForm((p) => ({
-                        ...p,
-                        description: e.target.value,
-                      }))
+                      setMessageForm((p) => ({ ...p, title: e.target.value }))
                     }
-                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none min-h-[120px]"
-                    placeholder="Short course overview…"
+                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                    placeholder="Message title"
                     required
                   />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4 bg-gray-50 dark:bg-slate-800/40 rounded-2xl border border-gray-100 dark:border-slate-800">
-                  <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={courseForm.isActive}
-                      onChange={(e) =>
-                        setCourseForm((p) => ({
-                          ...p,
-                          isActive: e.target.checked,
-                        }))
-                      }
-                      className="h-4 w-4"
-                    />
-                    Active
-                  </label>
-
-                  <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={courseForm.showOnLanding}
-                      onChange={(e) =>
-                        setCourseForm((p) => ({
-                          ...p,
-                          showOnLanding: e.target.checked,
-                        }))
-                      }
-                      className="h-4 w-4"
-                    />
-                    Show on Landing
-                  </label>
-
-                  <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={courseForm.showInExplore}
-                      onChange={(e) =>
-                        setCourseForm((p) => ({
-                          ...p,
-                          showInExplore: e.target.checked,
-                        }))
-                      }
-                      className="h-4 w-4"
-                    />
-                    Show in Explore
-                  </label>
-                </div>
-
-                <BusyButton
-                  type="submit"
-                  busy={courseBusyId === (editingCourse?.id || "create")}
-                  className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all"
-                  busyText={editingCourse ? "Saving..." : "Creating..."}
-                >
-                  {editingCourse ? "Save Changes" : "Create Course"}
-                </BusyButton>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Session Modal */}
-        {sessionModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
-            <div className="bg-white dark:bg-slate-900 max-w-2xl w-full p-8 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 relative">
-              <button
-                onClick={closeSessionModal}
-                className="absolute top-6 right-6 text-slate-400 hover:text-blue-900 dark:hover:text-slate-200 transition"
-                aria-label="Close"
-              >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    d="M6 18L18 6M6 6l12 12"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+                  <input
+                    value={messageForm.ctaUrl}
+                    onChange={(e) =>
+                      setMessageForm((p) => ({ ...p, ctaUrl: e.target.value }))
+                    }
+                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                    placeholder="Optional action link (https://...)"
                   />
-                </svg>
-              </button>
-
-              <h3 className="text-xl font-black text-blue-900 dark:text-white mb-2">
-                {editingSession ? "Edit Session" : "Add Session"}
-              </h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-                Creates a session under this cohort’s schedule.
-              </p>
-
-              <form onSubmit={saveSession} className="space-y-4">
-                {sessionError && (
-                  <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
-                    {sessionError}
-                  </div>
-                )}
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Week
-                    </label>
+                  <textarea
+                    value={messageForm.body}
+                    onChange={(e) =>
+                      setMessageForm((p) => ({ ...p, body: e.target.value }))
+                    }
+                    className="md:col-span-2 w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none min-h-[120px]"
+                    placeholder="Type announcement message for this cohort..."
+                    required
+                  />
+                  <div className="space-y-3">
                     <input
-                      type="number"
-                      min={1}
-                      value={sessionForm.week}
+                      value={messageForm.ctaLabel}
                       onChange={(e) =>
-                        setSessionForm((p) => ({
+                        setMessageForm((p) => ({
                           ...p,
-                          week: Math.max(
-                            1,
-                            parseInt(e.target.value || "1", 10),
-                          ),
+                          ctaLabel: e.target.value,
                         }))
                       }
                       className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                      placeholder="Optional CTA label"
                     />
+                    <BusyButton
+                      type="submit"
+                      busy={
+                        editingMessageId
+                          ? messageBusyId === editingMessageId
+                          : busy.sendCohortMessage
+                      }
+                      disabled={!selectedCohortId && !editingMessageId}
+                      className={`w-full px-4 py-4 rounded-2xl text-xs font-black uppercase tracking-widest text-white hover:opacity-90 transition ${
+                        editingMessageId ? "bg-orange-600" : "bg-blue-900"
+                      }`}
+                      busyText={editingMessageId ? "Updating..." : "Sending..."}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        {editingMessageId ? (
+                          <>
+                            <Edit className="w-4 h-4" />
+                            Update Message
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-4 h-4" />
+                            Send Message
+                          </>
+                        )}
+                      </span>
+                    </BusyButton>
+                  </div>
+                </div>
+              </form>
+
+              <div className="mt-6">
+                <h3 className="text-sm font-black uppercase tracking-widest text-slate-400 mb-3">
+                  Recent Messages
+                </h3>
+                {messagesLoading ? (
+                  <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
+                    Loading messages…
+                  </div>
+                ) : cohortMessages.length === 0 ? (
+                  <div className="p-5 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
+                    No sent messages for this cohort yet.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {cohortMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className={`p-4 rounded-2xl border ${
+                          editingMessageId === msg.id
+                            ? "border-orange-300 bg-orange-50 dark:bg-orange-900/10 dark:border-orange-700"
+                            : "border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <p className="text-sm font-black text-blue-900 dark:text-white">
+                              {msg.title}
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                              {formatInboxDate((msg as any).sentAt)} •{" "}
+                              {msg.cohortLabel}
+                            </p>
+                            <p className="text-sm text-slate-600 dark:text-slate-300 mt-3 whitespace-pre-wrap">
+                              {msg.body}
+                            </p>
+                            {msg.ctaLabel && (
+                              <p className="text-xs mt-2 text-blue-600 dark:text-blue-400 font-bold">
+                                CTA: {msg.ctaLabel}
+                                {msg.ctaUrl && ` → ${msg.ctaUrl}`}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <button
+                              onClick={() => startEditMessage(msg)}
+                              disabled={messageBusyId !== null}
+                              className="p-2 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition disabled:opacity-50"
+                              title="Edit message"
+                              aria-label="Edit message"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => deleteMessage(msg.id)}
+                              disabled={messageBusyId !== null}
+                              className="p-2 text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition disabled:opacity-50"
+                              title="Delete message"
+                              aria-label="Delete message"
+                            >
+                              {messageBusyId === msg.id ? (
+                                <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <Trash2 className="w-4 h-4" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Pending Payments */}
+          {activeAdminSection === "payments" && (
+            <div className={`mb-8 p-8 ${surfaceCardClass}`}>
+              <div className="flex items-center justify-between gap-4 mb-6">
+                <div>
+                  <h2 className={sectionTitleClass}>Pending Payments</h2>
+                  <p className={sectionCopyClass}>
+                    Approve or clear pending Paystack references.
+                  </p>
+                </div>
+
+                <button
+                  onClick={fetchRegistrations}
+                  className={subtleActionClass}
+                >
+                  Refresh
+                </button>
+              </div>
+
+              {pendingPayments.length === 0 ? (
+                <div className="p-6 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
+                  No pending payments right now.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-gray-50 dark:bg-slate-800/50 border-b border-gray-100 dark:border-slate-800">
+                      <tr>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Student
+                        </th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Kind
+                        </th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Weeks
+                        </th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Amount
+                        </th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Reference
+                        </th>
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-gray-50 dark:divide-slate-800">
+                      {pendingPayments.map((r) => {
+                        const p = (r as any).pendingPayment;
+                        return (
+                          <tr
+                            key={r.uid}
+                            className="hover:bg-gray-50/50 dark:hover:bg-slate-800/30 transition-colors"
+                          >
+                            <td className="px-6 py-4">
+                              <p className="text-sm font-black text-blue-900 dark:text-white">
+                                {r.fullName}
+                              </p>
+                              <p className="text-xs text-slate-400 font-medium">
+                                {r.email}
+                              </p>
+                            </td>
+                            <td className="px-6 py-4 text-xs font-bold text-slate-600 dark:text-slate-300 uppercase">
+                              {p?.kind}
+                            </td>
+                            <td className="px-6 py-4 text-xs font-bold text-slate-600 dark:text-slate-300">
+                              {p?.weeks}
+                            </td>
+                            <td className="px-6 py-4 text-sm font-black text-blue-900 dark:text-teal-500">
+                              ₦{Number(p?.amount || 0).toLocaleString()}
+                            </td>
+                            <td className="px-6 py-4">
+                              <p className="text-xs text-slate-600 dark:text-slate-300 font-bold break-all">
+                                {p?.reference}
+                              </p>
+                              <button
+                                onClick={() =>
+                                  copyToClipboard(String(p?.reference || ""))
+                                }
+                                className="mt-2 text-[10px] font-black uppercase tracking-widest text-blue-700 dark:text-blue-400 hover:underline"
+                              >
+                                Copy Ref
+                              </button>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2">
+                                <BusyButton
+                                  busy={pendingBusyUid === r.uid}
+                                  onClick={() => approvePending(r)}
+                                  className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:opacity-90 transition"
+                                  busyText="Approving..."
+                                >
+                                  Approve
+                                </BusyButton>
+                                <BusyButton
+                                  busy={pendingBusyUid === r.uid}
+                                  onClick={() => clearPending(r.uid)}
+                                  className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-orange-600 text-white hover:opacity-90 transition"
+                                  busyText="Clearing..."
+                                >
+                                  Clear
+                                </BusyButton>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Inbox Modal */}
+          <AnimatePresence>
+            {showInboxModal && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[70] bg-slate-950/75 backdrop-blur-md p-3 md:p-6"
+              >
+                <motion.div
+                  initial={{ opacity: 0, y: 20, scale: 0.985 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 12, scale: 0.985 }}
+                  transition={{ duration: 0.2 }}
+                  className="mx-auto h-[92vh] max-w-7xl rounded-[2rem] border border-white/10 bg-white dark:bg-slate-950 shadow-[0_20px_80px_rgba(0,0,0,0.35)] overflow-hidden"
+                >
+                  {/* Top bar */}
+                  <div className="relative border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-white via-slate-50 to-blue-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900/70">
+                    <div className="absolute inset-0 pointer-events-none opacity-60">
+                      <div className="absolute -top-10 right-20 h-28 w-28 rounded-full bg-blue-500/10 blur-2xl" />
+                      <div className="absolute -bottom-10 left-24 h-28 w-28 rounded-full bg-teal-500/10 blur-2xl" />
+                    </div>
+
+                    <div className="relative flex flex-col gap-4 px-5 py-5 md:px-7 md:py-6">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-pink-50 dark:bg-pink-500/10 border border-pink-100 dark:border-pink-500/20 text-pink-600 dark:text-pink-300 text-[10px] font-black uppercase tracking-[0.18em] mb-3">
+                            <Inbox className="w-3.5 h-3.5" />
+                            Support Inbox
+                          </div>
+
+                          <h3 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
+                            Web + Mobile Conversations
+                          </h3>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                            Review enquiries, continue mobile app chats, and
+                            reply without leaving the dashboard.
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={fetchInboxMessages}
+                            className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition inline-flex items-center gap-2"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                            Refresh
+                          </button>
+
+                          <button
+                            onClick={() => setShowInboxModal(false)}
+                            className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+                            aria-label="Close Inbox"
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Tabs */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {[
+                          { key: "all", label: "All", count: inboxCounts.all },
+                          { key: "new", label: "New", count: inboxCounts.new },
+                          {
+                            key: "read",
+                            label: "Read",
+                            count: inboxCounts.read,
+                          },
+                          {
+                            key: "resolved",
+                            label: "Resolved",
+                            count: inboxCounts.resolved,
+                          },
+                        ].map((tab) => {
+                          const active = inboxFilter === tab.key;
+
+                          return (
+                            <button
+                              key={tab.key}
+                              onClick={() =>
+                                setInboxFilter(
+                                  tab.key as
+                                    | "all"
+                                    | "new"
+                                    | "read"
+                                    | "resolved",
+                                )
+                              }
+                              className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all inline-flex items-center gap-2 border ${
+                                active
+                                  ? "bg-slate-900 dark:bg-teal-600 text-white border-slate-900 dark:border-teal-600 shadow-lg"
+                                  : "bg-white/80 dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800"
+                              }`}
+                            >
+                              <span>{tab.label}</span>
+                              <span
+                                className={`min-w-[22px] h-[22px] px-1 rounded-full text-[10px] flex items-center justify-center ${
+                                  active
+                                    ? "bg-white/15 text-white"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300"
+                                }`}
+                              >
+                                {tab.count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="md:col-span-2">
+                  {/* Body */}
+                  <div className="grid h-[calc(92vh-158px)] grid-cols-1 xl:grid-cols-[380px_1fr]">
+                    {/* Left rail */}
+                    <div className="border-r border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 overflow-hidden">
+                      <div className="h-full overflow-auto p-4 space-y-3">
+                        {inboxError ? (
+                          <div className="p-4 rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-200 text-sm font-bold inline-flex items-start gap-3 w-full">
+                            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                            <span>{inboxError}</span>
+                          </div>
+                        ) : inboxLoading ? (
+                          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 inline-flex items-center gap-3 w-full shadow-sm">
+                            <span className="h-4 w-4 rounded-full border-2 border-slate-300 dark:border-slate-600 border-t-blue-600 dark:border-t-teal-400 animate-spin" />
+                            Loading inbox…
+                          </div>
+                        ) : filteredInboxMessages.length === 0 ? (
+                          <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 shadow-sm">
+                            No messages in this filter.
+                          </div>
+                        ) : (
+                          filteredInboxMessages.map((m) => {
+                            const isSelected = selectedInboxId === m.id;
+                            const status = String(
+                              m.status || "new",
+                            ).toLowerCase();
+
+                            return (
+                              <button
+                                key={m.id}
+                                onClick={() => setSelectedInboxId(m.id)}
+                                className={`w-full text-left rounded-3xl border p-4 transition-all shadow-sm ${
+                                  isSelected
+                                    ? "border-blue-200 dark:border-teal-500/30 bg-white dark:bg-slate-900 ring-2 ring-blue-500/10 dark:ring-teal-500/10"
+                                    : "border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/70 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md"
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-600 to-teal-500 text-white flex items-center justify-center font-black text-sm shrink-0">
+                                        {(getInboxDisplayName(m) || "?")
+                                          .charAt(0)
+                                          .toUpperCase()}
+                                      </div>
+
+                                      <div className="min-w-0">
+                                        <p className="text-sm font-black text-slate-900 dark:text-white truncate">
+                                          {getInboxDisplayName(m)}
+                                        </p>
+                                        <p className="text-xs text-slate-400 font-medium truncate mt-0.5">
+                                          {getInboxEmail(m) || "No email"}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    <p className="mt-3 text-[12px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                                      {getInboxPreview(m)}
+                                    </p>
+                                  </div>
+
+                                  <span
+                                    className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shrink-0 ${
+                                      status === "new"
+                                        ? "bg-pink-50 border border-pink-200 text-pink-600 dark:bg-pink-500/10 dark:border-pink-500/20 dark:text-pink-300"
+                                        : status === "resolved"
+                                          ? "bg-teal-50 border border-teal-200 text-teal-600 dark:bg-teal-500/10 dark:border-teal-500/20 dark:text-teal-300"
+                                          : "bg-slate-100 border border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300"
+                                    }`}
+                                  >
+                                    {status}
+                                  </span>
+                                </div>
+
+                                <div className="mt-4 flex items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="text-[10px] font-bold text-slate-400">
+                                      {formatInboxDate(
+                                        m.updatedAt || m.createdAt,
+                                      )}
+                                    </p>
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-300 dark:text-slate-600 mt-1">
+                                      {getInboxSourceLabel(m)}
+                                    </p>
+                                  </div>
+
+                                  {isSelected ? (
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 dark:text-teal-300">
+                                      Open
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Right detail */}
+                    <div className="bg-white dark:bg-slate-950 overflow-hidden">
+                      <div className="h-full overflow-auto p-5 md:p-7">
+                        {!selectedInboxMessage ? (
+                          <div className="h-full flex items-center justify-center">
+                            <div className="max-w-md text-center">
+                              <div className="w-16 h-16 mx-auto rounded-3xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mb-5">
+                                <Mail className="w-7 h-7" />
+                              </div>
+                              <h4 className="text-xl font-black text-slate-900 dark:text-white mb-2">
+                                Select a message
+                              </h4>
+                              <p className="text-slate-500 dark:text-slate-400">
+                                Open a conversation from the left to preview and
+                                manage it.
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5 mb-6">
+                              <div className="min-w-0">
+                                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300 mb-4">
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                  Conversation
+                                </div>
+
+                                <h3 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white break-words">
+                                  {getInboxDisplayName(selectedInboxMessage)}
+                                </h3>
+
+                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 break-all">
+                                  {getInboxEmail(selectedInboxMessage) ||
+                                    "No email on file"}
+                                </p>
+
+                                <p className="text-[11px] text-slate-400 font-bold mt-3">
+                                  {formatInboxDate(
+                                    selectedInboxMessage.createdAt,
+                                  )}
+                                </p>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  onClick={() =>
+                                    copyToClipboard(
+                                      getInboxEmail(selectedInboxMessage) || "",
+                                    )
+                                  }
+                                  className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition inline-flex items-center gap-2"
+                                >
+                                  <Copy className="w-4 h-4" />
+                                  Copy Email
+                                </button>
+
+                                <button
+                                  onClick={() =>
+                                    markInboxStatus(
+                                      selectedInboxMessage.id,
+                                      "read",
+                                    )
+                                  }
+                                  className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+                                >
+                                  Mark Read
+                                </button>
+
+                                <button
+                                  onClick={() =>
+                                    markInboxStatus(
+                                      selectedInboxMessage.id,
+                                      "resolved",
+                                    )
+                                  }
+                                  className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:bg-teal-500 transition"
+                                >
+                                  Resolve
+                                </button>
+
+                                <a
+                                  href={`mailto:${getInboxEmail(selectedInboxMessage)}`}
+                                  onClick={() =>
+                                    markInboxStatus(
+                                      selectedInboxMessage.id,
+                                      "resolved",
+                                    )
+                                  }
+                                  className={`px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition inline-flex items-center gap-2 ${
+                                    getInboxEmail(selectedInboxMessage)
+                                      ? "bg-blue-900 text-white hover:bg-blue-800"
+                                      : "bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed pointer-events-none"
+                                  }`}
+                                >
+                                  <Mail className="w-4 h-4" />
+                                  Email Reply
+                                </a>
+
+                                <button
+                                  onClick={() =>
+                                    deleteInboxMessage(selectedInboxMessage.id)
+                                  }
+                                  className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:bg-red-500 transition"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                              <div className="rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                  Status
+                                </p>
+                                <p
+                                  className={`text-sm font-black mt-2 ${
+                                    String(
+                                      selectedInboxMessage.status || "new",
+                                    ).toLowerCase() === "new"
+                                      ? "text-pink-600 dark:text-pink-300"
+                                      : String(
+                                            selectedInboxMessage.status || "",
+                                          ).toLowerCase() === "resolved"
+                                        ? "text-teal-600 dark:text-teal-300"
+                                        : "text-blue-900 dark:text-white"
+                                  }`}
+                                >
+                                  {selectedInboxMessage.status || "new"}
+                                </p>
+                              </div>
+
+                              <div className="rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                  Source
+                                </p>
+                                <p className="text-sm font-black text-slate-900 dark:text-white mt-2">
+                                  {getInboxSourceLabel(selectedInboxMessage)}
+                                </p>
+                              </div>
+
+                              <div className="rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                  Auth UID
+                                </p>
+                                <p className="text-sm font-black text-slate-900 dark:text-white mt-2 break-all">
+                                  {selectedInboxMessage.auth?.uid ||
+                                    "Anonymous"}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-gradient-to-br from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 p-6 shadow-sm">
+                              <div className="flex items-center justify-between gap-3 mb-5">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 inline-flex items-center gap-2">
+                                  <MessageSquare className="w-4 h-4" />
+                                  Conversation Thread
+                                </p>
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                  {inboxThread.length} message
+                                  {inboxThread.length === 1 ? "" : "s"}
+                                </span>
+                              </div>
+
+                              {inboxThreadLoading ? (
+                                <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/50 px-4 py-5 text-sm text-slate-500 dark:text-slate-300 inline-flex items-center gap-3 w-full">
+                                  <span className="h-4 w-4 rounded-full border-2 border-slate-300 dark:border-slate-600 border-t-blue-600 dark:border-t-teal-400 animate-spin" />
+                                  Loading conversation…
+                                </div>
+                              ) : (
+                                <div className="space-y-3">
+                                  {inboxThread.map((entry) => {
+                                    const isAdmin = entry.senderType === "admin";
+                                    return (
+                                      <div
+                                        key={entry.id}
+                                        className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}
+                                      >
+                                        <div
+                                          className={`max-w-[85%] rounded-[1.5rem] px-4 py-3 border shadow-sm ${
+                                            isAdmin
+                                              ? "bg-blue-900 text-white border-blue-800"
+                                              : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800"
+                                          }`}
+                                        >
+                                          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest opacity-70 mb-2">
+                                            <span>
+                                              {entry.senderName ||
+                                                (isAdmin
+                                                  ? "Admin Support"
+                                                  : "Learner")}
+                                            </span>
+                                            <span>•</span>
+                                            <span>
+                                              {formatInboxDate(entry.createdAt)}
+                                            </span>
+                                          </div>
+                                          <p className="text-[15px] leading-7 whitespace-pre-wrap break-words">
+                                            {entry.body}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="mt-6 rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-6 shadow-sm">
+                              <div className="flex items-center justify-between gap-3 mb-4">
+                                <div>
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    Admin Reply
+                                  </p>
+                                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                                    Sends a reply into the conversation thread
+                                    so the mobile app can pick it up.
+                                  </p>
+                                </div>
+                              </div>
+
+                              {replyError ? (
+                                <div className="mb-4 rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm font-bold text-red-700 dark:text-red-200">
+                                  {replyError}
+                                </div>
+                              ) : null}
+
+                              <textarea
+                                value={replyDraft}
+                                onChange={(e) => setReplyDraft(e.target.value)}
+                                rows={5}
+                                placeholder="Type your reply to the learner..."
+                                className="w-full rounded-3xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/20 dark:focus:ring-teal-500/20"
+                              />
+
+                              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                                <p className="text-xs text-slate-400">
+                                  Replies are stored under{" "}
+                                  <span className="font-black text-slate-500 dark:text-slate-300">
+                                    contactMessages/{selectedInboxMessage.id}/messages
+                                  </span>
+                                </p>
+
+                                <BusyButton
+                                  type="button"
+                                  onClick={sendInboxReply}
+                                  busy={replyBusy}
+                                  busyText="Sending reply..."
+                                  disabled={!selectedInboxMessage?.id}
+                                  className="px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:bg-blue-800 transition inline-flex items-center gap-2"
+                                >
+                                  <Send className="w-4 h-4" />
+                                  Send Reply
+                                </BusyButton>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Config Modal */}
+          {showConfig && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
+              <div className="bg-white dark:bg-slate-900 max-w-lg w-full p-8 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 relative">
+                <button
+                  onClick={() => setShowConfig(false)}
+                  className="absolute top-6 right-6 text-slate-400 hover:text-blue-900 dark:hover:text-slate-200 transition"
+                  aria-label="Close"
+                >
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M6 18L18 6M6 6l12 12"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+
+                <h3 className="text-xl font-black text-blue-900 dark:text-white mb-4">
+                  Sheet Binding Setup
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+                  Connect your registrations directly to a Google Sheet.
+                </p>
+
+                <form onSubmit={handleSaveWebhook} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                      Google Apps Script URL
+                    </label>
+                    <input
+                      required
+                      type="url"
+                      value={webhookUrl}
+                      onChange={(e) => setWebhookUrl(e.target.value)}
+                      placeholder="https://script.google.com/macros/s/.../exec"
+                      className="w-full px-5 py-3 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl text-sm text-slate-800 dark:text-slate-100"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full py-4 bg-blue-900 text-white font-bold rounded-xl shadow-lg hover:opacity-95 transition"
+                  >
+                    Save Configuration
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Course Catalog */}
+          {activeAdminSection === "courses" && (
+            <div className={`mb-8 p-8 ${surfaceCardClass}`}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                <div>
+                  <h2 className={sectionTitleClass}>Course Catalog</h2>
+                  <p className={sectionCopyClass}>
+                    Add / edit courses shown on the landing page and explore
+                    pages.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button onClick={fetchCourses} className={subtleActionClass}>
+                    Refresh Courses
+                  </button>
+
+                  <button
+                    onClick={openAddCourse}
+                    disabled={!paths.length}
+                    className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition ${
+                      !paths.length
+                        ? "bg-gray-200 text-gray-500"
+                        : "bg-teal-600 text-white hover:bg-teal-500"
+                    }`}
+                  >
+                    + Add Course
+                  </button>
+                </div>
+              </div>
+
+              {!paths.length ? (
+                <div className="p-6 bg-orange-50 dark:bg-orange-500/10 rounded-2xl border border-orange-100 dark:border-orange-500/20 text-orange-800 dark:text-orange-200 mb-6">
+                  Create at least one Path first. Courses must belong to a Path.
+                </div>
+              ) : coursesLoading ? (
+                <div className="p-6 bg-gray-50 dark:bg-slate-800/40 rounded-2xl text-slate-500 dark:text-slate-300">
+                  Loading courses…
+                </div>
+              ) : courses.length === 0 ? (
+                <div className="p-6 bg-orange-50 dark:bg-orange-500/10 rounded-2xl border border-orange-100 dark:border-orange-500/20 text-orange-800 dark:text-orange-200">
+                  No courses found yet. Click <b>Add Course</b> to create the
+                  first one.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {courses.map((c) => {
+                    const weeks =
+                      (c as any).weeks ?? parseWeeks(c.duration || "4 Weeks");
+                    const ppw =
+                      ((c as any).pricePerWeek ??
+                        parsePricePerWeek(c.priceLabel || "₦10k/wk")) ||
+                      10000;
+                    const label = c.priceLabel || formatPriceLabel(ppw);
+
+                    const pTitle = (c as any).pathId
+                      ? pathsById.get(String((c as any).pathId))?.title
+                      : null;
+
+                    return (
+                      <div
+                        key={c.id}
+                        className="p-5 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-black text-blue-900 dark:text-white">
+                              {c.title}
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                              {c.description}
+                            </p>
+                            <p className="text-[11px] text-slate-400 mt-2 font-bold">
+                              {weeks} Weeks • {c.sessions} • {c.level} • {label}
+                            </p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-bold">
+                              Path:{" "}
+                              <span className="text-slate-600 dark:text-slate-200">
+                                {pTitle || "—"}
+                              </span>
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => toggleCourseLanding(c)}
+                              className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
+                                (c as any).showOnLanding !== false
+                                  ? "bg-teal-50 border-teal-200 text-teal-600 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-400"
+                                  : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
+                              }`}
+                              title="Toggle landing page visibility"
+                            >
+                              {(c as any).showOnLanding !== false
+                                ? "Landing: ON"
+                                : "Landing: OFF"}
+                            </button>
+
+                            <button
+                              onClick={() => toggleCourseExplore(c)}
+                              className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
+                                (c as any).showInExplore !== false
+                                  ? "bg-blue-50 border-blue-200 text-blue-700 dark:bg-slate-800/40 dark:border-slate-700 dark:text-blue-300"
+                                  : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
+                              }`}
+                              title="Toggle Explore All Paths visibility"
+                            >
+                              {(c as any).showInExplore !== false
+                                ? "Explore: ON"
+                                : "Explore: OFF"}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 mt-4">
+                          <button
+                            onClick={() => openEditCourse(c)}
+                            className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:opacity-90 transition"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => deleteCourse(c)}
+                            className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Course Modal */}
+          {courseModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
+              <div className="bg-white dark:bg-slate-900 max-w-2xl w-full p-8 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 relative">
+                <button
+                  onClick={closeCourseModal}
+                  className="absolute top-6 right-6 text-slate-400 hover:text-blue-900 dark:hover:text-slate-200 transition"
+                  aria-label="Close"
+                >
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M6 18L18 6M6 6l12 12"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+
+                <h3 className="text-xl font-black text-blue-900 dark:text-white mb-2">
+                  {editingCourse ? "Edit Course" : "Add New Course"}
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+                  This updates what students see across your site.
+                </p>
+
+                <form onSubmit={saveCourse} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                      Image URL (optional)
+                    </label>
+                    <input
+                      value={courseForm.imageUrl}
+                      onChange={(e) =>
+                        setCourseForm((p) => ({
+                          ...p,
+                          imageUrl: e.target.value,
+                        }))
+                      }
+                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                      placeholder="https://... (jpeg/png/webp)"
+                    />
+
+                    {/* Optional preview (safe) */}
+                    {courseForm.imageUrl?.trim() ? (
+                      <div className="mt-3 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700">
+                        <img
+                          src={courseForm.imageUrl.trim()}
+                          alt="Course preview"
+                          className="w-full h-40 object-cover"
+                          onError={(e) => {
+                            (
+                              e.currentTarget as HTMLImageElement
+                            ).style.display = "none";
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                  {courseError && (
+                    <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
+                      {courseError}
+                    </div>
+                  )}
+
+                  <div>
                     <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
                       Path
                     </label>
                     <select
-                      value={sessionForm.pathId}
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        const t = pathsById.get(id)?.title || "";
-                        setSessionForm((p) => ({ ...p, pathId: id, path: t }));
-                      }}
+                      value={courseForm.pathId}
+                      onChange={(e) =>
+                        setCourseForm((p) => ({ ...p, pathId: e.target.value }))
+                      }
                       className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
                       required
                     >
@@ -3620,389 +3835,637 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </option>
                       ))}
                     </select>
+                  </div>
 
-                    <label className="mt-3 flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
+                  <div>
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                      Title
+                    </label>
+                    <input
+                      value={courseForm.title}
+                      onChange={(e) =>
+                        setCourseForm((p) => ({ ...p, title: e.target.value }))
+                      }
+                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                      placeholder="e.g. UI/UX for Developers"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                        Duration
+                      </label>
+                      <input
+                        onBlur={() => {
+                          const w = parseWeeks(courseForm.duration);
+                          setCourseForm((p) => ({
+                            ...p,
+                            weeks: w,
+                            duration: `${w} Weeks`,
+                            syllabus: normalizeSyllabus(p.syllabus, w),
+                          }));
+                        }}
+                        value={courseForm.duration}
+                        onChange={(e) =>
+                          setCourseForm((p) => ({
+                            ...p,
+                            duration: e.target.value,
+                          }))
+                        }
+                        className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                        placeholder="e.g. 6 Weeks"
+                        required
+                      />
+                      <p className="text-[11px] text-slate-400 mt-2 font-bold">
+                        Weeks (truth): {courseForm.weeks}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                        Sessions
+                      </label>
+                      <input
+                        value={courseForm.sessions}
+                        onChange={(e) =>
+                          setCourseForm((p) => ({
+                            ...p,
+                            sessions: e.target.value,
+                          }))
+                        }
+                        className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                        placeholder="e.g. 2× Weekly"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                      Description
+                    </label>
+                    <textarea
+                      value={courseForm.description}
+                      onChange={(e) =>
+                        setCourseForm((p) => ({
+                          ...p,
+                          description: e.target.value,
+                        }))
+                      }
+                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none min-h-[120px]"
+                      placeholder="Short course overview…"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4 bg-gray-50 dark:bg-slate-800/40 rounded-2xl border border-gray-100 dark:border-slate-800">
+                    <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
                       <input
                         type="checkbox"
-                        checked={sessionForm.isPublished}
+                        checked={courseForm.isActive}
                         onChange={(e) =>
-                          setSessionForm((p) => ({
+                          setCourseForm((p) => ({
                             ...p,
-                            isPublished: e.target.checked,
+                            isActive: e.target.checked,
                           }))
                         }
                         className="h-4 w-4"
                       />
-                      Published (visible to students)
+                      Active
+                    </label>
+
+                    <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={courseForm.showOnLanding}
+                        onChange={(e) =>
+                          setCourseForm((p) => ({
+                            ...p,
+                            showOnLanding: e.target.checked,
+                          }))
+                        }
+                        className="h-4 w-4"
+                      />
+                      Show on Landing
+                    </label>
+
+                    <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={courseForm.showInExplore}
+                        onChange={(e) =>
+                          setCourseForm((p) => ({
+                            ...p,
+                            showInExplore: e.target.checked,
+                          }))
+                        }
+                        className="h-4 w-4"
+                      />
+                      Show in Explore
                     </label>
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                    Title
-                  </label>
-                  <input
-                    value={sessionForm.title}
-                    onChange={(e) =>
-                      setSessionForm((p) => ({ ...p, title: e.target.value }))
-                    }
-                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                    placeholder="e.g. Week 1 Live Class"
-                    required
-                  />
-                </div>
+                  <BusyButton
+                    type="submit"
+                    busy={courseBusyId === (editingCourse?.id || "create")}
+                    className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all"
+                    busyText={editingCourse ? "Saving..." : "Creating..."}
+                  >
+                    {editingCourse ? "Save Changes" : "Create Course"}
+                  </BusyButton>
+                </form>
+              </div>
+            </div>
+          )}
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Session Modal */}
+          {sessionModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
+              <div className="bg-white dark:bg-slate-900 max-w-2xl w-full p-8 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 relative">
+                <button
+                  onClick={closeSessionModal}
+                  className="absolute top-6 right-6 text-slate-400 hover:text-blue-900 dark:hover:text-slate-200 transition"
+                  aria-label="Close"
+                >
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M6 18L18 6M6 6l12 12"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+
+                <h3 className="text-xl font-black text-blue-900 dark:text-white mb-2">
+                  {editingSession ? "Edit Session" : "Add Session"}
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+                  Creates a session under this cohort’s schedule.
+                </p>
+
+                <form onSubmit={saveSession} className="space-y-4">
+                  {sessionError && (
+                    <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
+                      {sessionError}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                        Week
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={sessionForm.week}
+                        onChange={(e) =>
+                          setSessionForm((p) => ({
+                            ...p,
+                            week: Math.max(
+                              1,
+                              parseInt(e.target.value || "1", 10),
+                            ),
+                          }))
+                        }
+                        className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                      />
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                        Path
+                      </label>
+                      <select
+                        value={sessionForm.pathId}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          const t = pathsById.get(id)?.title || "";
+                          setSessionForm((p) => ({
+                            ...p,
+                            pathId: id,
+                            path: t,
+                          }));
+                        }}
+                        className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                        required
+                      >
+                        <option value="" disabled>
+                          Select a path…
+                        </option>
+                        {paths.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.title}
+                          </option>
+                        ))}
+                      </select>
+
+                      <label className="mt-3 flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={sessionForm.isPublished}
+                          onChange={(e) =>
+                            setSessionForm((p) => ({
+                              ...p,
+                              isPublished: e.target.checked,
+                            }))
+                          }
+                          className="h-4 w-4"
+                        />
+                        Published (visible to students)
+                      </label>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Date
+                      Title
                     </label>
                     <input
-                      type="date"
-                      value={sessionForm.date}
+                      value={sessionForm.title}
                       onChange={(e) =>
-                        setSessionForm((p) => ({ ...p, date: e.target.value }))
+                        setSessionForm((p) => ({ ...p, title: e.target.value }))
                       }
                       className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                      placeholder="e.g. Week 1 Live Class"
                       required
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Time
-                    </label>
-                    <input
-                      type="time"
-                      value={sessionForm.time}
-                      onChange={(e) =>
-                        setSessionForm((p) => ({ ...p, time: e.target.value }))
-                      }
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                      required
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                        Date
+                      </label>
+                      <input
+                        type="date"
+                        value={sessionForm.date}
+                        onChange={(e) =>
+                          setSessionForm((p) => ({
+                            ...p,
+                            date: e.target.value,
+                          }))
+                        }
+                        className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                        Time
+                      </label>
+                      <input
+                        type="time"
+                        value={sessionForm.time}
+                        onChange={(e) =>
+                          setSessionForm((p) => ({
+                            ...p,
+                            time: e.target.value,
+                          }))
+                        }
+                        className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                        Duration (mins)
+                      </label>
+                      <input
+                        type="number"
+                        min={15}
+                        value={sessionForm.durationMins}
+                        onChange={(e) =>
+                          setSessionForm((p) => ({
+                            ...p,
+                            durationMins: parseInt(e.target.value || "60", 10),
+                          }))
+                        }
+                        className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                      />
+                    </div>
                   </div>
 
                   <div>
                     <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                      Duration (mins)
+                      Live Session URL (optional)
                     </label>
                     <input
-                      type="number"
-                      min={15}
-                      value={sessionForm.durationMins}
+                      value={sessionForm.joinUrl}
                       onChange={(e) =>
                         setSessionForm((p) => ({
                           ...p,
-                          durationMins: parseInt(e.target.value || "60", 10),
+                          joinUrl: e.target.value,
                         }))
                       }
                       className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                      placeholder="Zoom/Meet link..."
                     />
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                    Live Session URL (optional)
-                  </label>
-                  <input
-                    value={sessionForm.joinUrl}
-                    onChange={(e) =>
-                      setSessionForm((p) => ({ ...p, joinUrl: e.target.value }))
-                    }
-                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                    placeholder="Zoom/Meet link..."
-                  />
-                </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                      Recorded Session URL (optional)
+                    </label>
+                    <input
+                      value={sessionForm.recordingUrl}
+                      onChange={(e) =>
+                        setSessionForm((p) => ({
+                          ...p,
+                          recordingUrl: e.target.value,
+                        }))
+                      }
+                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
+                      placeholder="Loom/Drive/YouTube recording link..."
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                    Recorded Session URL (optional)
-                  </label>
-                  <input
-                    value={sessionForm.recordingUrl}
-                    onChange={(e) =>
-                      setSessionForm((p) => ({
-                        ...p,
-                        recordingUrl: e.target.value,
-                      }))
-                    }
-                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                    placeholder="Loom/Drive/YouTube recording link..."
-                  />
-                </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
+                      Notes (optional)
+                    </label>
+                    <textarea
+                      value={sessionForm.notes}
+                      onChange={(e) =>
+                        setSessionForm((p) => ({ ...p, notes: e.target.value }))
+                      }
+                      className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none min-h-[110px]"
+                      placeholder="Any admin notes..."
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                    Notes (optional)
-                  </label>
-                  <textarea
-                    value={sessionForm.notes}
-                    onChange={(e) =>
-                      setSessionForm((p) => ({ ...p, notes: e.target.value }))
-                    }
-                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none min-h-[110px]"
-                    placeholder="Any admin notes..."
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={busy.createSession || busy.saveSession}
-                  className="w-full ... disabled:opacity-60 flex items-center justify-center gap-3"
-                >
-                  {busy.createSession || busy.saveSession ? (
-                    <>
-                      <span className="h-5 w-5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                      <span>
-                        {editingSession ? "Saving..." : "Creating..."}
-                      </span>
-                    </>
-                  ) : editingSession ? (
-                    "Save Session"
-                  ) : (
-                    "Create Session"
-                  )}
-                </button>
-              </form>
+                  <button
+                    type="submit"
+                    disabled={busy.createSession || busy.saveSession}
+                    className="w-full ... disabled:opacity-60 flex items-center justify-center gap-3"
+                  >
+                    {busy.createSession || busy.saveSession ? (
+                      <>
+                        <span className="h-5 w-5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                        <span>
+                          {editingSession ? "Saving..." : "Creating..."}
+                        </span>
+                      </>
+                    ) : editingSession ? (
+                      "Save Session"
+                    ) : (
+                      "Create Session"
+                    )}
+                  </button>
+                </form>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {activeAdminSection === "registrations" && (
-          <>
-        {/* Registrations Controls */}
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="bg-white dark:bg-slate-900 p-1 rounded-xl border border-gray-100 dark:border-slate-800 flex shadow-sm">
-              {["All", "Pending", "Complete"].map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFilter(f as any)}
-                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-                    filter === f
-                      ? "bg-blue-900 dark:bg-teal-600 text-white shadow-md"
-                      : "text-slate-400 hover:text-blue-900 dark:hover:text-slate-200"
-                  }`}
-                >
-                  {f}
-                </button>
-              ))}
-            </div>
-
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, email, phone, path, pathId..."
-              className="px-4 py-2.5 rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200 outline-none"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleExportCSV}
-              className="px-4 py-2.5 text-blue-700 dark:text-blue-400 text-xs font-black uppercase tracking-widest hover:underline"
-            >
-              Download CSV
-            </button>
-            <button
-              onClick={handleClearAll}
-              className="px-4 py-2.5 text-red-600 text-xs font-black uppercase tracking-widest hover:underline"
-            >
-              Clear Database
-            </button>
-          </div>
-        </div>
-
-        {/* Registrations Table */}
-        {loading ? (
-          <div className={`p-10 ${surfaceCardClass}`}>
-            <p className="text-slate-500 dark:text-slate-400">
-              Loading registrations...
-            </p>
-          </div>
-        ) : (
-          <div className={`overflow-hidden ${surfaceCardClass}`}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-gray-50 dark:bg-slate-800/50 border-b border-gray-100 dark:border-slate-800">
-                  <tr>
-                    <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Student Info
-                    </th>
-                    <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Path & Duration
-                    </th>
-                    <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Total Price
-                    </th>
-                    <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Payment Status
-                    </th>
-                    <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-gray-50 dark:divide-slate-800">
-                  {filteredData.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="px-8 py-20 text-center text-slate-400 font-medium italic"
+          {activeAdminSection === "registrations" && (
+            <div>
+              {/* Registrations Controls */}
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="bg-white dark:bg-slate-900 p-1 rounded-xl border border-gray-100 dark:border-slate-800 flex shadow-sm">
+                    {["All", "Pending", "Complete"].map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => setFilter(f as any)}
+                        className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                          filter === f
+                            ? "bg-blue-900 dark:bg-teal-600 text-white shadow-md"
+                            : "text-slate-400 hover:text-blue-900 dark:hover:text-slate-200"
+                        }`}
                       >
-                        No registration records found for this filter.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredData.map((reg) => {
-                      const regPathTitle = (reg as any).pathId
-                        ? pathsById.get(String((reg as any).pathId))?.title
-                        : null;
+                        {f}
+                      </button>
+                    ))}
+                  </div>
 
-                      return (
-                        <tr
-                          key={reg.uid}
-                          className="hover:bg-gray-50/50 dark:hover:bg-slate-800/30 transition-colors"
-                        >
-                          <td className="px-8 py-6">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-blue-900 text-white flex items-center justify-center font-black text-xs">
-                                {reg.fullName?.charAt(0)}
-                              </div>
-                              <div>
-                                <p className="font-bold text-blue-900 dark:text-white leading-tight">
-                                  {reg.fullName}
-                                </p>
-                                <p className="text-xs text-slate-400 font-medium mt-1">
-                                  {reg.email}
-                                </p>
-                                <p className="text-[10px] text-slate-400">
-                                  {reg.phone} · {reg.gender}
-                                  {(reg as any).pendingPayment ? (
-                                    <span className="ml-2 text-purple-600 font-black">
-                                      • Pending Pay
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search name, email, phone, path, pathId..."
+                    className="px-4 py-2.5 rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm text-slate-700 dark:text-slate-200 outline-none"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleExportCSV}
+                    className="px-4 py-2.5 text-blue-700 dark:text-blue-400 text-xs font-black uppercase tracking-widest hover:underline"
+                  >
+                    Download CSV
+                  </button>
+                  <button
+                    onClick={handleClearAll}
+                    className="px-4 py-2.5 text-red-600 text-xs font-black uppercase tracking-widest hover:underline"
+                  >
+                    Clear Database
+                  </button>
+                </div>
+              </div>
+
+              {/* Registrations Table */}
+              {loading ? (
+                <div className={`p-10 ${surfaceCardClass}`}>
+                  <p className="text-slate-500 dark:text-slate-400">
+                    Loading registrations...
+                  </p>
+                </div>
+              ) : (
+                <div className={`overflow-hidden ${surfaceCardClass}`}>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead className="bg-gray-50 dark:bg-slate-800/50 border-b border-gray-100 dark:border-slate-800">
+                        <tr>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            Student Info
+                          </th>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            Path & Duration
+                          </th>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            Total Price
+                          </th>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            Payment Status
+                          </th>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+
+                      <tbody className="divide-y divide-gray-50 dark:divide-slate-800">
+                        {filteredData.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={5}
+                              className="px-8 py-20 text-center text-slate-400 font-medium italic"
+                            >
+                              No registration records found for this filter.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredData.map((reg) => {
+                            const regPathTitle = (reg as any).pathId
+                              ? pathsById.get(String((reg as any).pathId))
+                                  ?.title
+                              : null;
+
+                            return (
+                              <tr
+                                key={reg.uid}
+                                className="hover:bg-gray-50/50 dark:hover:bg-slate-800/30 transition-colors"
+                              >
+                                <td className="px-8 py-6">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-blue-900 text-white flex items-center justify-center font-black text-xs">
+                                      {reg.fullName?.charAt(0)}
+                                    </div>
+                                    <div>
+                                      <p className="font-bold text-blue-900 dark:text-white leading-tight">
+                                        {reg.fullName}
+                                      </p>
+                                      <p className="text-xs text-slate-400 font-medium mt-1">
+                                        {reg.email}
+                                      </p>
+                                      <p className="text-[10px] text-slate-400">
+                                        {reg.phone} · {reg.gender}
+                                        {(reg as any).pendingPayment ? (
+                                          <span className="ml-2 text-purple-600 font-black">
+                                            • Pending Pay
+                                          </span>
+                                        ) : null}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </td>
+
+                                <td className="px-8 py-6">
+                                  <span className="text-xs font-bold text-slate-600 dark:text-slate-300 block">
+                                    {regPathTitle || reg.path}
+                                  </span>
+
+                                  {(reg as any).pathId ? (
+                                    <span className="text-[10px] text-slate-400 font-bold block">
+                                      ID: {String((reg as any).pathId)}
                                     </span>
                                   ) : null}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
 
-                          <td className="px-8 py-6">
-                            <span className="text-xs font-bold text-slate-600 dark:text-slate-300 block">
-                              {regPathTitle || reg.path}
-                            </span>
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
+                                    {reg.weeksToCommit} Weeks
+                                  </span>
+                                </td>
 
-                            {(reg as any).pathId ? (
-                              <span className="text-[10px] text-slate-400 font-bold block">
-                                ID: {String((reg as any).pathId)}
-                              </span>
-                            ) : null}
+                                <td className="px-8 py-6">
+                                  <p className="text-sm font-black text-blue-900 dark:text-teal-500">
+                                    ₦
+                                    {Number(
+                                      reg.totalPrice || 0,
+                                    ).toLocaleString()}
+                                  </p>
+                                </td>
 
-                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
-                              {reg.weeksToCommit} Weeks
-                            </span>
-                          </td>
+                                <td className="px-8 py-6">
+                                  <button
+                                    onClick={() =>
+                                      handleToggleStatus(reg.uid, reg.status)
+                                    }
+                                    className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
+                                      reg.status === "Complete"
+                                        ? "bg-teal-50 border-teal-200 text-teal-600 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-400"
+                                        : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
+                                    }`}
+                                  >
+                                    {reg.status}
+                                  </button>
+                                </td>
 
-                          <td className="px-8 py-6">
-                            <p className="text-sm font-black text-blue-900 dark:text-teal-500">
-                              ₦{Number(reg.totalPrice || 0).toLocaleString()}
-                            </p>
-                          </td>
+                                <td className="px-8 py-6">
+                                  <button
+                                    onClick={() => handleDelete(reg.uid)}
+                                    className="p-2 text-slate-300 hover:text-red-600 transition-colors"
+                                    title="Delete Registration"
+                                    aria-label="Delete Registration"
+                                  >
+                                    <svg
+                                      className="w-5 h-5"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth="2"
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                      />
+                                    </svg>
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
-                          <td className="px-8 py-6">
-                            <button
-                              onClick={() =>
-                                handleToggleStatus(reg.uid, reg.status)
-                              }
-                              className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${
-                                reg.status === "Complete"
-                                  ? "bg-teal-50 border-teal-200 text-teal-600 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-400"
-                                  : "bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400"
-                              }`}
-                            >
-                              {reg.status}
-                            </button>
-                          </td>
+          {/* Footer status (unchanged) */}
+          <div className="mt-16 p-8 bg-blue-900 dark:bg-slate-900 rounded-[2rem] text-white shadow-2xl flex flex-col md:flex-row items-center gap-12">
+            <div className="md:w-1/2">
+              <h3 className="text-2xl font-black mb-4">
+                Infrastructure Status
+              </h3>
+              <ul className="space-y-4">
+                <li className="flex items-center gap-3">
+                  <div className="w-3 h-3 bg-teal-400 rounded-full" />
+                  <span className="text-sm font-medium">
+                    Firebase Auth: <span className="text-teal-400">ONLINE</span>
+                  </span>
+                </li>
+                <li className="flex items-center gap-3">
+                  <div
+                    className={`w-3 h-3 rounded-full ${
+                      webhookUrl ? "bg-teal-400" : "bg-orange-400"
+                    }`}
+                  />
+                  <span className="text-sm font-medium">
+                    Sheets Binding:{" "}
+                    {webhookUrl ? (
+                      <span className="text-teal-400">CONNECTED</span>
+                    ) : (
+                      <span className="text-orange-200">NOT CONFIGURED</span>
+                    )}
+                  </span>
+                </li>
+              </ul>
+            </div>
 
-                          <td className="px-8 py-6">
-                            <button
-                              onClick={() => handleDelete(reg.uid)}
-                              className="p-2 text-slate-300 hover:text-red-600 transition-colors"
-                              title="Delete Registration"
-                              aria-label="Delete Registration"
-                            >
-                              <svg
-                                className="w-5 h-5"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth="2"
-                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                />
-                              </svg>
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+            <div className="md:w-1/2 p-6 bg-white/5 dark:bg-white/10 rounded-2xl border border-white/10">
+              <p className="text-xs text-blue-100/70 mb-2 uppercase tracking-widest font-bold">
+                Admin Notice
+              </p>
+              <p className="text-xs leading-relaxed opacity-80">
+                Keep approvals consistent: approve pending payments only after
+                verifying Paystack reference. Cohorts/sessions are admin-managed
+                and visible to students based on your app UI.
+              </p>
             </div>
           </div>
-        )}
-          </>
-        )}
-
-        {/* Footer status (unchanged) */}
-        <div className="mt-16 p-8 bg-blue-900 dark:bg-slate-900 rounded-[2rem] text-white shadow-2xl flex flex-col md:flex-row items-center gap-12">
-          <div className="md:w-1/2">
-            <h3 className="text-2xl font-black mb-4">Infrastructure Status</h3>
-            <ul className="space-y-4">
-              <li className="flex items-center gap-3">
-                <div className="w-3 h-3 bg-teal-400 rounded-full" />
-                <span className="text-sm font-medium">
-                  Firebase Auth: <span className="text-teal-400">ONLINE</span>
-                </span>
-              </li>
-              <li className="flex items-center gap-3">
-                <div
-                  className={`w-3 h-3 rounded-full ${
-                    webhookUrl ? "bg-teal-400" : "bg-orange-400"
-                  }`}
-                />
-                <span className="text-sm font-medium">
-                  Sheets Binding:{" "}
-                  {webhookUrl ? (
-                    <span className="text-teal-400">CONNECTED</span>
-                  ) : (
-                    <span className="text-orange-200">NOT CONFIGURED</span>
-                  )}
-                </span>
-              </li>
-            </ul>
-          </div>
-
-          <div className="md:w-1/2 p-6 bg-white/5 dark:bg-white/10 rounded-2xl border border-white/10">
-            <p className="text-xs text-blue-100/70 mb-2 uppercase tracking-widest font-bold">
-              Admin Notice
-            </p>
-            <p className="text-xs leading-relaxed opacity-80">
-              Keep approvals consistent: approve pending payments only after
-              verifying Paystack reference. Cohorts/sessions are admin-managed
-              and visible to students based on your app UI.
-            </p>
-          </div>
-        </div>
+        </motion.div>
       </div>
     </div>
   );
