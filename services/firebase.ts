@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import {
   browserLocalPersistence,
+  browserSessionPersistence,
   getAuth,
   setPersistence,
 } from "firebase/auth";
@@ -22,5 +23,14 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const functions = getFunctions(app, "us-central1");
 
-await setPersistence(auth, browserLocalPersistence);
+export const setAuthPersistenceMode = async (
+  mode: "local" | "session" = "local",
+) => {
+  await setPersistence(
+    auth,
+    mode === "session" ? browserSessionPersistence : browserLocalPersistence,
+  );
+};
+
+await setAuthPersistenceMode("local");
 await auth.authStateReady();

@@ -67,18 +67,19 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onNavigate }) => {
         password,
       );
 
-      // ✅ flag to show ContinueRegistration after login
       localStorage.setItem(
         "cwg_account_created",
         JSON.stringify({
           email: created?.email || trimmedEmail,
           createdAt: Date.now(),
+          verificationRequired: true,
         }),
       );
 
-      setSuccess("Account created successfully. Please login to continue.");
-      await registrationStore.logout();
-      onNavigate("student-login");
+      setSuccess(
+        "Account created. We sent a verification link to your email address.",
+      );
+      onNavigate("verify-email");
     } catch (err: any) {
       setError(err?.message || "Account creation failed.");
     } finally {

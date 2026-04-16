@@ -10,7 +10,9 @@ import {
   PathDoc,
   SyllabusWeek,
   CohortMessageDoc,
+  ResourceDoc,
 } from "../services/registrationStore";
+import AdminResourcesPanel from "./AdminResourcesPanel";
 
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -59,6 +61,7 @@ import { auth, db } from "../services/firebase";
 interface AdminDashboardProps {
   onNavigate: (view: View) => void;
   onLogout: () => void;
+  sessionRemainingMs?: number;
 }
 
 const getCohortDocId = (c: any) => String(c?.id || "").trim();
@@ -260,6 +263,14 @@ const formatInboxDate = (v: any) => {
   return new Date(ms).toLocaleString();
 };
 
+const formatSessionCountdown = (ms: number) => {
+  if (!ms || ms <= 0) return "00:00";
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+};
+
 const getInboxMessageBody = (message: any) =>
   String(
     message?.body ||
@@ -328,6 +339,7 @@ const normalizeInboxThreadMessage = (
 const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigate,
   onLogout,
+  sessionRemainingMs = 0,
 }) => {
   const [registrations, setRegistrations] = useState<RegistrationEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -368,6 +380,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | "sessions"
     | "messages"
     | "courses"
+    | "resources"
     | "payments"
     | "registrations"
   >("paths");
@@ -485,6 +498,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // -------------------------
   const [courses, setCourses] = useState<CourseDoc[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(true);
+  const [resources, setResources] = useState<ResourceDoc[]>([]);
+  const [resourcesLoading, setResourcesLoading] = useState(true);
   const [courseModalOpen, setCourseModalOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<CourseDoc | null>(null);
   const [courseForm, setCourseForm] = useState<CourseForm>(emptyCourse);
@@ -770,6 +785,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setCoursesLoading(false);
     }
   };
+
+  const fetchResources = async () => {
+    setResourcesLoading(true);
+    try {
+      const list = await registrationStore.getResources();
+      setResources(list || []);
+    } catch (e) {
+      console.error("Failed to load resources:", e);
+      setResources([]);
+    } finally {
+      setResourcesLoading(false);
+    }
+  };
+
   const markInboxStatus = async (
     id: string,
     status: "new" | "read" | "resolved",
@@ -940,6 +969,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           fetchRegistrations(),
           fetchPaymentRecords(),
           fetchCourses(),
+          fetchResources(),
           fetchCohorts(),
           fetchInboxMessages(),
         ]);
@@ -1268,6 +1298,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700/50",
         },
         {
+          key: "resources",
+          label: "Resources",
+          description: "PDFs, code packs, and media links",
+          icon: ExternalLink,
+          badge: resources.length,
+          tone: "emerald",
+          activeClass:
+            "bg-emerald-600 text-white border-emerald-500 shadow-emerald-500/20",
+          inactiveClass:
+            "bg-emerald-50/60 text-emerald-900 border-emerald-100 hover:border-emerald-300 dark:bg-emerald-950/20 dark:text-emerald-200 dark:border-emerald-900/40 dark:hover:border-emerald-700/60",
+          badgeClass:
+            "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200 dark:border-emerald-700/50",
+        },
+        {
           key: "payments",
           label: "Payments",
           description: "Review pending confirmations",
@@ -1303,6 +1347,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       filteredData.length,
       paths.length,
       pendingPayments.length,
+      resources.length,
       sessions.length,
     ],
   );
@@ -2082,6 +2127,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
+              <div className="px-4 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-100 dark:border-amber-500/20">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-600 dark:text-amber-300">
+                  Auto-lock
+                </p>
+                <p className="text-sm font-black text-amber-900 dark:text-amber-100 mt-1">
+                  {formatSessionCountdown(sessionRemainingMs)}
+                </p>
+              </div>
+
               <button
                 onClick={() => {
                   setInboxFilter("all");
@@ -3029,6 +3083,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 )}
               </div>
             </div>
+          )}
+
+          {activeAdminSection === "resources" && (
+            <AdminResourcesPanel
+              paths={paths}
+              courses={courses}
+              resources={resources}
+              loading={resourcesLoading}
+              onRefresh={fetchResources}
+            />
           )}
 
           {/* Pending Payments */}

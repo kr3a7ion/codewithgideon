@@ -26,6 +26,7 @@ import StudentDashboard from '../components/StudentDashboard';
 import { useAppLogic } from '../hooks/useAppLogic';
 import CreateAccount from '@/components/CreateAccount';
 import ContinueRegistration from '@/components/ContinueRegistration';
+import VerifyEmail from '../components/VerifyEmail';
 
 export type View =
   | "home"
@@ -44,7 +45,8 @@ export type View =
   | "admin-login"
   | "admin-dashboard"
   | "create-account"
-  | "continue-registration";
+  | "continue-registration"
+  | "verify-email";
 
 const App: React.FC = () => {
   const {
@@ -60,6 +62,8 @@ const App: React.FC = () => {
     isAdminLoggedIn,
     isStudentLoggedIn,
     studentProfile,
+    verificationState,
+    adminSessionRemainingMs,
 
     // 🧭 Actions
     navigateTo,
@@ -69,6 +73,9 @@ const App: React.FC = () => {
     logoutAdmin,
     loginStudent,
     logoutStudent,
+    resendVerificationEmail,
+    refreshVerifiedSession,
+    logoutPendingVerification,
   } = useAppLogic();
 
   return (
@@ -136,6 +143,20 @@ const App: React.FC = () => {
           <CreateAccount onNavigate={navigateTo} />
         )}
 
+        {currentView === "verify-email" &&
+          (verificationState ? (
+            <VerifyEmail
+              role={verificationState.role}
+              email={verificationState.email}
+              onNavigate={navigateTo}
+              onRefresh={refreshVerifiedSession}
+              onResend={resendVerificationEmail}
+              onLogout={logoutPendingVerification}
+            />
+          ) : (
+            <StudentLogin onNavigate={navigateTo} onLogin={loginStudent} />
+          ))}
+
         {currentView === "continue-registration" &&
           (isStudentLoggedIn ? (
             <ContinueRegistration
@@ -179,7 +200,11 @@ const App: React.FC = () => {
 
         {currentView === "admin-dashboard" &&
           (isAdminLoggedIn ? (
-            <AdminDashboard onNavigate={navigateTo} onLogout={logoutAdmin} />
+            <AdminDashboard
+              onNavigate={navigateTo}
+              onLogout={logoutAdmin}
+              sessionRemainingMs={adminSessionRemainingMs}
+            />
           ) : (
             <AdminLogin onNavigate={navigateTo} onLogin={loginAdmin} />
           ))}

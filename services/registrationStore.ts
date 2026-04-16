@@ -1,4 +1,4 @@
-import { db, auth } from "./firebase";
+import { db, auth, setAuthPersistenceMode } from "./firebase";
 import {
   doc,
   setDoc,
@@ -21,8 +21,10 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
+  sendEmailVerification,
   signOut,
   onAuthStateChanged,
+  reload,
 } from "firebase/auth";
 
 function waitForAuthUid(auth: any, expectedUid: string, timeoutMs = 8000) {
@@ -166,6 +168,21 @@ export type CourseDoc = {
   syllabus?: SyllabusWeek[];
 };
 
+export type ResourceDoc = {
+  id: string;
+  name: string;
+  type: string;
+  size: string;
+  folder: string;
+  url: string;
+  description?: string;
+  pathId?: string;
+  courseId?: string;
+  isPublished: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type SessionDoc = {
   id: string;
 
@@ -210,8 +227,13 @@ export type SessionPatch = Partial<
 
 type CourseInput = Omit<CourseDoc, "id" | "createdAt" | "updatedAt">;
 type CoursePatch = Partial<Omit<CourseDoc, "id" | "createdAt" | "updatedAt">>;
+type ResourceInput = Omit<ResourceDoc, "id" | "createdAt" | "updatedAt">;
+type ResourcePatch = Partial<
+  Omit<ResourceDoc, "id" | "createdAt" | "updatedAt">
+>;
 
 const coursesColRef = collection(db, "courses");
+const resourcesColRef = collection(db, "resources");
 const usersColRef = collection(db, "users");
 const pathsColRef = collection(db, "paths");
 
@@ -688,12 +710,15 @@ export const registrationStore = {
     if (!password || String(password).length < 6)
       throw new Error("Password must be at least 6 characters.");
 
+    await setAuthPersistenceMode("local");
     const userCredential = await createUserWithEmailAndPassword(
       auth,
       em,
       password,
     );
     const user = userCredential.user;
+
+    await sendEmailVerification(user);
 
     // force token (good practice)
     await user.getIdToken(true);
@@ -864,7 +889,12 @@ export const registrationStore = {
     return user.uid;
   },
 
-  async login(email: string, password: string): Promise<string> {
+  async login(
+    email: string,
+    password: string,
+    options?: { persistence?: "local" | "session" },
+  ): Promise<string> {
+    await setAuthPersistenceMode(options?.persistence || "local");
     const cred = await signInWithEmailAndPassword(auth, email, password);
     return cred.user.uid;
   },
@@ -948,6 +978,30 @@ export const registrationStore = {
 
   async resetPassword(email: string): Promise<void> {
     await sendPasswordResetEmail(auth, email);
+  },
+
+  async sendCurrentUserVerificationEmail(): Promise<void> {
+    const user = auth.currentUser;
+    if (!user) throw new Error("No signed-in user found.");
+
+    await sendEmailVerification(user);
+  },
+
+  async reloadCurrentUser(): Promise<{
+    uid: string;
+    email: string;
+    emailVerified: boolean;
+  } | null> {
+    const user = auth.currentUser;
+    if (!user) return null;
+
+    await reload(user);
+
+    return {
+      uid: user.uid,
+      email: String(user.email || "").trim(),
+      emailVerified: !!user.emailVerified,
+    };
   },
 
   async logout(): Promise<void> {
@@ -1495,6 +1549,72 @@ export const registrationStore = {
 
   async deleteCourse(courseId: string): Promise<void> {
     await deleteDoc(doc(db, "courses", courseId));
+  },
+
+  // =========================
+  // RESOURCES (Admin-managed)
+  // =========================
+  async getResources(): Promise<ResourceDoc[]> {
+    const snap = await getDocs(query(resourcesColRef, orderBy("updatedAt", "desc")));
+    return snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as any),
+    })) as ResourceDoc[];
+  },
+
+  async addResource(input: ResourceInput): Promise<string> {
+    const cleanPayload: any = stripUndefined({
+      name: String(input.name || "").trim(),
+      type: String(input.type || "Link").trim() || "Link",
+      size: String(input.size || "").trim(),
+      folder: String(input.folder || "General").trim() || "General",
+      url: String(input.url || "").trim(),
+      description: input.description
+        ? String(input.description).trim()
+        : undefined,
+      pathId: input.pathId ? String(input.pathId).trim() : undefined,
+      courseId: input.courseId ? String(input.courseId).trim() : undefined,
+      isPublished: input.isPublished !== false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    if (!cleanPayload.name) throw new Error("Resource name is required.");
+    if (!cleanPayload.url) throw new Error("Resource URL is required.");
+
+    const ref = await addDoc(resourcesColRef, cleanPayload);
+    return ref.id;
+  },
+
+  async updateResource(resourceId: string, patch: ResourcePatch): Promise<void> {
+    const cleanPatch: any = { updatedAt: Date.now() };
+
+    if (patch.name !== undefined) cleanPatch.name = String(patch.name).trim();
+    if (patch.type !== undefined) cleanPatch.type = String(patch.type).trim();
+    if (patch.size !== undefined) cleanPatch.size = String(patch.size).trim();
+    if (patch.folder !== undefined)
+      cleanPatch.folder = String(patch.folder).trim() || "General";
+    if (patch.url !== undefined) cleanPatch.url = String(patch.url).trim();
+    if (patch.description !== undefined)
+      cleanPatch.description = patch.description
+        ? String(patch.description).trim()
+        : deleteField();
+    if (patch.isPublished !== undefined)
+      cleanPatch.isPublished = !!patch.isPublished;
+    if (patch.pathId !== undefined) {
+      const value = String(patch.pathId || "").trim();
+      cleanPatch.pathId = value ? value : deleteField();
+    }
+    if (patch.courseId !== undefined) {
+      const value = String(patch.courseId || "").trim();
+      cleanPatch.courseId = value ? value : deleteField();
+    }
+
+    await updateDoc(doc(db, "resources", resourceId), stripUndefined(cleanPatch));
+  },
+
+  async deleteResource(resourceId: string): Promise<void> {
+    await deleteDoc(doc(db, "resources", resourceId));
   },
 
   // ✅ Student unlock helper (upgraded: prefer pathId, fallback to path string)

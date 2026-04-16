@@ -43,7 +43,9 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLogin }) => {
       const em = String(data?.email || "").trim();
       if (em) setEmail(em);
       setBanner(
-        "Account created successfully. Please login to continue registration.",
+        data?.verificationRequired
+          ? "Account created. Verify your email, then sign in to continue registration."
+          : "Account created successfully. Please login to continue registration.",
       );
     } catch {}
   }, []);
