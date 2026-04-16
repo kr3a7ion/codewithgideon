@@ -54,6 +54,8 @@ export interface PendingPayment {
   status: "Pending";
   weeks: number;
   amount: number;
+  baseAmount?: number;
+  weeklyRate?: number;
   reference: string;
   createdAt: number;
 }
@@ -911,11 +913,15 @@ export const registrationStore = {
       kind: "initial" | "topup";
       weeks: number;
       amount: number;
+      baseAmount?: number;
+      weeklyRate?: number;
       reference: string;
     },
   ): Promise<void> {
     const weeks = Math.max(1, Math.floor(Number(pending.weeks || 1)));
     const amount = Math.max(0, Number(pending.amount || 0));
+    const baseAmount = Math.max(0, Number(pending.baseAmount || 0));
+    const weeklyRate = Math.max(0, Number(pending.weeklyRate || 0));
     const reference = String(pending.reference || "").trim();
 
     await updateDoc(doc(db, "users", uid), {
@@ -924,6 +930,8 @@ export const registrationStore = {
         status: "Pending",
         weeks,
         amount,
+        ...(baseAmount > 0 ? { baseAmount } : {}),
+        ...(weeklyRate > 0 ? { weeklyRate } : {}),
         reference,
         createdAt: Date.now(),
       },
@@ -966,16 +974,42 @@ export const registrationStore = {
     additionalWeeks: number,
     amount: number,
     reference: string,
+    options?: { baseAmount?: number; weeklyRate?: number },
   ): Promise<void> {
+    const safeWeeks = Math.max(1, Math.floor(Number(additionalWeeks || 1)));
+    const userRef = doc(db, "users", uid);
+    const userSnap = await getDoc(userRef);
+    const userData = (userSnap.data() as any) || {};
+
+    const currentWeeks = Math.max(0, Number(userData.weeksToCommit || 0));
+    const currentTotalPrice = Math.max(0, Number(userData.totalPrice || 0));
+    const explicitWeeklyRate = Math.max(0, Number(options?.weeklyRate || 0));
+    const inferredWeeklyRate =
+      explicitWeeklyRate > 0
+        ? explicitWeeklyRate
+        : currentWeeks > 0 && currentTotalPrice > 0
+          ? Math.round(currentTotalPrice / currentWeeks)
+          : 0;
+
+    const priceIncrement = Math.max(
+      0,
+      Number(options?.baseAmount || 0) ||
+        (inferredWeeklyRate > 0 ? safeWeeks * inferredWeeklyRate : 0) ||
+        Number(amount || 0),
+    );
+
     await updateDoc(doc(db, "users", uid), {
-      weeksToCommit: increment(additionalWeeks),
+      weeksToCommit: increment(safeWeeks),
+      totalPrice: increment(priceIncrement),
       status: "Complete",
       pendingPayment: deleteField(),
     });
 
     await addDoc(collection(db, "users", uid, "payments"), {
       amount,
-      weeks: additionalWeeks,
+      baseAmount: priceIncrement,
+      weeklyRate: inferredWeeklyRate || undefined,
+      weeks: safeWeeks,
       reference,
       timestamp: Date.now(),
     });
@@ -1643,13 +1677,23 @@ export const registrationStore = {
 
   async approveTopUpFromPending(
     uid: string,
-    pending: { weeks: number; amount: number; reference: string },
+    pending: {
+      weeks: number;
+      amount: number;
+      baseAmount?: number;
+      weeklyRate?: number;
+      reference: string;
+    },
   ): Promise<void> {
     await this.recordTopUp(
       uid,
       pending.weeks,
       pending.amount,
       pending.reference,
+      {
+        baseAmount: pending.baseAmount,
+        weeklyRate: pending.weeklyRate,
+      },
     );
   },
 };

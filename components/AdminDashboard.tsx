@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import {
   collection,
+  collectionGroup,
   getDocs,
   limit,
   orderBy,
@@ -106,6 +107,15 @@ type InboxThreadMessage = {
   senderEmail?: string;
   createdAt?: any;
   source?: string;
+};
+
+type PaymentRecord = {
+  id: string;
+  uid: string;
+  amount: number;
+  reference: string;
+  kind?: string;
+  createdAt?: any;
 };
 
 type CourseForm = {
@@ -510,6 +520,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [courseBusyId, setCourseBusyId] = useState<string | null>(null);
   const [sessionBusyId, setSessionBusyId] = useState<string | null>(null);
   const [pendingBusyUid, setPendingBusyUid] = useState<string | null>(null);
+  const [paymentRecords, setPaymentRecords] = useState<PaymentRecord[]>([]);
   const [sessionsError, setSessionsError] = useState<string>("");
   const [inboxFilter, setInboxFilter] = useState<
     "all" | "new" | "read" | "resolved"
@@ -589,6 +600,36 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setRegistrations(data);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPaymentRecords = async () => {
+    try {
+      const snap = await getDocs(collectionGroup(db, "payments"));
+      const records: PaymentRecord[] = snap.docs.map((paymentDoc) => {
+        const data = paymentDoc.data() as Record<string, any>;
+        const uid =
+          String(data.uid || paymentDoc.ref.parent.parent?.id || "").trim();
+        const amountKobo = Number(data.amountKobo || 0);
+        const amount = amountKobo > 0
+          ? Math.round(amountKobo / 100)
+          : Math.max(0, Number(data.amount || 0));
+
+        return {
+          id: paymentDoc.id,
+          uid,
+          amount,
+          reference: String(data.reference || paymentDoc.id).trim(),
+          kind: String(data.kind || "").trim(),
+          createdAt:
+            data.verifiedAt || data.createdAt || data.timestamp || undefined,
+        };
+      });
+
+      setPaymentRecords(records);
+    } catch (e) {
+      console.error("fetchPaymentRecords failed:", e);
+      setPaymentRecords([]);
     }
   };
   const fetchInboxMessages = async () => {
@@ -897,6 +938,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         await Promise.all([
           fetchRegistrations(),
+          fetchPaymentRecords(),
           fetchCourses(),
           fetchCohorts(),
           fetchInboxMessages(),
@@ -997,13 +1039,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   ) => {
     const next = current === "Pending" ? "Complete" : "Pending";
     await registrationStore.updateStatus(uid, next);
-    await fetchRegistrations();
+    await Promise.all([fetchRegistrations(), fetchPaymentRecords()]);
   };
 
   const handleDelete = async (uid: string) => {
     if (confirm("Are you sure you want to delete this registration?")) {
       await registrationStore.delete(uid);
-      await fetchRegistrations();
+      await Promise.all([fetchRegistrations(), fetchPaymentRecords()]);
     }
   };
 
@@ -1096,9 +1138,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const complete = registrations.filter(
       (r) => r.status === "Complete",
     ).length;
-    const revenue = registrations
+    const paymentsRevenue = paymentRecords.reduce(
+      (sum, payment) => sum + (Number(payment.amount) || 0),
+      0,
+    );
+    const paidUids = new Set(
+      paymentRecords.map((payment) => payment.uid).filter(Boolean),
+    );
+    const legacyRevenue = registrations
       .filter((r) => r.status === "Complete")
+      .filter((r) => !paidUids.has(r.uid))
       .reduce((sum, r) => sum + (Number(r.totalPrice) || 0), 0);
+    const revenue = paymentsRevenue + legacyRevenue;
 
     const pendingPayments = registrations.filter(
       (r) => !!(r as any).pendingPayment,
@@ -1111,7 +1162,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       revenue,
       pendingPaymentsCount: pendingPayments.length,
     };
-  }, [registrations]);
+  }, [registrations, paymentRecords]);
 
   const pendingPayments = useMemo(() => {
     return registrations
@@ -1529,7 +1580,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
 
       setSelectedCohortId(docId);
-      await fetchSessions(docId);
+      await handleRefreshAll();
 
       alert(`Active cohort set for "${res.path}" → ${res.cohortKey}`);
     } catch (e: any) {
@@ -1572,7 +1623,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
 
       setSelectedCohortId(docId);
-      await fetchSessions(docId);
+      await handleRefreshAll();
     } catch (e: any) {
       console.error("addCohort failed:", e);
       alert(e?.message || "Failed to create cohort.");
@@ -1588,11 +1639,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     try {
       await registrationStore.deleteCohort(c.id);
-      await fetchCohorts();
       if (selectedCohortId === c.id) {
         setSelectedCohortId("");
         setSessions([]);
       }
+      await handleRefreshAll();
     } catch (e) {
       console.error("deleteCohort failed:", e);
       alert("Failed to delete cohort.");
@@ -1706,7 +1757,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }
 
         closeSessionModal();
-        await fetchSessions(selectedCohortId);
+        await handleRefreshAll();
       } catch (e: any) {
         console.error("saveSession failed:", e);
         setSessionError(e?.message || "Failed to save session.");
@@ -1722,7 +1773,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setSessionBusyId(s.id);
     try {
       await registrationStore.deleteCohortSession(selectedCohortId, s.id);
-      await fetchSessions(selectedCohortId);
+      await handleRefreshAll();
     } catch (e) {
       console.error("deleteSession failed:", e);
       alert("Failed to delete session.");
@@ -1766,7 +1817,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           sentBy: "admin",
         });
         setMessageForm({ title: "", body: "", ctaLabel: "", ctaUrl: "" });
-        await fetchCohortMessages(selectedCohortId);
+        await handleRefreshAll();
       } catch (err: any) {
         console.error("sendMessageToCohort failed:", err);
         setMessageError(err?.message || "Failed to send cohort message.");
@@ -1820,7 +1871,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       );
       setEditingMessageId(null);
       setMessageForm({ title: "", body: "", ctaLabel: "", ctaUrl: "" });
-      await fetchCohortMessages(selectedCohortId);
+      await handleRefreshAll();
     } catch (err: any) {
       console.error("updateMessage failed:", err);
       setMessageError(err?.message || "Failed to update message.");
@@ -1839,7 +1890,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (editingMessageId === msgId) {
         cancelEditMessage();
       }
-      await fetchCohortMessages(selectedCohortId);
+      await handleRefreshAll();
     } catch (err: any) {
       console.error("deleteMessage failed:", err);
       setMessageError(err?.message || "Failed to delete message.");
@@ -1858,7 +1909,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setPendingBusyUid(uid);
     try {
       await registrationStore.clearPendingPayment(uid);
-      await fetchRegistrations();
+      await Promise.all([fetchRegistrations(), fetchPaymentRecords()]);
     } catch (e) {
       console.error("clearPending failed:", e);
       alert("Failed to clear pending payment.");
@@ -1893,7 +1944,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           pending.reference,
         );
       }
-      await fetchRegistrations();
+      await Promise.all([fetchRegistrations(), fetchPaymentRecords()]);
     } catch (e) {
       console.error("approvePending failed:", e);
       alert("Failed to approve pending payment.");
@@ -2992,11 +3043,38 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
 
                 <button
-                  onClick={fetchRegistrations}
+                  onClick={() =>
+                    Promise.all([fetchRegistrations(), fetchPaymentRecords()])
+                  }
                   className={subtleActionClass}
                 >
                   Refresh
                 </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 p-5">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                    Verified Payment Records
+                  </p>
+                  <p className="mt-3 text-2xl font-black text-slate-900 dark:text-white">
+                    {paymentRecords.length}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 p-5">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                    Verified Payments Total
+                  </p>
+                  <p className="mt-3 text-2xl font-black text-slate-900 dark:text-white">
+                    ₦
+                    {paymentRecords
+                      .reduce(
+                        (sum, payment) => sum + (Number(payment.amount) || 0),
+                        0,
+                      )
+                      .toLocaleString()}
+                  </p>
+                </div>
               </div>
 
               {pendingPayments.length === 0 ? (

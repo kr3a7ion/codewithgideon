@@ -380,6 +380,8 @@ const Payment: React.FC<PaymentProps> = ({
       expectedAmountKobo: totalPriceKobo,
       baseAmountKobo: basePriceKobo,
       processingFeeKobo: processingFeeKobo,
+      baseAmount: basePrice,
+      weeklyRate,
       app: "codewithgideon-web",
       ts: Date.now(),
     }),
@@ -393,7 +395,9 @@ const Payment: React.FC<PaymentProps> = ({
       cohortId,
       cohortLabel,
       cohortKey,
-      totalPrice,
+      totalPriceKobo,
+      basePrice,
+      weeklyRate,
     ],
   );
 
@@ -546,6 +550,8 @@ const Payment: React.FC<PaymentProps> = ({
         kind: u.isTopUp ? "topup" : "initial",
         weeks: topUpWeeks,
         amount: totalPrice,
+        baseAmount: basePrice,
+        weeklyRate,
         reference,
       });
 

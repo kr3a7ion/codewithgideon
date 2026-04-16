@@ -124,6 +124,20 @@ const PINNED_MAX_WEEKS: Record<string, number> = {
   "ai-assisted development": 4,
 };
 
+const PINNED_WEEKLY_RATES: Record<string, number> = {
+  "flutter & mobile app development": 10000,
+  "web development & wordpress": 10000,
+  "ai-assisted development": 10000,
+};
+
+const parsePricePerWeek = (label: string, fallback = 10000) => {
+  const s = String(label || "").toLowerCase();
+  const hasK = s.includes("k");
+  const num = parseInt(s.replace(/[^\d]/g, ""), 10);
+  if (!Number.isFinite(num) || num <= 0) return fallback;
+  return hasK ? num * 1000 : num;
+};
+
 type VerifyBody = {
   reference?: string;
   uid?: string;
@@ -226,6 +240,14 @@ export const initializePaystackPayment = onRequest(
           0,
           Math.round(amount / 100),
         );
+        const baseAmountNaira = Math.max(
+          0,
+          Number((meta as any).baseAmount || 0),
+        );
+        const weeklyRateNaira = Math.max(
+          0,
+          Number((meta as any).weeklyRate || 0),
+        );
 
         if (!email || !isValidEmail(email)) {
           res.status(400).json({ok: false, error: "Valid email is required"});
@@ -285,6 +307,8 @@ export const initializePaystackPayment = onRequest(
                 status: "Pending",
                 weeks,
                 amount: pendingAmountNaira,
+                ...(baseAmountNaira > 0 ? {baseAmount: baseAmountNaira} : {}),
+                ...(weeklyRateNaira > 0 ? {weeklyRate: weeklyRateNaira} : {}),
                 reference,
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
               },
@@ -471,6 +495,10 @@ export const verifyPaystackPayment = onRequest(
 
           const userData = userSnap.data() || {};
           const originalWeeks = Number(userData.weeksToCommit || 0) || 0;
+          const currentTotalPrice = Number(userData.totalPrice || 0) || 0;
+          const normalizedPath = String(path || userData.path || "")
+            .trim()
+            .toLowerCase();
 
           // ✅ requested weeks (still untrusted)
           const requestedWeeks =
@@ -480,19 +508,23 @@ export const verifyPaystackPayment = onRequest(
 
           // ✅ resolve maxWeeks (truth fields first)
           let maxWeeks = 4;
+          let resolvedWeeklyRate = clamp(
+            Number(body.weeklyRate) || 0,
+            0,
+            1000000,
+          );
 
           // 0) client hint (only if sane)
           const hintedMax = Number(body.courseMaxWeeks);
           if (Number.isFinite(hintedMax) && hintedMax > 0 && hintedMax <= 104) {
             maxWeeks = Math.floor(hintedMax);
           } else {
-            const normalizedPath = String(path || userData.path || "")
-              .trim()
-              .toLowerCase();
-
             // 1) pinned
             if (PINNED_MAX_WEEKS[normalizedPath]) {
               maxWeeks = PINNED_MAX_WEEKS[normalizedPath];
+              if (!(resolvedWeeklyRate > 0)) {
+                resolvedWeeklyRate = PINNED_WEEKLY_RATES[normalizedPath] || 10000;
+              }
             } else {
               // 2) Firestore course lookup using tx.get ONLY
               const coursesCol = db.collection("courses");
@@ -506,6 +538,7 @@ export const verifyPaystackPayment = onRequest(
                   // We'll treat it as "found" via direct data below
                   const foundData = cSnap.data() as any;
                   const truthWeeks = Number(foundData?.weeks);
+                  const truthRate = Number(foundData?.pricePerWeek);
                   if (Number.isFinite(truthWeeks) && truthWeeks > 0) {
                     maxWeeks = Math.floor(truthWeeks);
                   } else {
@@ -513,6 +546,15 @@ export const verifyPaystackPayment = onRequest(
                       String(foundData?.duration || "4"),
                       4,
                     );
+                  }
+                  if (!(resolvedWeeklyRate > 0)) {
+                    resolvedWeeklyRate =
+                      Number.isFinite(truthRate) && truthRate > 0 ?
+                        Math.floor(truthRate) :
+                        parsePricePerWeek(
+                          String(foundData?.priceLabel || "₦10k/wk"),
+                          10000,
+                        );
                   }
 
                   // continue without query
@@ -538,6 +580,7 @@ export const verifyPaystackPayment = onRequest(
               if (found) {
                 const foundData = found.data() as any;
                 const truthWeeks = Number(foundData?.weeks);
+                const truthRate = Number(foundData?.pricePerWeek);
                 if (Number.isFinite(truthWeeks) && truthWeeks > 0) {
                   maxWeeks = Math.floor(truthWeeks);
                 } else {
@@ -546,7 +589,26 @@ export const verifyPaystackPayment = onRequest(
                     4,
                   );
                 }
+                if (!(resolvedWeeklyRate > 0)) {
+                  resolvedWeeklyRate =
+                    Number.isFinite(truthRate) && truthRate > 0 ?
+                      Math.floor(truthRate) :
+                      parsePricePerWeek(
+                        String(foundData?.priceLabel || "₦10k/wk"),
+                        10000,
+                      );
+                }
               }
+            }
+          }
+
+          if (!(resolvedWeeklyRate > 0)) {
+            if (PINNED_WEEKLY_RATES[normalizedPath]) {
+              resolvedWeeklyRate = PINNED_WEEKLY_RATES[normalizedPath];
+            } else if (originalWeeks > 0 && currentTotalPrice > 0) {
+              resolvedWeeklyRate = Math.round(currentTotalPrice / originalWeeks);
+            } else {
+              resolvedWeeklyRate = 10000;
             }
           }
 
@@ -560,6 +622,8 @@ export const verifyPaystackPayment = onRequest(
           } else {
             safeWeeks = clamp(requestedWeeks, 1, Math.max(1, maxWeeks));
           }
+
+          const baseCourseAmountNaira = safeWeeks * resolvedWeeklyRate;
 
           // ✅ update user (simple, no TS generics needed)
           const updates: Record<string, any> = {
@@ -579,9 +643,12 @@ export const verifyPaystackPayment = onRequest(
             if (safeWeeks > 0) {
               updates.weeksToCommit =
                 admin.firestore.FieldValue.increment(safeWeeks);
+              updates.totalPrice =
+                admin.firestore.FieldValue.increment(baseCourseAmountNaira);
             }
           } else {
             updates.weeksToCommit = safeWeeks;
+            updates.totalPrice = baseCourseAmountNaira;
           }
 
           tx.update(userRef, updates);
@@ -592,6 +659,8 @@ export const verifyPaystackPayment = onRequest(
             amountKobo,
             email: data?.customer?.email || null,
             weeks: safeWeeks,
+            baseAmount: baseCourseAmountNaira,
+            weeklyRate: resolvedWeeklyRate,
             kind,
 
             cohortId: cohortId || null,
