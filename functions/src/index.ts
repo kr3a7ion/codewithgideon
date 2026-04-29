@@ -177,13 +177,34 @@ export const sendMentorRequest = onCall(
     const sourceSuffix = contextType === "recorded" ? "recorded" : "live";
 
     try {
-      // The admin inbox and mobile thread reader already understand this shape.
-      const docRef = await db.collection("contactMessages").add({
+      // Reuse a single mentor thread per student + class context so mobile can
+      // render one continuous chat timeline instead of stitching many roots.
+      const existingThreads = await db
+        .collection("contactMessages")
+        .where("studentUid", "==", request.auth.uid)
+        .get();
+
+      const matchingThread = existingThreads.docs
+        .filter((doc) => {
+          const data = doc.data() || {};
+          return (
+            String(data.category || "") === "ask-mentor" &&
+            String(data.sessionId || "") === sessionId
+          );
+        })
+        .sort((a, b) => {
+          const aMs = a.updateTime?.toMillis() || a.createTime?.toMillis() || 0;
+          const bMs = b.updateTime?.toMillis() || b.createTime?.toMillis() || 0;
+          return bMs - aMs;
+        })[0];
+
+      const now = FieldValue.serverTimestamp();
+      const basePayload = {
         name,
         email,
-        body: message,
-        message,
         lastMessage: message,
+        lastMessageAt: now,
+        updatedAt: now,
         status: "new",
         source: `mobile-ask-mentor:${sourceSuffix}`,
         category: "ask-mentor",
@@ -202,13 +223,36 @@ export const sendMentorRequest = onCall(
         appCheck: {
           appId: request.app?.appId || null,
         },
-        createdAt: FieldValue.serverTimestamp(),
-        lastMessageAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
+      };
+
+      let threadRef;
+
+      if (matchingThread) {
+        threadRef = matchingThread.ref;
+        await threadRef.set(basePayload, {merge: true});
+      } else {
+        threadRef = await db.collection("contactMessages").add({
+          ...basePayload,
+          body: message,
+          message,
+          createdAt: now,
+        });
+      }
+
+      await threadRef.collection("messages").add({
+        body: message,
+        message,
+        senderType: "user",
+        senderRole: "user",
+        senderName: name,
+        senderEmail: email,
+        source: `mobile-ask-mentor:${sourceSuffix}`,
+        sessionId,
+        createdAt: now,
       });
 
       logger.info("Mentor request saved", {
-        docId: docRef.id,
+        docId: threadRef.id,
         uid: request.auth.uid,
         sessionId,
         contextType: sourceSuffix,
@@ -217,7 +261,7 @@ export const sendMentorRequest = onCall(
 
       return {
         success: true,
-        conversationId: docRef.id,
+        conversationId: threadRef.id,
       };
     } catch (error) {
       logger.error("Failed to save mentor request", error);
