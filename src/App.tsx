@@ -26,6 +26,7 @@ import StudentDashboard from '../components/StudentDashboard';
 import { useAppLogic } from '../hooks/useAppLogic';
 import CreateAccount from '@/components/CreateAccount';
 import ContinueRegistration from '@/components/ContinueRegistration';
+import VerifyEmail from '../components/VerifyEmail';
 
 export type View =
   | "home"
@@ -44,7 +45,8 @@ export type View =
   | "admin-login"
   | "admin-dashboard"
   | "create-account"
-  | "continue-registration";
+  | "continue-registration"
+  | "verify-email";
 
 const App: React.FC = () => {
   const {
@@ -60,6 +62,7 @@ const App: React.FC = () => {
     isAdminLoggedIn,
     isStudentLoggedIn,
     studentProfile,
+    verificationState,
 
     // 🧭 Actions
     navigateTo,
@@ -68,7 +71,11 @@ const App: React.FC = () => {
     loginAdmin,
     logoutAdmin,
     loginStudent,
+    loginStudentWithGoogle,
     logoutStudent,
+    resendVerificationEmail,
+    refreshVerifiedSession,
+    logoutPendingVerification,
   } = useAppLogic();
 
   return (
@@ -133,22 +140,46 @@ const App: React.FC = () => {
 
         {/* REGISTRATION */}
         {currentView === "create-account" && (
-          <CreateAccount onNavigate={navigateTo} />
+          <CreateAccount
+            onNavigate={navigateTo}
+            onGoogleAuth={loginStudentWithGoogle}
+          />
         )}
 
+        {currentView === "verify-email" &&
+          (verificationState ? (
+            <VerifyEmail
+              role={verificationState.role}
+              email={verificationState.email}
+              onNavigate={navigateTo}
+              onRefresh={refreshVerifiedSession}
+              onResend={resendVerificationEmail}
+              onLogout={logoutPendingVerification}
+            />
+          ) : (
+            <StudentLogin
+              onNavigate={navigateTo}
+              onLogin={loginStudent}
+              onGoogleAuth={loginStudentWithGoogle}
+            />
+          ))}
+
         {currentView === "continue-registration" &&
-          (isStudentLoggedIn ? (
+          (
             <ContinueRegistration
               onNavigate={navigateTo}
               selectedPath={selectedPath}
+              onGoogleAuth={loginStudentWithGoogle}
             />
-          ) : (
-            <StudentLogin onNavigate={navigateTo} onLogin={loginStudent} />
-          ))}
+          )}
 
         {/* STUDENT AUTH */}
         {currentView === "student-login" && (
-          <StudentLogin onNavigate={navigateTo} onLogin={loginStudent} />
+          <StudentLogin
+            onNavigate={navigateTo}
+            onLogin={loginStudent}
+            onGoogleAuth={loginStudentWithGoogle}
+          />
         )}
 
         {currentView === "student-dashboard" &&
@@ -159,7 +190,11 @@ const App: React.FC = () => {
               onLogout={logoutStudent}
             />
           ) : (
-            <StudentLogin onNavigate={navigateTo} onLogin={loginStudent} />
+            <StudentLogin
+              onNavigate={navigateTo}
+              onLogin={loginStudent}
+              onGoogleAuth={loginStudentWithGoogle}
+            />
           ))}
 
         {/* PAYMENT */}

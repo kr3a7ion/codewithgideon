@@ -233,6 +233,9 @@ payments
 
 Contact messages should **not be directly written from the client**.
 
+Firestore security rules for this project are managed in the Firebase Console,
+not from a local `firestore.rules` file in this repo.
+
 Example:
 
 
@@ -328,10 +331,14 @@ npm run build
 
 # Deploy
 
-Deploy everything:
+Deploy hosting and functions from this repo:
 
 
 firebase deploy
+
+
+This repo does not deploy Firestore rules. Update and publish Firestore rules
+directly in the Firebase Console for the connected project.
 
 
 Deploy only functions:
@@ -394,5 +401,4 @@ https://tiktok.com/@codewithgideon
 # License
 
 This project is intended for educational and commercial use under the author's terms
-
 

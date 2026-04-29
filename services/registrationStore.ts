@@ -1,4 +1,4 @@
-import { db, auth } from "./firebase";
+import { db, auth, setAuthPersistenceMode } from "./firebase";
 import {
   doc,
   setDoc,
@@ -19,10 +19,16 @@ import {
 } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword,
+  fetchSignInMethodsForEmail,
+  GoogleAuthProvider,
+  linkWithCredential,
   signInWithEmailAndPassword,
+  signInWithPopup,
   sendPasswordResetEmail,
+  sendEmailVerification,
   signOut,
   onAuthStateChanged,
+  reload,
 } from "firebase/auth";
 
 function waitForAuthUid(auth: any, expectedUid: string, timeoutMs = 8000) {
@@ -39,6 +45,35 @@ function waitForAuthUid(auth: any, expectedUid: string, timeoutMs = 8000) {
     });
   });
 }
+
+class PendingGoogleLinkError extends Error {
+  code = "auth/account-exists-with-different-credential";
+  requiresPasswordLink = false;
+  signInMethods: string[];
+  email: string;
+
+  constructor(email: string, signInMethods: string[]) {
+    const methods = signInMethods.map((item) => item.toLowerCase());
+    const requiresPasswordLink = methods.includes("password");
+    super(
+      requiresPasswordLink
+        ? "This email already has a password login. Sign in with your password once and we will connect Google automatically for your next login."
+        : "This email already uses another sign-in method. Use that sign-in method first, then try Google again.",
+    );
+    this.name = "PendingGoogleLinkError";
+    this.email = email;
+    this.signInMethods = signInMethods;
+    this.requiresPasswordLink = requiresPasswordLink;
+  }
+}
+
+type PendingGoogleLinkState = {
+  email: string;
+  credential: ReturnType<typeof GoogleAuthProvider.credentialFromError>;
+  signInMethods: string[];
+} | null;
+
+let pendingGoogleLink: PendingGoogleLinkState = null;
 
 // ✅ allow UI to send ms number / ISO string / Timestamp
 type TimestampLike = Timestamp | number | string;
@@ -164,6 +199,40 @@ export type CourseDoc = {
   syllabus?: SyllabusWeek[];
 };
 
+export type ResourceDoc = {
+  id: string;
+  name: string;
+  type: string;
+  size: string;
+  folder: string;
+  url: string;
+  description?: string;
+  pathId?: string;
+  courseId?: string;
+  sessionId?: string;
+  sessionWeek?: number;
+  isPublished: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type CommunitySpaceDoc = {
+  id: string;
+  title: string;
+  description: string;
+  cohortId?: string;
+  cohortLabel?: string;
+  pathId?: string;
+  roomUrl?: string;
+  ctaLabel?: string;
+  category?: string;
+  icon?: string;
+  isPublished: boolean;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type SessionDoc = {
   id: string;
 
@@ -208,8 +277,21 @@ export type SessionPatch = Partial<
 
 type CourseInput = Omit<CourseDoc, "id" | "createdAt" | "updatedAt">;
 type CoursePatch = Partial<Omit<CourseDoc, "id" | "createdAt" | "updatedAt">>;
+type ResourceInput = Omit<ResourceDoc, "id" | "createdAt" | "updatedAt">;
+type ResourcePatch = Partial<
+  Omit<ResourceDoc, "id" | "createdAt" | "updatedAt">
+>;
+type CommunitySpaceInput = Omit<
+  CommunitySpaceDoc,
+  "id" | "createdAt" | "updatedAt"
+>;
+type CommunitySpacePatch = Partial<
+  Omit<CommunitySpaceDoc, "id" | "createdAt" | "updatedAt">
+>;
 
 const coursesColRef = collection(db, "courses");
+const resourcesColRef = collection(db, "resources");
+const communitySpacesColRef = collection(db, "communitySpaces");
 const usersColRef = collection(db, "users");
 const pathsColRef = collection(db, "paths");
 
@@ -686,6 +768,7 @@ export const registrationStore = {
     if (!password || String(password).length < 6)
       throw new Error("Password must be at least 6 characters.");
 
+    await setAuthPersistenceMode("local");
     const userCredential = await createUserWithEmailAndPassword(
       auth,
       em,
@@ -693,10 +776,80 @@ export const registrationStore = {
     );
     const user = userCredential.user;
 
+    // Send verification immediately so every new account starts with the same
+    // security step as the mobile app.
+    await sendEmailVerification(user);
+
     // force token (good practice)
     await user.getIdToken(true);
 
     return { uid: user.uid, email: user.email || em };
+  },
+
+  async signInStudentWithGoogle(): Promise<{
+    uid: string;
+    email: string;
+    emailVerified: boolean;
+  }> {
+    await setAuthPersistenceMode("local");
+    const provider = new GoogleAuthProvider();
+    provider.addScope("email");
+    provider.setCustomParameters({ prompt: "select_account" });
+
+    try {
+      const cred = await signInWithPopup(auth, provider);
+      const user = cred.user;
+      if (!user) {
+        throw new Error("Google sign-in did not return a user.");
+      }
+
+      await user.getIdToken(true);
+      await waitForAuthUid(auth, user.uid, 15000);
+
+      return {
+        uid: user.uid,
+        email: String(user.email || "").trim(),
+        emailVerified: !!user.emailVerified,
+      };
+    } catch (err: any) {
+      const code = String(err?.code || "").toLowerCase();
+      if (code.includes("account-exists-with-different-credential")) {
+        const email = String(err?.customData?.email || "").trim();
+        const credential = GoogleAuthProvider.credentialFromError(err);
+
+        if (email && credential) {
+          const signInMethods = await fetchSignInMethodsForEmail(auth, email);
+          pendingGoogleLink = { email, credential, signInMethods };
+          throw new PendingGoogleLinkError(email, signInMethods);
+        }
+      }
+
+      throw err;
+    }
+  },
+
+  async linkPendingGoogleProviderIfNeeded(user = auth.currentUser): Promise<void> {
+    const pending = pendingGoogleLink;
+    if (!pending || !user?.email) return;
+
+    if (String(user.email).trim().toLowerCase() !== pending.email.toLowerCase()) {
+      return;
+    }
+
+    try {
+      await linkWithCredential(user, pending.credential);
+    } catch (err: any) {
+      const code = String(err?.code || "").toLowerCase();
+      if (
+        !code.includes("provider-already-linked") &&
+        !code.includes("credential-already-in-use") &&
+        !code.includes("invalid-credential")
+      ) {
+        throw err;
+      }
+    } finally {
+      pendingGoogleLink = null;
+    }
   },
 
   // =========================
@@ -862,7 +1015,12 @@ export const registrationStore = {
     return user.uid;
   },
 
-  async login(email: string, password: string): Promise<string> {
+  async login(
+    email: string,
+    password: string,
+    options?: { persistence?: "local" | "session" },
+  ): Promise<string> {
+    await setAuthPersistenceMode(options?.persistence || "local");
     const cred = await signInWithEmailAndPassword(auth, email, password);
     return cred.user.uid;
   },
@@ -940,6 +1098,29 @@ export const registrationStore = {
 
   async resetPassword(email: string): Promise<void> {
     await sendPasswordResetEmail(auth, email);
+  },
+
+  async sendCurrentUserVerificationEmail(): Promise<void> {
+    const user = auth.currentUser;
+    if (!user) throw new Error("No signed-in user found.");
+    await sendEmailVerification(user);
+  },
+
+  async reloadCurrentUser(): Promise<{
+    uid: string;
+    email: string;
+    emailVerified: boolean;
+  } | null> {
+    const user = auth.currentUser;
+    if (!user) return null;
+
+    await reload(user);
+
+    return {
+      uid: user.uid,
+      email: String(user.email || "").trim(),
+      emailVerified: !!user.emailVerified,
+    };
   },
 
   async logout(): Promise<void> {
@@ -1461,6 +1642,200 @@ export const registrationStore = {
 
   async deleteCourse(courseId: string): Promise<void> {
     await deleteDoc(doc(db, "courses", courseId));
+  },
+
+  // =========================
+  // RESOURCES (Admin-managed)
+  // =========================
+  async getResources(): Promise<ResourceDoc[]> {
+    const snap = await getDocs(
+      query(resourcesColRef, orderBy("updatedAt", "desc")),
+    );
+    return snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as any),
+    })) as ResourceDoc[];
+  },
+
+  async addResource(input: ResourceInput): Promise<string> {
+    const payload = stripUndefined({
+      name: String(input.name || "").trim(),
+      type: String(input.type || "PDF").trim() || "PDF",
+      size: String(input.size || "").trim(),
+      folder: String(input.folder || "General").trim() || "General",
+      url: String(input.url || "").trim(),
+      description: input.description
+        ? String(input.description).trim()
+        : undefined,
+      pathId: input.pathId ? String(input.pathId).trim() : undefined,
+      courseId: input.courseId ? String(input.courseId).trim() : undefined,
+      sessionId: input.sessionId ? String(input.sessionId).trim() : undefined,
+      sessionWeek:
+        input.sessionWeek !== undefined && input.sessionWeek !== null
+          ? (() => {
+              const week = Number(input.sessionWeek);
+              return Number.isFinite(week) && week >= 1 && week <= 52
+                ? Math.trunc(week)
+                : undefined;
+            })()
+          : undefined,
+      isPublished: input.isPublished !== false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    if (!payload.name) throw new Error("Resource name is required.");
+    if (!payload.url) throw new Error("Resource URL is required.");
+
+    const ref = await addDoc(resourcesColRef, payload);
+    return ref.id;
+  },
+
+  async updateResource(resourceId: string, patch: ResourcePatch): Promise<void> {
+    const cleanPatch: any = { updatedAt: Date.now() };
+
+    if (patch.name !== undefined) cleanPatch.name = String(patch.name).trim();
+    if (patch.type !== undefined) cleanPatch.type = String(patch.type).trim();
+    if (patch.size !== undefined) cleanPatch.size = String(patch.size).trim();
+    if (patch.folder !== undefined)
+      cleanPatch.folder = String(patch.folder).trim() || "General";
+    if (patch.url !== undefined) cleanPatch.url = String(patch.url).trim();
+    if (patch.description !== undefined)
+      cleanPatch.description = patch.description
+        ? String(patch.description).trim()
+        : deleteField();
+    if (patch.pathId !== undefined) {
+      const value = String(patch.pathId || "").trim();
+      cleanPatch.pathId = value ? value : deleteField();
+    }
+    if (patch.courseId !== undefined) {
+      const value = String(patch.courseId || "").trim();
+      cleanPatch.courseId = value ? value : deleteField();
+    }
+    if (patch.sessionId !== undefined) {
+      const value = String(patch.sessionId || "").trim();
+      cleanPatch.sessionId = value ? value : deleteField();
+    }
+    if (patch.sessionWeek !== undefined) {
+      const numericWeek = Number(patch.sessionWeek);
+      cleanPatch.sessionWeek =
+        Number.isFinite(numericWeek) && numericWeek >= 1 && numericWeek <= 52
+          ? Math.trunc(numericWeek)
+          : deleteField();
+    }
+    if (patch.isPublished !== undefined)
+      cleanPatch.isPublished = !!patch.isPublished;
+
+    await updateDoc(doc(db, "resources", resourceId), stripUndefined(cleanPatch));
+  },
+
+  async deleteResource(resourceId: string): Promise<void> {
+    await deleteDoc(doc(db, "resources", resourceId));
+  },
+
+  // =========================
+  // COMMUNITY SPACES (Admin-managed)
+  // =========================
+  async getCommunitySpaces(): Promise<CommunitySpaceDoc[]> {
+    const snap = await getDocs(query(communitySpacesColRef, orderBy("sortOrder", "asc")));
+    return snap.docs
+      .map((d) => ({
+        id: d.id,
+        ...(d.data() as any),
+      }))
+      .sort((a: any, b: any) => {
+        const sortOrder = Number(a.sortOrder || 0) - Number(b.sortOrder || 0);
+        if (sortOrder !== 0) return sortOrder;
+        return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+      }) as CommunitySpaceDoc[];
+  },
+
+  async addCommunitySpace(input: CommunitySpaceInput): Promise<string> {
+    const payload = stripUndefined({
+      title: String(input.title || "").trim(),
+      description: String(input.description || "").trim(),
+      cohortId: input.cohortId ? String(input.cohortId).trim() : undefined,
+      cohortLabel: input.cohortLabel
+        ? String(input.cohortLabel).trim()
+        : undefined,
+      pathId: input.pathId ? String(input.pathId).trim() : undefined,
+      roomUrl: input.roomUrl ? String(input.roomUrl).trim() : undefined,
+      ctaLabel: input.ctaLabel ? String(input.ctaLabel).trim() : undefined,
+      category: input.category ? String(input.category).trim() : "General",
+      icon: input.icon ? String(input.icon).trim() : "forum",
+      isPublished: input.isPublished !== false,
+      sortOrder: Number.isFinite(Number(input.sortOrder))
+        ? Math.max(0, Math.trunc(Number(input.sortOrder)))
+        : 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    if (!payload.title || payload.title.length < 2) {
+      throw new Error("Space title must be at least 2 characters.");
+    }
+    if (!payload.description || payload.description.length < 8) {
+      throw new Error("Space description must be at least 8 characters.");
+    }
+
+    const ref = await addDoc(communitySpacesColRef, payload);
+    return ref.id;
+  },
+
+  async updateCommunitySpace(
+    spaceId: string,
+    patch: CommunitySpacePatch,
+  ): Promise<void> {
+    const cleanPatch: any = { updatedAt: Date.now() };
+
+    if (patch.title !== undefined) cleanPatch.title = String(patch.title).trim();
+    if (patch.description !== undefined)
+      cleanPatch.description = String(patch.description).trim();
+    if (patch.cohortId !== undefined) {
+      const value = String(patch.cohortId || "").trim();
+      cleanPatch.cohortId = value ? value : deleteField();
+    }
+    if (patch.cohortLabel !== undefined) {
+      const value = String(patch.cohortLabel || "").trim();
+      cleanPatch.cohortLabel = value ? value : deleteField();
+    }
+    if (patch.pathId !== undefined) {
+      const value = String(patch.pathId || "").trim();
+      cleanPatch.pathId = value ? value : deleteField();
+    }
+    if (patch.roomUrl !== undefined) {
+      const value = String(patch.roomUrl || "").trim();
+      cleanPatch.roomUrl = value ? value : deleteField();
+    }
+    if (patch.ctaLabel !== undefined) {
+      const value = String(patch.ctaLabel || "").trim();
+      cleanPatch.ctaLabel = value ? value : deleteField();
+    }
+    if (patch.category !== undefined) {
+      const value = String(patch.category || "").trim();
+      cleanPatch.category = value ? value : deleteField();
+    }
+    if (patch.icon !== undefined) {
+      const value = String(patch.icon || "").trim();
+      cleanPatch.icon = value ? value : deleteField();
+    }
+    if (patch.isPublished !== undefined)
+      cleanPatch.isPublished = !!patch.isPublished;
+    if (patch.sortOrder !== undefined) {
+      const numericValue = Number(patch.sortOrder);
+      cleanPatch.sortOrder = Number.isFinite(numericValue)
+        ? Math.max(0, Math.trunc(numericValue))
+        : 0;
+    }
+
+    await updateDoc(
+      doc(db, "communitySpaces", spaceId),
+      stripUndefined(cleanPatch),
+    );
+  },
+
+  async deleteCommunitySpace(spaceId: string): Promise<void> {
+    await deleteDoc(doc(db, "communitySpaces", spaceId));
   },
 
   // ✅ Student unlock helper (upgraded: prefer pathId, fallback to path string)

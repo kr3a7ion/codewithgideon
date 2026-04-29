@@ -32,7 +32,7 @@ const Hero: React.FC = () => {
   };
 
   return (
-    <section className="relative pt-32 pb-20 md:pt-48 md:pb-40 overflow-hidden bg-white dark:bg-slate-950 transition-colors">
+    <section className="relative overflow-hidden bg-white pt-24 pb-18 transition-colors min-h-[calc(100svh-5.5rem)] md:pt-32 md:pb-24 lg:min-h-[calc(100svh-6.5rem)] dark:bg-slate-950">
       {/* Sophisticated Background Elements */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-full -z-10 overflow-hidden">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-600/10 blur-[120px] animate-pulse" />
@@ -50,7 +50,7 @@ const Hero: React.FC = () => {
         />
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 flex flex-col lg:flex-row items-center gap-16 lg:gap-24">
+      <div className="mx-auto flex min-h-[inherit] max-w-7xl flex-col items-center gap-14 px-6 lg:flex-row lg:gap-24">
         {/* Left Content */}
         <div className="lg:w-1/2 relative z-20 text-center lg:text-left">
           <motion.div

@@ -12,13 +12,19 @@ import {
   Code2,
 } from "lucide-react";
 import { View } from "../src/App";
+import AuthStatusCard from "./AuthStatusCard";
+import GoogleAuthButton from "./GoogleAuthButton";
 import { registrationStore } from "../services/registrationStore";
 
 interface CreateAccountProps {
   onNavigate: (view: View) => void;
+  onGoogleAuth?: () => Promise<{ success: boolean; error?: string }>;
 }
 
-const CreateAccount: React.FC<CreateAccountProps> = ({ onNavigate }) => {
+const CreateAccount: React.FC<CreateAccountProps> = ({
+  onNavigate,
+  onGoogleAuth,
+}) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -33,6 +39,35 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onNavigate }) => {
     () => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail),
     [trimmedEmail],
   );
+
+  const humanizeAuthError = (err: any) => {
+    const code = String(err?.code || "").toLowerCase();
+    const message = String(err?.message || "").trim();
+
+    if (code.includes("email-already-in-use")) {
+      return "An account already exists for this email. Sign in instead.";
+    }
+    if (code.includes("invalid-email")) {
+      return "Please enter a valid email address.";
+    }
+    if (code.includes("weak-password")) {
+      return "Password must be at least 6 characters.";
+    }
+    if (code.includes("popup-closed-by-user")) {
+      return "Google sign-in was cancelled before it finished.";
+    }
+    if (code.includes("popup-blocked")) {
+      return "Google sign-in was blocked. Please allow pop-ups and try again.";
+    }
+    if (code.includes("operation-not-allowed")) {
+      return "Google sign-in is not enabled yet. Please contact support.";
+    }
+    if (code.includes("network-request-failed")) {
+      return "Network error. Check your connection and try again.";
+    }
+
+    return message || "Account creation failed.";
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,14 +108,33 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onNavigate }) => {
         JSON.stringify({
           email: created?.email || trimmedEmail,
           createdAt: Date.now(),
+          verificationRequired: true,
         }),
       );
 
-      setSuccess("Account created successfully. Please login to continue.");
-      await registrationStore.logout();
-      onNavigate("student-login");
+      setSuccess(
+        "Account created. We sent a verification link to your email address.",
+      );
+      onNavigate("verify-email");
     } catch (err: any) {
-      setError(err?.message || "Account creation failed.");
+      setError(humanizeAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleAuth = async () => {
+    setError("");
+    setSuccess("");
+    setLoading(true);
+    try {
+      if (!onGoogleAuth) throw new Error("Google sign-in is not available.");
+      const res = await onGoogleAuth();
+      if (res && res.success === false) {
+        throw new Error(res.error || "Google sign-in failed. Please try again.");
+      }
+    } catch (err: any) {
+      setError(humanizeAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -122,12 +176,8 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onNavigate }) => {
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  className="p-4 rounded-2xl border bg-teal-50 border-teal-100 text-teal-800 dark:bg-teal-500/10 dark:border-teal-500/20 dark:text-teal-200 flex items-start gap-3"
                 >
-                  <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
-                  <p className="text-sm font-medium leading-relaxed">
-                    {success}
-                  </p>
+                  <AuthStatusCard tone="success" message={success} />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -139,12 +189,8 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onNavigate }) => {
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-2xl flex items-start gap-3"
                 >
-                  <div className="w-2 h-2 rounded-full bg-red-500 mt-1.5 shrink-0" />
-                  <p className="text-red-600 dark:text-red-400 text-sm font-medium leading-relaxed">
-                    {error}
-                  </p>
+                  <AuthStatusCard tone="error" message={error} />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -235,6 +281,12 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onNavigate }) => {
                 </>
               )}
             </button>
+
+            <GoogleAuthButton
+              loading={loading}
+              disabled={loading}
+              onClick={handleGoogleAuth}
+            />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <button

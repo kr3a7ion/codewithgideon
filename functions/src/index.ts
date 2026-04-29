@@ -22,6 +22,20 @@ type ContactPayload = {
   message?: unknown;
 };
 
+type MentorRequestPayload = {
+  name?: unknown;
+  email?: unknown;
+  message?: unknown;
+  contextType?: unknown;
+  sessionId?: unknown;
+  sessionTitle?: unknown;
+  pathTitle?: unknown;
+  cohortKey?: unknown;
+  cohortId?: unknown;
+  cohortLabel?: unknown;
+  studentPhone?: unknown;
+};
+
 const isValidEmail = (value: string): boolean => {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 };
@@ -105,6 +119,111 @@ export const sendContactMessage = onCall(
       throw new HttpsError(
         "internal",
         "Could not send message right now. Please try again.",
+      );
+    }
+  },
+);
+
+export const sendMentorRequest = onCall(
+  {
+    region: "us-central1",
+    // Keep App Check optional until the mobile app has it enabled everywhere.
+    // enforceAppCheck: true,
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError(
+        "unauthenticated",
+        "You must be signed in to contact a mentor.",
+      );
+    }
+
+    const data = (request.data || {}) as MentorRequestPayload;
+
+    const name = normalizeSpaces(String(data.name ?? ""));
+    const email = normalizeSpaces(String(data.email ?? "")).toLowerCase();
+    const message = normalizeSpaces(String(data.message ?? ""));
+    const contextType = normalizeSpaces(String(data.contextType ?? "")).toLowerCase();
+    const sessionId = normalizeSpaces(String(data.sessionId ?? ""));
+    const sessionTitle = normalizeSpaces(String(data.sessionTitle ?? ""));
+    const pathTitle = normalizeSpaces(String(data.pathTitle ?? ""));
+    const cohortKey = normalizeSpaces(String(data.cohortKey ?? ""));
+    const cohortId = normalizeSpaces(String(data.cohortId ?? ""));
+    const cohortLabel = normalizeSpaces(String(data.cohortLabel ?? ""));
+    const studentPhone = normalizeSpaces(String(data.studentPhone ?? ""));
+
+    if (!name || name.length < 2) {
+      throw new HttpsError(
+        "invalid-argument",
+        "A valid student name is required.",
+      );
+    }
+    if (!email || !isValidEmail(email)) {
+      throw new HttpsError("invalid-argument", "A valid email is required.");
+    }
+    if (!message || message.length < 5) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Message must be at least 5 characters.",
+      );
+    }
+    if (message.length > 3000) {
+      throw new HttpsError("invalid-argument", "Message is too long.");
+    }
+    if (!sessionId) {
+      throw new HttpsError("invalid-argument", "Session ID is required.");
+    }
+
+    const sourceSuffix = contextType === "recorded" ? "recorded" : "live";
+
+    try {
+      // The admin inbox and mobile thread reader already understand this shape.
+      const docRef = await db.collection("contactMessages").add({
+        name,
+        email,
+        body: message,
+        message,
+        lastMessage: message,
+        status: "new",
+        source: `mobile-ask-mentor:${sourceSuffix}`,
+        category: "ask-mentor",
+        contextType: sourceSuffix,
+        sessionId,
+        sessionTitle,
+        pathTitle,
+        cohortKey,
+        cohortId,
+        cohortLabel,
+        studentUid: request.auth.uid,
+        studentPhone,
+        auth: {
+          uid: request.auth.uid,
+        },
+        appCheck: {
+          appId: request.app?.appId || null,
+        },
+        createdAt: FieldValue.serverTimestamp(),
+        lastMessageAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      logger.info("Mentor request saved", {
+        docId: docRef.id,
+        uid: request.auth.uid,
+        sessionId,
+        contextType: sourceSuffix,
+        hasAppCheck: !!request.app,
+      });
+
+      return {
+        success: true,
+        conversationId: docRef.id,
+      };
+    } catch (error) {
+      logger.error("Failed to save mentor request", error);
+      throw new HttpsError(
+        "internal",
+        "Could not send mentor request right now. Please try again.",
       );
     }
   },

@@ -66,6 +66,10 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onNavigate, onLogin }) => {
       return "Network error. Please check your internet and try again.";
     }
 
+    if (msg.includes("admin record missing") || msg.includes("admins/")) {
+      return "This account signed in successfully, but it does not have a matching admins/{uid} Firestore record yet.";
+    }
+
     if (msg.includes("permission") || msg.includes("not authorized")) {
       return "You’re not authorized to access the admin portal.";
     }

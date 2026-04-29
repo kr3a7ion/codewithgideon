@@ -18,6 +18,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { View } from "../src/App";
+import AuthStatusCard from "./AuthStatusCard";
+import GoogleAuthButton from "./GoogleAuthButton";
 import {
   registrationStore,
   CourseDoc,
@@ -43,6 +45,7 @@ type CourseOption = {
 interface ContinueRegistrationProps {
   onNavigate: (view: View, extraData?: any) => void;
   selectedPath: string;
+  onGoogleAuth?: () => Promise<{ success: boolean; error?: string }>;
 }
 
 const PINNED_COURSES_RAW: Omit<CourseOption, "pathId">[] = [
@@ -110,6 +113,7 @@ const fadeUp = {
 const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
   onNavigate,
   selectedPath,
+  onGoogleAuth,
 }) => {
   const [authReady, setAuthReady] = useState(false);
   const [uid, setUid] = useState("");
@@ -123,10 +127,6 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
     });
     return () => unsub();
   }, []);
-
-  useEffect(() => {
-    if (authReady && !uid) onNavigate("student-login");
-  }, [authReady, uid, onNavigate]);
 
   const [selectedPathId, setSelectedPathId] = useState("");
   const [selectedCourseId, setSelectedCourseId] = useState("");
@@ -153,6 +153,8 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [authRecoveryLoading, setAuthRecoveryLoading] = useState(false);
+  const [authRecoveryError, setAuthRecoveryError] = useState("");
 
   const activePaths = useMemo(
     () => (paths || []).filter((p) => (p as any)?.isActive !== false),
@@ -534,6 +536,69 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
           <p className="text-sm font-bold text-slate-600 dark:text-slate-400">
             Loading your account…
           </p>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (!uid) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-slate-950 px-6">
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-lg w-full rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 shadow-2xl"
+        >
+          <div className="w-14 h-14 rounded-2xl bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center mb-5">
+            <ShieldCheck className="w-7 h-7 text-blue-600 dark:text-blue-400" />
+          </div>
+
+          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+            Sign back in to finish registration
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">
+            Your account step is saved. Use Google or your email login to jump
+            right back into the payment-ready registration flow.
+          </p>
+
+          {authRecoveryError ? (
+            <div className="mt-5">
+              <AuthStatusCard tone="error" message={authRecoveryError} />
+            </div>
+          ) : null}
+
+          <div className="mt-6 space-y-3">
+            <GoogleAuthButton
+              onClick={async () => {
+                if (!onGoogleAuth || authRecoveryLoading) return;
+                setAuthRecoveryError("");
+                setAuthRecoveryLoading(true);
+                try {
+                  const result = await onGoogleAuth();
+                  if (result?.success === false) {
+                    throw new Error(result.error || "Google sign-in failed.");
+                  }
+                } catch (err: any) {
+                  setAuthRecoveryError(
+                    String(err?.message || "Google sign-in failed. Please try again."),
+                  );
+                } finally {
+                  setAuthRecoveryLoading(false);
+                }
+              }}
+              disabled={!onGoogleAuth || authRecoveryLoading}
+              loading={authRecoveryLoading}
+              label="Continue with Google"
+            />
+
+            <button
+              type="button"
+              onClick={() => onNavigate("student-login")}
+              className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-5 py-3.5 text-sm font-bold text-slate-900 dark:text-white transition hover:bg-slate-50 dark:hover:bg-slate-900"
+            >
+              Use email and password
+            </button>
+          </div>
         </motion.div>
       </div>
     );

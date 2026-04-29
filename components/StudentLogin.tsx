@@ -12,6 +12,8 @@ import {
   LogIn,
 } from "lucide-react";
 import { View } from "../src/App";
+import AuthStatusCard from "./AuthStatusCard";
+import GoogleAuthButton from "./GoogleAuthButton";
 import { registrationStore } from "../services/registrationStore";
 
 interface StudentLoginProps {
@@ -22,9 +24,14 @@ interface StudentLoginProps {
     email: string,
     password: string,
   ) => Promise<{ success: boolean; error?: string }>;
+  onGoogleAuth?: () => Promise<{ success: boolean; error?: string }>;
 }
 
-const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLogin }) => {
+const StudentLogin: React.FC<StudentLoginProps> = ({
+  onNavigate,
+  onLogin,
+  onGoogleAuth,
+}) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -43,7 +50,9 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLogin }) => {
       const em = String(data?.email || "").trim();
       if (em) setEmail(em);
       setBanner(
-        "Account created successfully. Please login to continue registration.",
+        data?.verificationRequired
+          ? "Account created. Verify your email, then sign in to continue registration."
+          : "Account created successfully. Please login to continue registration.",
       );
     } catch {}
   }, []);
@@ -83,12 +92,24 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLogin }) => {
     if (code.includes("auth/network-request-failed")) {
       return "Network error. Check your connection and try again.";
     }
+    if (code.includes("auth/popup-closed-by-user")) {
+      return "Google sign-in was cancelled before it finished.";
+    }
+    if (code.includes("auth/popup-blocked")) {
+      return "Google sign-in was blocked. Please allow pop-ups and try again.";
+    }
+    if (code.includes("auth/account-exists-with-different-credential")) {
+      return "This email already uses another sign-in method. Use that sign-in method first.";
+    }
+    if (code.includes("auth/operation-not-allowed")) {
+      return "Google sign-in is not enabled yet. Please contact support.";
+    }
 
     if (msg.toLowerCase().includes("network")) {
       return "Network error. Please check your connection and try again.";
     }
 
-    return "Login failed. Please try again.";
+    return msg || "Login failed. Please try again.";
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -117,6 +138,23 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLogin }) => {
 
       if (res && res.success === false) {
         throw new Error(res.error || "Login failed. Please try again.");
+      }
+    } catch (err: any) {
+      setError(humanizeAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleAuth = async () => {
+    setError("");
+    setMessage("");
+    setLoading(true);
+    try {
+      if (!onGoogleAuth) throw new Error("Google sign-in is not available.");
+      const res = await onGoogleAuth();
+      if (res && res.success === false) {
+        throw new Error(res.error || "Google sign-in failed. Please try again.");
       }
     } catch (err: any) {
       setError(humanizeAuthError(err));
@@ -187,12 +225,8 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLogin }) => {
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/30 rounded-2xl flex items-start gap-3"
                 >
-                  <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 shrink-0" />
-                  <p className="text-blue-700 dark:text-blue-300 text-sm font-medium leading-relaxed">
-                    {banner}
-                  </p>
+                  <AuthStatusCard tone="info" message={banner} />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -204,12 +238,8 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLogin }) => {
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-2xl flex items-start gap-3"
                 >
-                  <div className="w-2 h-2 rounded-full bg-red-500 mt-1.5 shrink-0" />
-                  <p className="text-red-600 dark:text-red-400 text-sm font-medium leading-relaxed">
-                    {error}
-                  </p>
+                  <AuthStatusCard tone="error" message={error} />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -221,12 +251,8 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLogin }) => {
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  className="p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-100 dark:border-teal-900/30 rounded-2xl flex items-start gap-3"
                 >
-                  <div className="w-2 h-2 rounded-full bg-teal-500 mt-1.5 shrink-0" />
-                  <p className="text-teal-700 dark:text-teal-300 text-sm font-medium leading-relaxed">
-                    {message}
-                  </p>
+                  <AuthStatusCard tone="success" message={message} />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -319,6 +345,12 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ onNavigate, onLogin }) => {
                 </>
               )}
             </button>
+
+            <GoogleAuthButton
+              loading={loading}
+              disabled={loading}
+              onClick={handleGoogleAuth}
+            />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <button
