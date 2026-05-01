@@ -230,6 +230,17 @@ export const sendMentorRequest = onCall(
       if (matchingThread) {
         threadRef = matchingThread.ref;
         await threadRef.set(basePayload, {merge: true});
+        await threadRef.collection("messages").add({
+          body: message,
+          message,
+          senderType: "user",
+          senderRole: "user",
+          senderName: name,
+          senderEmail: email,
+          source: `mobile-ask-mentor:${sourceSuffix}`,
+          sessionId,
+          createdAt: now,
+        });
       } else {
         threadRef = await db.collection("contactMessages").add({
           ...basePayload,
@@ -238,18 +249,6 @@ export const sendMentorRequest = onCall(
           createdAt: now,
         });
       }
-
-      await threadRef.collection("messages").add({
-        body: message,
-        message,
-        senderType: "user",
-        senderRole: "user",
-        senderName: name,
-        senderEmail: email,
-        source: `mobile-ask-mentor:${sourceSuffix}`,
-        sessionId,
-        createdAt: now,
-      });
 
       logger.info("Mentor request saved", {
         docId: threadRef.id,

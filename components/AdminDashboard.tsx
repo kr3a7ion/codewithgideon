@@ -49,13 +49,14 @@ import {
   collection,
   getDocs,
   limit,
-  orderBy,
   query,
   doc,
   updateDoc,
   deleteDoc,
   addDoc,
   serverTimestamp,
+  orderBy,
+  onSnapshot,
 } from "firebase/firestore";
 import { auth, db } from "../services/firebase";
 
@@ -259,6 +260,14 @@ const formatInboxDate = (v: any) => {
   return new Date(ms).toLocaleString();
 };
 
+const getInboxActivityMs = (message: any) =>
+  toDateMs(
+    message?.updatedAt ||
+      message?.lastMessageAt ||
+      message?.repliedAt ||
+      message?.createdAt,
+  );
+
 const getInboxMessageBody = (message: any) =>
   String(
     message?.body ||
@@ -323,6 +332,41 @@ const normalizeInboxThreadMessage = (
     source: raw?.source,
   };
 };
+
+const sortInboxMessagesByActivity = (messages: ContactMessageDoc[]) =>
+  [...messages].sort((a, b) => {
+    const activityDelta = getInboxActivityMs(b) - getInboxActivityMs(a);
+    if (activityDelta !== 0) return activityDelta;
+    return toDateMs(b.createdAt) - toDateMs(a.createdAt);
+  });
+
+const mergeInboxThreadEntries = (
+  entries: InboxThreadMessage[],
+): InboxThreadMessage[] =>
+  entries
+    .filter((entry, index, list) => {
+      const entryName = String(entry.senderName || "").trim().toLowerCase();
+      const entryTime = toDateMs(entry.createdAt);
+
+      return (
+        list.findIndex((candidate) => {
+          if (candidate.id === entry.id) return true;
+
+          const candidateName = String(candidate.senderName || "")
+            .trim()
+            .toLowerCase();
+          const candidateTime = toDateMs(candidate.createdAt);
+
+          return (
+            candidate.body === entry.body &&
+            candidate.senderType === entry.senderType &&
+            candidateName === entryName &&
+            Math.abs(candidateTime - entryTime) <= 5000
+          );
+        }) === index
+      );
+    })
+    .sort((a, b) => toDateMs(a.createdAt) - toDateMs(b.createdAt));
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigate,
@@ -614,18 +658,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setInboxError("");
 
     try {
-      const q = query(
-        collection(db, "contactMessages"),
-        orderBy("createdAt", "desc"),
-        limit(30),
-      );
+      const snap = await getDocs(collection(db, "contactMessages"));
 
-      const snap = await getDocs(q);
-
-      const list: ContactMessageDoc[] = snap.docs.map((doc) => ({
+      const list = sortInboxMessagesByActivity(
+        snap.docs.map((doc) => ({
         id: doc.id,
         ...(doc.data() as Omit<ContactMessageDoc, "id">),
-      }));
+        })),
+      );
 
       setInboxMessages(list);
 
@@ -700,19 +740,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )
         .filter(Boolean) as InboxThreadMessage[];
 
-      const merged = [...rootThread, ...embeddedThread, ...subcollectionThread]
-        .filter((entry, index, list) => {
-          return (
-            list.findIndex(
-              (candidate) =>
-                candidate.id === entry.id ||
-                (candidate.body === entry.body &&
-                  toDateMs(candidate.createdAt) === toDateMs(entry.createdAt) &&
-                  candidate.senderType === entry.senderType),
-            ) === index
-          );
-        })
-        .sort((a, b) => toDateMs(a.createdAt) - toDateMs(b.createdAt));
+      const merged = mergeInboxThreadEntries([
+        ...rootThread,
+        ...embeddedThread,
+        ...subcollectionThread,
+      ]);
 
       setInboxThread(merged);
     } catch (e) {
@@ -2106,6 +2138,34 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
   };
   useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "contactMessages"),
+      (snap) => {
+        const list = sortInboxMessagesByActivity(
+          snap.docs.map((doc) => ({
+            id: doc.id,
+            ...(doc.data() as Omit<ContactMessageDoc, "id">),
+          })),
+        );
+
+        setInboxMessages(list);
+        setInboxLoading(false);
+        setInboxError("");
+      },
+      (error) => {
+        console.error("contactMessages subscription failed:", error);
+        setInboxError(
+          (error as any)?.message ||
+            "Failed to keep inbox synced. Check Firestore rules/index.",
+        );
+        setInboxLoading(false);
+      },
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     if (!selectedInboxMessage?.id) return;
 
     const currentStatus = String(
@@ -2125,7 +2185,78 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
 
-    fetchInboxThread(selectedInboxMessage);
+    setInboxThreadLoading(true);
+    setReplyError("");
+
+    const rootThread = [
+      normalizeInboxThreadMessage(
+        {
+          ...selectedInboxMessage,
+          senderType: "user",
+          senderName: getInboxDisplayName(selectedInboxMessage),
+          senderEmail: getInboxEmail(selectedInboxMessage),
+        },
+        `${selectedInboxMessage.id}-root`,
+      ),
+    ].filter(Boolean) as InboxThreadMessage[];
+
+    const embeddedThread = [
+      ...(Array.isArray(selectedInboxMessage.thread)
+        ? selectedInboxMessage.thread
+        : []),
+      ...(Array.isArray(selectedInboxMessage.messages)
+        ? selectedInboxMessage.messages
+        : []),
+      ...(Array.isArray(selectedInboxMessage.replies)
+        ? selectedInboxMessage.replies
+        : []),
+    ]
+      .map((entry, index) =>
+        normalizeInboxThreadMessage(
+          entry,
+          `${selectedInboxMessage.id}-embedded-${index}`,
+        ),
+      )
+      .filter(Boolean) as InboxThreadMessage[];
+
+    const threadQuery = query(
+      collection(db, "contactMessages", selectedInboxMessage.id, "messages"),
+      orderBy("createdAt", "asc"),
+      limit(200),
+    );
+
+    const unsubscribe = onSnapshot(
+      threadQuery,
+      (snap) => {
+        const subcollectionThread = snap.docs
+          .map((threadDoc, index) =>
+            normalizeInboxThreadMessage(
+              {
+                id: threadDoc.id,
+                ...(threadDoc.data() as Record<string, any>),
+              },
+              `${selectedInboxMessage.id}-sub-${index}`,
+            ),
+          )
+          .filter(Boolean) as InboxThreadMessage[];
+
+        setInboxThread(
+          mergeInboxThreadEntries([
+            ...rootThread,
+            ...embeddedThread,
+            ...subcollectionThread,
+          ]),
+        );
+        setInboxThreadLoading(false);
+      },
+      (error) => {
+        console.error("contactMessages thread subscription failed:", error);
+        setInboxThread(mergeInboxThreadEntries([...rootThread, ...embeddedThread]));
+        setInboxThreadLoading(false);
+      },
+    );
+
+    return () => unsubscribe();
   }, [selectedInboxMessage]);
 
   useEffect(() => {

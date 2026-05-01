@@ -143,6 +143,8 @@ export interface RegistrationEntry {
   cohortId?: string; // stable id e.g. FLUTTER
   cohortLabel?: string; // human label e.g. "March 2026 Cohort"
   cohortKey?: string; // unique schedule key e.g. FLUTTER-2026-03
+  courseDurationWeeks?: number;
+  weeklyRate?: number;
 
   pendingPayment?: PendingPayment;
 }
