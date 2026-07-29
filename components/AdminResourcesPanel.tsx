@@ -12,17 +12,25 @@ import {
   Video,
 } from "lucide-react";
 import {
+  CohortDoc,
   CourseDoc,
   PathDoc,
   ResourceDoc,
+  SessionDoc,
   registrationStore,
 } from "../services/registrationStore";
 
 interface AdminResourcesPanelProps {
+  cohorts: CohortDoc[];
   paths: PathDoc[];
   courses: CourseDoc[];
+  sessions: SessionDoc[];
   resources: ResourceDoc[];
   loading: boolean;
+  sessionsLoading: boolean;
+  error?: string;
+  selectedCohortId: string;
+  onSelectCohort: (cohortId: string) => void;
   onRefresh: () => Promise<void>;
 }
 
@@ -35,6 +43,8 @@ type ResourceForm = {
   description: string;
   pathId: string;
   courseId: string;
+  sessionId: string;
+  sessionWeek: string;
   isPublished: boolean;
 };
 
@@ -47,22 +57,36 @@ const emptyForm: ResourceForm = {
   description: "",
   pathId: "",
   courseId: "",
+  sessionId: "",
+  sessionWeek: "",
   isPublished: true,
 };
 
-const typeIcon = (type: string) => {
-  const key = String(type || "").toLowerCase();
-  if (key === "video") return Video;
-  if (key === "code") return Code2;
-  if (key === "link") return FileCode2;
+const iconForType = (type: string) => {
+  const normalized = String(type || "").toLowerCase();
+  if (normalized === "video") return Video;
+  if (normalized === "code") return Code2;
+  if (normalized === "link") return FileCode2;
   return FileText;
 };
 
+const FieldLabel = ({ children }: { children: React.ReactNode }) => (
+  <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+    {children}
+  </label>
+);
+
 const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
+  cohorts,
   paths,
   courses,
+  sessions,
   resources,
   loading,
+  sessionsLoading,
+  error: loadError = "",
+  selectedCohortId,
+  onSelectCohort,
   onRefresh,
 }) => {
   const [form, setForm] = useState<ResourceForm>(emptyForm);
@@ -86,6 +110,11 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [resources]);
 
+  const selectedSession = useMemo(
+    () => sessions.find((session) => session.id === form.sessionId) || null,
+    [form.sessionId, sessions],
+  );
+
   const resetForm = () => {
     setForm(emptyForm);
     setEditingResource(null);
@@ -103,6 +132,11 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
       description: resource.description || "",
       pathId: String(resource.pathId || ""),
       courseId: String(resource.courseId || ""),
+      sessionId: String(resource.sessionId || ""),
+      sessionWeek:
+        resource.sessionWeek !== undefined && resource.sessionWeek !== null
+          ? String(resource.sessionWeek)
+          : "",
       isPublished: resource.isPublished !== false,
     });
     setError("");
@@ -114,12 +148,10 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
 
     const name = form.name.trim();
     const url = form.url.trim();
-
     if (name.length < 2) {
       setError("Resource name must be at least 2 characters.");
       return;
     }
-
     if (!url) {
       setError("Resource URL is required.");
       return;
@@ -134,11 +166,16 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
       description: form.description.trim(),
       pathId: form.pathId || undefined,
       courseId: form.courseId || undefined,
+      sessionId: form.sessionId.trim() || undefined,
+      // Keep week as a loose library label. Exact class attachment now comes
+      // from the selected session ID because one week can hold multiple classes.
+      sessionWeek: form.sessionWeek.trim()
+        ? Number(form.sessionWeek.trim())
+        : undefined,
       isPublished: form.isPublished,
     };
 
     setBusyId(editingResource?.id || "create-resource");
-
     try {
       if (editingResource) {
         await registrationStore.updateResource(editingResource.id, payload);
@@ -158,14 +195,10 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
     if (!confirm(`Delete "${resource.name}"? This cannot be undone.`)) return;
 
     setBusyId(resource.id);
-    setError("");
-
     try {
       await registrationStore.deleteResource(resource.id);
       await onRefresh();
-      if (editingResource?.id === resource.id) {
-        resetForm();
-      }
+      if (editingResource?.id === resource.id) resetForm();
     } catch (err: any) {
       setError(err?.message || "Could not delete the resource.");
     } finally {
@@ -181,7 +214,7 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
             Course Resources
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            Manage downloadable PDFs, code packs, video links, and resource folders for the app.
+            Manage PDFs, code packs, video links, and folders that the mobile library can later consume.
           </p>
         </div>
 
@@ -204,7 +237,7 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
                 {editingResource ? "Edit Resource" : "Add Resource"}
               </p>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Keep folder names consistent so the mobile library stays easy to scan.
+                Keep folder naming consistent so the app library stays tidy. For class-specific files, always target a real session ID because a single week can contain multiple classes.
               </p>
             </div>
 
@@ -225,26 +258,33 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
             </div>
           ) : null}
 
+          {!error && loadError ? (
+            <div className="p-4 rounded-2xl border bg-amber-50 border-amber-100 text-amber-700 dark:bg-amber-500/10 dark:border-amber-500/20 dark:text-amber-200 text-sm font-medium">
+              {loadError}
+            </div>
+          ) : null}
+
+          <div className="p-4 rounded-2xl border border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/10 text-sm text-blue-900 dark:text-blue-100">
+            Class attachment logic:
+            Files only appear inside a specific class or recording when they have an exact <strong>session ID</strong>.
+            A week tag is now treated as a broad library label, not a precise class target.
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                Resource Name
-              </label>
+              <FieldLabel>Resource name</FieldLabel>
               <input
                 value={form.name}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, name: event.target.value }))
                 }
                 className="w-full px-5 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white outline-none"
-                placeholder="Week 1 starter files"
+                placeholder="Resource name"
                 required
               />
             </div>
-
             <div>
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                Type
-              </label>
+              <FieldLabel>Resource type</FieldLabel>
               <select
                 value={form.type}
                 onChange={(event) =>
@@ -263,38 +303,31 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                Folder
-              </label>
+              <FieldLabel>Folder</FieldLabel>
               <input
                 value={form.folder}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, folder: event.target.value }))
                 }
                 className="w-full px-5 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white outline-none"
-                placeholder="Week 2 - Widgets"
+                placeholder="Folder"
               />
             </div>
-
             <div>
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                Size Label
-              </label>
+              <FieldLabel>Size label</FieldLabel>
               <input
                 value={form.size}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, size: event.target.value }))
                 }
                 className="w-full px-5 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white outline-none"
-                placeholder="4.2 MB"
+                placeholder="Size label"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-              Resource URL
-            </label>
+            <FieldLabel>Resource URL</FieldLabel>
             <input
               value={form.url}
               onChange={(event) =>
@@ -308,9 +341,7 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                Path
-              </label>
+              <FieldLabel>Path scope</FieldLabel>
               <select
                 value={form.pathId}
                 onChange={(event) =>
@@ -318,6 +349,8 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
                     ...prev,
                     pathId: event.target.value,
                     courseId: "",
+                    sessionId: "",
+                    sessionWeek: "",
                   }))
                 }
                 className="w-full px-5 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white outline-none"
@@ -332,13 +365,35 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                Course
-              </label>
+              <FieldLabel>Cohort for class attachment</FieldLabel>
+              <select
+                value={selectedCohortId}
+                onChange={(event) => {
+                  onSelectCohort(event.target.value);
+                  setForm((prev) => ({ ...prev, sessionId: "", sessionWeek: "" }));
+                }}
+                className="w-full px-5 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white outline-none"
+              >
+                <option value="">Select cohort for class attachment</option>
+                {cohorts.map((cohort) => (
+                  <option key={cohort.id} value={cohort.id}>
+                    {cohort.label || cohort.cohortKey || cohort.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <FieldLabel>Course scope</FieldLabel>
               <select
                 value={form.courseId}
                 onChange={(event) =>
-                  setForm((prev) => ({ ...prev, courseId: event.target.value }))
+                  setForm((prev) => ({
+                    ...prev,
+                    courseId: event.target.value,
+                    sessionId: "",
+                    sessionWeek: "",
+                  }))
                 }
                 className="w-full px-5 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white outline-none"
               >
@@ -352,10 +407,67 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
             </div>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <FieldLabel>Exact class session</FieldLabel>
+              <select
+                value={form.sessionId}
+                onChange={(event) => {
+                  const nextSessionId = event.target.value;
+                  const nextSession =
+                    sessions.find((session) => session.id === nextSessionId) || null;
+                  setForm((prev) => ({
+                    ...prev,
+                    sessionId: nextSessionId,
+                    pathId: nextSession?.pathId || prev.pathId,
+                    sessionWeek:
+                      nextSession?.week !== undefined ? String(nextSession.week) : prev.sessionWeek,
+                  }));
+                }}
+                className="w-full px-5 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white outline-none"
+              >
+                <option value="">
+                  {selectedCohortId
+                    ? sessionsLoading
+                      ? "Loading sessions..."
+                      : "Choose exact class session"
+                    : "Choose cohort first"}
+                </option>
+                {sessions.map((session) => (
+                  <option key={session.id} value={session.id}>
+                    {`Week ${session.week} • ${session.title}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <FieldLabel>Week tag</FieldLabel>
+              <input
+                value={form.sessionWeek}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    sessionWeek: event.target.value.replace(/[^0-9]/g, ""),
+                  }))
+                }
+                className="w-full px-5 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white outline-none"
+                inputMode="numeric"
+                placeholder="Optional week tag for library grouping"
+              />
+            </div>
+          </div>
+
+          {selectedSession ? (
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
+              Class target:
+              <strong className="ml-2 text-slate-900 dark:text-white">
+                Week {selectedSession.week} • {selectedSession.title}
+              </strong>
+            </div>
+          ) : null}
+
           <div>
-            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-              Description
-            </label>
+            <FieldLabel>Description</FieldLabel>
             <textarea
               value={form.description}
               onChange={(event) =>
@@ -363,7 +475,7 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
               }
               rows={4}
               className="w-full px-5 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white outline-none"
-              placeholder="Short context for learners before they open this resource..."
+              placeholder="Description"
             />
           </div>
 
@@ -415,20 +527,12 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
           </div>
 
           <div className="rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 p-5">
-            <div className="flex items-center justify-between gap-4 mb-4">
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-                  Folder Overview
-                </p>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                  Use folders to mirror the mobile library layout.
-                </p>
-              </div>
-            </div>
-
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-3">
+              Folder Overview
+            </p>
             {folderGroups.length === 0 ? (
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                No folders yet. Your first resource will create one.
+                No folders yet.
               </p>
             ) : (
               <div className="flex flex-wrap gap-2">
@@ -455,12 +559,12 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
           </div>
         ) : resources.length === 0 ? (
           <div className="p-6 rounded-[2rem] border border-amber-100 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-200">
-            No resources have been added yet. Start with PDFs, code bundles, or session recordings.
+            No resources have been added yet.
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {resources.map((resource, index) => {
-              const Icon = typeIcon(resource.type);
+              const Icon = iconForType(resource.type);
               const pathTitle = paths.find((path) => path.id === resource.pathId)?.title;
               const courseTitle = courses.find((course) => course.id === resource.courseId)?.title;
 
@@ -477,7 +581,6 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
                       <div className="w-12 h-12 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center shrink-0">
                         <Icon className="w-5 h-5 text-blue-700 dark:text-teal-300" />
                       </div>
-
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-sm font-black text-slate-900 dark:text-white">
@@ -493,17 +596,14 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
                             {resource.isPublished !== false ? "Published" : "Draft"}
                           </span>
                         </div>
-
                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
                           {resource.type} • {resource.size || "No size"} • {resource.folder || "General"}
                         </p>
-
                         {resource.description ? (
                           <p className="text-sm text-slate-600 dark:text-slate-300 mt-3 leading-relaxed">
                             {resource.description}
                           </p>
                         ) : null}
-
                         <div className="mt-3 flex flex-wrap gap-2">
                           {pathTitle ? (
                             <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-600 dark:text-slate-200">
@@ -515,6 +615,18 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
                             <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-600 dark:text-slate-200">
                               <BookOpen className="w-3.5 h-3.5" />
                               <span>{courseTitle}</span>
+                            </span>
+                          ) : null}
+                          {resource.sessionId ? (
+                            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-600 dark:text-slate-200">
+                              <Video className="w-3.5 h-3.5" />
+                              <span>Session {resource.sessionId}</span>
+                            </span>
+                          ) : null}
+                          {resource.sessionWeek ? (
+                            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-600 dark:text-slate-200">
+                              <BookOpen className="w-3.5 h-3.5" />
+                              <span>Week tag {resource.sessionWeek}</span>
                             </span>
                           ) : null}
                         </div>

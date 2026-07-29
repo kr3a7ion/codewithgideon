@@ -11,8 +11,10 @@ import {
   SyllabusWeek,
   CohortMessageDoc,
   ResourceDoc,
+  CommunitySpaceDoc,
 } from "../services/registrationStore";
 import AdminResourcesPanel from "./AdminResourcesPanel";
+import AdminCommunitySpacesPanel from "./AdminCommunitySpacesPanel";
 
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -48,13 +50,14 @@ import {
   collectionGroup,
   getDocs,
   limit,
-  orderBy,
   query,
   doc,
   updateDoc,
   deleteDoc,
   addDoc,
   serverTimestamp,
+  orderBy,
+  onSnapshot,
 } from "firebase/firestore";
 import { auth, db } from "../services/firebase";
 
@@ -112,13 +115,9 @@ type InboxThreadMessage = {
   source?: string;
 };
 
-type PaymentRecord = {
-  id: string;
-  uid: string;
-  amount: number;
-  reference: string;
-  kind?: string;
-  createdAt?: any;
+type AdminNotice = {
+  tone: "info" | "success" | "error";
+  message: string;
 };
 
 type CourseForm = {
@@ -263,13 +262,13 @@ const formatInboxDate = (v: any) => {
   return new Date(ms).toLocaleString();
 };
 
-const formatSessionCountdown = (ms: number) => {
-  if (!ms || ms <= 0) return "00:00";
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-};
+const getInboxActivityMs = (message: any) =>
+  toDateMs(
+    message?.updatedAt ||
+      message?.lastMessageAt ||
+      message?.repliedAt ||
+      message?.createdAt,
+  );
 
 const getInboxMessageBody = (message: any) =>
   String(
@@ -336,6 +335,41 @@ const normalizeInboxThreadMessage = (
   };
 };
 
+const sortInboxMessagesByActivity = (messages: ContactMessageDoc[]) =>
+  [...messages].sort((a, b) => {
+    const activityDelta = getInboxActivityMs(b) - getInboxActivityMs(a);
+    if (activityDelta !== 0) return activityDelta;
+    return toDateMs(b.createdAt) - toDateMs(a.createdAt);
+  });
+
+const mergeInboxThreadEntries = (
+  entries: InboxThreadMessage[],
+): InboxThreadMessage[] =>
+  entries
+    .filter((entry, index, list) => {
+      const entryName = String(entry.senderName || "").trim().toLowerCase();
+      const entryTime = toDateMs(entry.createdAt);
+
+      return (
+        list.findIndex((candidate) => {
+          if (candidate.id === entry.id) return true;
+
+          const candidateName = String(candidate.senderName || "")
+            .trim()
+            .toLowerCase();
+          const candidateTime = toDateMs(candidate.createdAt);
+
+          return (
+            candidate.body === entry.body &&
+            candidate.senderType === entry.senderType &&
+            candidateName === entryName &&
+            Math.abs(candidateTime - entryTime) <= 5000
+          );
+        }) === index
+      );
+    })
+    .sort((a, b) => toDateMs(a.createdAt) - toDateMs(b.createdAt));
+
 const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigate,
   onLogout,
@@ -345,6 +379,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"All" | "Pending" | "Complete">("All");
   const [search, setSearch] = useState("");
+  const [adminNotice, setAdminNotice] = useState<AdminNotice | null>(null);
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -379,6 +414,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | "cohorts"
     | "sessions"
     | "messages"
+    | "community"
     | "courses"
     | "resources"
     | "payments"
@@ -500,6 +536,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [coursesLoading, setCoursesLoading] = useState(true);
   const [resources, setResources] = useState<ResourceDoc[]>([]);
   const [resourcesLoading, setResourcesLoading] = useState(true);
+  const [resourcesError, setResourcesError] = useState("");
+  const [communitySpaces, setCommunitySpaces] = useState<CommunitySpaceDoc[]>([]);
+  const [communitySpacesLoading, setCommunitySpacesLoading] = useState(true);
+  const [communitySpacesError, setCommunitySpacesError] = useState("");
   const [courseModalOpen, setCourseModalOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<CourseDoc | null>(null);
   const [courseForm, setCourseForm] = useState<CourseForm>(emptyCourse);
@@ -652,18 +692,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setInboxError("");
 
     try {
-      const q = query(
-        collection(db, "contactMessages"),
-        orderBy("createdAt", "desc"),
-        limit(30),
-      );
+      const snap = await getDocs(collection(db, "contactMessages"));
 
-      const snap = await getDocs(q);
-
-      const list: ContactMessageDoc[] = snap.docs.map((doc) => ({
+      const list = sortInboxMessagesByActivity(
+        snap.docs.map((doc) => ({
         id: doc.id,
         ...(doc.data() as Omit<ContactMessageDoc, "id">),
-      }));
+        })),
+      );
 
       setInboxMessages(list);
 
@@ -738,19 +774,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )
         .filter(Boolean) as InboxThreadMessage[];
 
-      const merged = [...rootThread, ...embeddedThread, ...subcollectionThread]
-        .filter((entry, index, list) => {
-          return (
-            list.findIndex(
-              (candidate) =>
-                candidate.id === entry.id ||
-                (candidate.body === entry.body &&
-                  toDateMs(candidate.createdAt) === toDateMs(entry.createdAt) &&
-                  candidate.senderType === entry.senderType),
-            ) === index
-          );
-        })
-        .sort((a, b) => toDateMs(a.createdAt) - toDateMs(b.createdAt));
+      const merged = mergeInboxThreadEntries([
+        ...rootThread,
+        ...embeddedThread,
+        ...subcollectionThread,
+      ]);
 
       setInboxThread(merged);
     } catch (e) {
@@ -788,14 +816,35 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const fetchResources = async () => {
     setResourcesLoading(true);
+    setResourcesError("");
     try {
       const list = await registrationStore.getResources();
       setResources(list || []);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to load resources:", e);
       setResources([]);
+      setResourcesError(
+        e?.message || "Failed to load resources from Firestore.",
+      );
     } finally {
       setResourcesLoading(false);
+    }
+  };
+
+  const fetchCommunitySpaces = async () => {
+    setCommunitySpacesLoading(true);
+    setCommunitySpacesError("");
+    try {
+      const list = await registrationStore.getCommunitySpaces();
+      setCommunitySpaces(list || []);
+    } catch (e: any) {
+      console.error("Failed to load community spaces:", e);
+      setCommunitySpaces([]);
+      setCommunitySpacesError(
+        e?.message || "Failed to load community spaces from Firestore.",
+      );
+    } finally {
+      setCommunitySpacesLoading(false);
     }
   };
 
@@ -970,6 +1019,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           fetchPaymentRecords(),
           fetchCourses(),
           fetchResources(),
+          fetchCommunitySpaces(),
           fetchCohorts(),
           fetchInboxMessages(),
         ]);
@@ -986,7 +1036,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }
       } catch (e) {
         console.error("handleRefreshAll failed:", e);
-        alert("Failed to refresh all dashboard data.");
+        const message = `${(e as any)?.message || e || ""}`.toLowerCase();
+        if (
+          message.includes("permission") ||
+          message.includes("missing or insufficient permissions")
+        ) {
+          setAdminNotice({
+            tone: "error",
+            message:
+              "Failed to refresh dashboard data because Firestore admin permissions are blocked.",
+          });
+        } else {
+          setAdminNotice({
+            tone: "error",
+            message: "Failed to refresh all dashboard data.",
+          });
+        }
       }
     });
   };
@@ -1030,11 +1095,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleSyncToSheets = async () => {
     if (!webhookUrl) {
-      alert("Please configure the Google Sheet Webhook URL first.");
+      setAdminNotice({
+        tone: "info",
+        message: "Configure the Google Sheets webhook URL before syncing.",
+      });
       setShowConfig(true);
       return;
     }
-    if (registrations.length === 0) return alert("No data to sync.");
+    if (registrations.length === 0) {
+      setAdminNotice({
+        tone: "info",
+        message: "There is no registration data to sync yet.",
+      });
+      return;
+    }
 
     setIsSyncing(true);
     try {
@@ -1049,12 +1123,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }),
       });
 
-      alert(
-        "Sync signal sent to Google Sheets! (no-cors means you won’t see a response)",
-      );
+      setAdminNotice({
+        tone: "success",
+        message:
+          "Sync signal sent to Google Sheets. Because this uses no-cors, the dashboard cannot read the webhook response.",
+      });
     } catch (error) {
       console.error("Sync Error:", error);
-      alert("Failed to connect to Google Sheets Webhook.");
+      setAdminNotice({
+        tone: "error",
+        message: "Failed to connect to the Google Sheets webhook.",
+      });
     } finally {
       setIsSyncing(false);
     }
@@ -1284,6 +1363,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             "bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-900/40 dark:text-violet-200 dark:border-violet-700/50",
         },
         {
+          key: "community",
+          label: "Community",
+          description: "Publish student spaces",
+          icon: MessageSquare,
+          badge: communitySpaces.length,
+          tone: "pink",
+          activeClass:
+            "bg-pink-600 text-white border-pink-500 shadow-pink-500/20",
+          inactiveClass:
+            "bg-pink-50/60 text-pink-900 border-pink-100 hover:border-pink-300 dark:bg-pink-950/20 dark:text-pink-200 dark:border-pink-900/40 dark:hover:border-pink-700/60",
+          badgeClass:
+            "bg-pink-100 text-pink-700 border-pink-200 dark:bg-pink-900/40 dark:text-pink-200 dark:border-pink-700/50",
+        },
+        {
           key: "courses",
           label: "Courses",
           description: "Course catalog management",
@@ -1342,6 +1435,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       ] as const,
     [
       cohortMessages.length,
+      communitySpaces.length,
       cohorts.length,
       courses.length,
       filteredData.length,
@@ -1590,9 +1684,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [activePathId, activeSeasonKey]);
 
   const saveActiveCohort = async () => {
-    if (!activePathId) return alert("Pick a Path first.");
-    if (!activeSeasonKey.trim()) return alert("Season Key is required.");
-    if (!activeSeasonLabel.trim()) return alert("Season Label is required.");
+    if (!activePathId) {
+      setAdminNotice({ tone: "info", message: "Pick a path first." });
+      return;
+    }
+    if (!activeSeasonKey.trim()) {
+      setAdminNotice({ tone: "info", message: "Season key is required." });
+      return;
+    }
+    if (!activeSeasonLabel.trim()) {
+      setAdminNotice({ tone: "info", message: "Season label is required." });
+      return;
+    }
 
     setCohortSaving(true);
     try {
@@ -1618,28 +1721,42 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           "Could not map cohortKey to cohort doc id:",
           res.cohortKey,
         );
-        alert(
-          `Active cohort set, but I couldn't auto-select it.\nCohortKey: ${res.cohortKey}`,
-        );
+        setAdminNotice({
+          tone: "info",
+          message: `Active cohort set, but the dashboard could not auto-select ${res.cohortKey}.`,
+        });
         return;
       }
 
       setSelectedCohortId(docId);
       await handleRefreshAll();
 
-      alert(`Active cohort set for "${res.path}" → ${res.cohortKey}`);
+      setAdminNotice({
+        tone: "success",
+        message: `Active cohort set for "${res.path}" as ${res.cohortKey}.`,
+      });
     } catch (e: any) {
       console.error("saveActiveCohort failed:", e);
-      alert(e?.message || "Failed to update active cohort.");
+      setAdminNotice({
+        tone: "error",
+        message: e?.message || "Failed to update active cohort.",
+      });
     } finally {
       setCohortSaving(false);
     }
   };
 
   const addCohort = async () => {
-    if (!activePathId) return alert("Pick a Path first.");
+    if (!activePathId) {
+      setAdminNotice({ tone: "info", message: "Pick a path first." });
+      return;
+    }
     if (!activeSeasonKey.trim() || !activeSeasonLabel.trim()) {
-      return alert("Set Season Key + Season Label first.");
+      setAdminNotice({
+        tone: "info",
+        message: "Set season key and season label first.",
+      });
+      return;
     }
 
     try {
@@ -1661,9 +1778,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         );
 
       if (!docId) {
-        alert(
-          `Cohort created, but couldn't auto-select it.\nCohortKey: ${res.cohortKey}`,
-        );
+        setAdminNotice({
+          tone: "info",
+          message: `Cohort created, but the dashboard could not auto-select ${res.cohortKey}.`,
+        });
         return;
       }
 
@@ -1671,7 +1789,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await handleRefreshAll();
     } catch (e: any) {
       console.error("addCohort failed:", e);
-      alert(e?.message || "Failed to create cohort.");
+      setAdminNotice({
+        tone: "error",
+        message: e?.message || "Failed to create cohort.",
+      });
     }
   };
 
@@ -1691,7 +1812,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await handleRefreshAll();
     } catch (e) {
       console.error("deleteCohort failed:", e);
-      alert("Failed to delete cohort.");
+      setAdminNotice({
+        tone: "error",
+        message: "Failed to delete cohort.",
+      });
     }
   };
 
@@ -1821,7 +1945,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await handleRefreshAll();
     } catch (e) {
       console.error("deleteSession failed:", e);
-      alert("Failed to delete session.");
+      setAdminNotice({
+        tone: "error",
+        message: "Failed to delete session.",
+      });
     } finally {
       setSessionBusyId(null);
     }
@@ -2055,6 +2182,34 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
   };
   useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "contactMessages"),
+      (snap) => {
+        const list = sortInboxMessagesByActivity(
+          snap.docs.map((doc) => ({
+            id: doc.id,
+            ...(doc.data() as Omit<ContactMessageDoc, "id">),
+          })),
+        );
+
+        setInboxMessages(list);
+        setInboxLoading(false);
+        setInboxError("");
+      },
+      (error) => {
+        console.error("contactMessages subscription failed:", error);
+        setInboxError(
+          (error as any)?.message ||
+            "Failed to keep inbox synced. Check Firestore rules/index.",
+        );
+        setInboxLoading(false);
+      },
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     if (!selectedInboxMessage?.id) return;
 
     const currentStatus = String(
@@ -2074,7 +2229,78 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
 
-    fetchInboxThread(selectedInboxMessage);
+    setInboxThreadLoading(true);
+    setReplyError("");
+
+    const rootThread = [
+      normalizeInboxThreadMessage(
+        {
+          ...selectedInboxMessage,
+          senderType: "user",
+          senderName: getInboxDisplayName(selectedInboxMessage),
+          senderEmail: getInboxEmail(selectedInboxMessage),
+        },
+        `${selectedInboxMessage.id}-root`,
+      ),
+    ].filter(Boolean) as InboxThreadMessage[];
+
+    const embeddedThread = [
+      ...(Array.isArray(selectedInboxMessage.thread)
+        ? selectedInboxMessage.thread
+        : []),
+      ...(Array.isArray(selectedInboxMessage.messages)
+        ? selectedInboxMessage.messages
+        : []),
+      ...(Array.isArray(selectedInboxMessage.replies)
+        ? selectedInboxMessage.replies
+        : []),
+    ]
+      .map((entry, index) =>
+        normalizeInboxThreadMessage(
+          entry,
+          `${selectedInboxMessage.id}-embedded-${index}`,
+        ),
+      )
+      .filter(Boolean) as InboxThreadMessage[];
+
+    const threadQuery = query(
+      collection(db, "contactMessages", selectedInboxMessage.id, "messages"),
+      orderBy("createdAt", "asc"),
+      limit(200),
+    );
+
+    const unsubscribe = onSnapshot(
+      threadQuery,
+      (snap) => {
+        const subcollectionThread = snap.docs
+          .map((threadDoc, index) =>
+            normalizeInboxThreadMessage(
+              {
+                id: threadDoc.id,
+                ...(threadDoc.data() as Record<string, any>),
+              },
+              `${selectedInboxMessage.id}-sub-${index}`,
+            ),
+          )
+          .filter(Boolean) as InboxThreadMessage[];
+
+        setInboxThread(
+          mergeInboxThreadEntries([
+            ...rootThread,
+            ...embeddedThread,
+            ...subcollectionThread,
+          ]),
+        );
+        setInboxThreadLoading(false);
+      },
+      (error) => {
+        console.error("contactMessages thread subscription failed:", error);
+        setInboxThread(mergeInboxThreadEntries([...rootThread, ...embeddedThread]));
+        setInboxThreadLoading(false);
+      },
+    );
+
+    return () => unsubscribe();
   }, [selectedInboxMessage]);
 
   useEffect(() => {
@@ -2205,6 +2431,29 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </motion.button>
             </div>
           </motion.div>
+
+          {adminNotice ? (
+            <motion.div
+              variants={fadeUp}
+              className={`mb-6 rounded-2xl border px-4 py-4 flex items-start justify-between gap-4 ${
+                adminNotice.tone === "error"
+                  ? "border-red-200 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200"
+                  : adminNotice.tone === "success"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200"
+                    : "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200"
+              }`}
+            >
+              <p className="text-sm font-medium">{adminNotice.message}</p>
+              <button
+                type="button"
+                onClick={() => setAdminNotice(null)}
+                className="shrink-0 rounded-lg p-1 opacity-70 hover:opacity-100 transition"
+                aria-label="Dismiss notice"
+              >
+                <X size={16} />
+              </button>
+            </motion.div>
+          ) : null}
 
           <motion.div
             variants={fadeUp}
@@ -3237,6 +3486,33 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               )}
             </div>
+          )}
+
+          {activeAdminSection === "resources" && (
+            <AdminResourcesPanel
+              cohorts={cohorts}
+              paths={paths}
+              courses={courses}
+              sessions={sessions}
+              resources={resources}
+              loading={resourcesLoading}
+              sessionsLoading={sessionsLoading}
+              error={resourcesError}
+              selectedCohortId={selectedCohortId}
+              onSelectCohort={setSelectedCohortId}
+              onRefresh={fetchResources}
+            />
+          )}
+
+          {activeAdminSection === "community" && (
+            <AdminCommunitySpacesPanel
+              cohorts={cohorts}
+              paths={paths}
+              spaces={communitySpaces}
+              loading={communitySpacesLoading}
+              error={communitySpacesError}
+              onRefresh={fetchCommunitySpaces}
+            />
           )}
 
           {/* Inbox Modal */}

@@ -63,7 +63,6 @@ const App: React.FC = () => {
     isStudentLoggedIn,
     studentProfile,
     verificationState,
-    adminSessionRemainingMs,
 
     // 🧭 Actions
     navigateTo,
@@ -72,6 +71,7 @@ const App: React.FC = () => {
     loginAdmin,
     logoutAdmin,
     loginStudent,
+    loginStudentWithGoogle,
     logoutStudent,
     resendVerificationEmail,
     refreshVerifiedSession,
@@ -140,7 +140,10 @@ const App: React.FC = () => {
 
         {/* REGISTRATION */}
         {currentView === "create-account" && (
-          <CreateAccount onNavigate={navigateTo} />
+          <CreateAccount
+            onNavigate={navigateTo}
+            onGoogleAuth={loginStudentWithGoogle}
+          />
         )}
 
         {currentView === "verify-email" &&
@@ -154,22 +157,29 @@ const App: React.FC = () => {
               onLogout={logoutPendingVerification}
             />
           ) : (
-            <StudentLogin onNavigate={navigateTo} onLogin={loginStudent} />
+            <StudentLogin
+              onNavigate={navigateTo}
+              onLogin={loginStudent}
+              onGoogleAuth={loginStudentWithGoogle}
+            />
           ))}
 
         {currentView === "continue-registration" &&
-          (isStudentLoggedIn ? (
+          (
             <ContinueRegistration
               onNavigate={navigateTo}
               selectedPath={selectedPath}
+              onGoogleAuth={loginStudentWithGoogle}
             />
-          ) : (
-            <StudentLogin onNavigate={navigateTo} onLogin={loginStudent} />
-          ))}
+          )}
 
         {/* STUDENT AUTH */}
         {currentView === "student-login" && (
-          <StudentLogin onNavigate={navigateTo} onLogin={loginStudent} />
+          <StudentLogin
+            onNavigate={navigateTo}
+            onLogin={loginStudent}
+            onGoogleAuth={loginStudentWithGoogle}
+          />
         )}
 
         {currentView === "student-dashboard" &&
@@ -180,7 +190,11 @@ const App: React.FC = () => {
               onLogout={logoutStudent}
             />
           ) : (
-            <StudentLogin onNavigate={navigateTo} onLogin={loginStudent} />
+            <StudentLogin
+              onNavigate={navigateTo}
+              onLogin={loginStudent}
+              onGoogleAuth={loginStudentWithGoogle}
+            />
           ))}
 
         {/* PAYMENT */}

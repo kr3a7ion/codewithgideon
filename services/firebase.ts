@@ -23,6 +23,8 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const functions = getFunctions(app, "us-central1");
 
+// Admin and student sign-ins need different persistence policies, so keep the
+// default configurable instead of hard-coding long-lived local storage.
 export const setAuthPersistenceMode = async (
   mode: "local" | "session" = "local",
 ) => {

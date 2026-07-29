@@ -22,6 +22,20 @@ type ContactPayload = {
   message?: unknown;
 };
 
+type MentorRequestPayload = {
+  name?: unknown;
+  email?: unknown;
+  message?: unknown;
+  contextType?: unknown;
+  sessionId?: unknown;
+  sessionTitle?: unknown;
+  pathTitle?: unknown;
+  cohortKey?: unknown;
+  cohortId?: unknown;
+  cohortLabel?: unknown;
+  studentPhone?: unknown;
+};
+
 const isValidEmail = (value: string): boolean => {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 };
@@ -105,6 +119,154 @@ export const sendContactMessage = onCall(
       throw new HttpsError(
         "internal",
         "Could not send message right now. Please try again.",
+      );
+    }
+  },
+);
+
+export const sendMentorRequest = onCall(
+  {
+    region: "us-central1",
+    // Keep App Check optional until the mobile app has it enabled everywhere.
+    // enforceAppCheck: true,
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError(
+        "unauthenticated",
+        "You must be signed in to contact a mentor.",
+      );
+    }
+
+    const data = (request.data || {}) as MentorRequestPayload;
+
+    const name = normalizeSpaces(String(data.name ?? ""));
+    const email = normalizeSpaces(String(data.email ?? "")).toLowerCase();
+    const message = normalizeSpaces(String(data.message ?? ""));
+    const contextType = normalizeSpaces(String(data.contextType ?? "")).toLowerCase();
+    const sessionId = normalizeSpaces(String(data.sessionId ?? ""));
+    const sessionTitle = normalizeSpaces(String(data.sessionTitle ?? ""));
+    const pathTitle = normalizeSpaces(String(data.pathTitle ?? ""));
+    const cohortKey = normalizeSpaces(String(data.cohortKey ?? ""));
+    const cohortId = normalizeSpaces(String(data.cohortId ?? ""));
+    const cohortLabel = normalizeSpaces(String(data.cohortLabel ?? ""));
+    const studentPhone = normalizeSpaces(String(data.studentPhone ?? ""));
+
+    if (!name || name.length < 2) {
+      throw new HttpsError(
+        "invalid-argument",
+        "A valid student name is required.",
+      );
+    }
+    if (!email || !isValidEmail(email)) {
+      throw new HttpsError("invalid-argument", "A valid email is required.");
+    }
+    if (!message || message.length < 5) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Message must be at least 5 characters.",
+      );
+    }
+    if (message.length > 3000) {
+      throw new HttpsError("invalid-argument", "Message is too long.");
+    }
+    if (!sessionId) {
+      throw new HttpsError("invalid-argument", "Session ID is required.");
+    }
+
+    const sourceSuffix = contextType === "recorded" ? "recorded" : "live";
+
+    try {
+      // Reuse a single mentor thread per student + class context so mobile can
+      // render one continuous chat timeline instead of stitching many roots.
+      const existingThreads = await db
+        .collection("contactMessages")
+        .where("studentUid", "==", request.auth.uid)
+        .get();
+
+      const matchingThread = existingThreads.docs
+        .filter((doc) => {
+          const data = doc.data() || {};
+          return (
+            String(data.category || "") === "ask-mentor" &&
+            String(data.sessionId || "") === sessionId
+          );
+        })
+        .sort((a, b) => {
+          const aMs = a.updateTime?.toMillis() || a.createTime?.toMillis() || 0;
+          const bMs = b.updateTime?.toMillis() || b.createTime?.toMillis() || 0;
+          return bMs - aMs;
+        })[0];
+
+      const now = FieldValue.serverTimestamp();
+      const basePayload = {
+        name,
+        email,
+        lastMessage: message,
+        lastMessageAt: now,
+        updatedAt: now,
+        status: "new",
+        source: `mobile-ask-mentor:${sourceSuffix}`,
+        category: "ask-mentor",
+        contextType: sourceSuffix,
+        sessionId,
+        sessionTitle,
+        pathTitle,
+        cohortKey,
+        cohortId,
+        cohortLabel,
+        studentUid: request.auth.uid,
+        studentPhone,
+        auth: {
+          uid: request.auth.uid,
+        },
+        appCheck: {
+          appId: request.app?.appId || null,
+        },
+      };
+
+      let threadRef;
+
+      if (matchingThread) {
+        threadRef = matchingThread.ref;
+        await threadRef.set(basePayload, {merge: true});
+        await threadRef.collection("messages").add({
+          body: message,
+          message,
+          senderType: "user",
+          senderRole: "user",
+          senderName: name,
+          senderEmail: email,
+          source: `mobile-ask-mentor:${sourceSuffix}`,
+          sessionId,
+          createdAt: now,
+        });
+      } else {
+        threadRef = await db.collection("contactMessages").add({
+          ...basePayload,
+          body: message,
+          message,
+          createdAt: now,
+        });
+      }
+
+      logger.info("Mentor request saved", {
+        docId: threadRef.id,
+        uid: request.auth.uid,
+        sessionId,
+        contextType: sourceSuffix,
+        hasAppCheck: !!request.app,
+      });
+
+      return {
+        success: true,
+        conversationId: threadRef.id,
+      };
+    } catch (error) {
+      logger.error("Failed to save mentor request", error);
+      throw new HttpsError(
+        "internal",
+        "Could not send mentor request right now. Please try again.",
       );
     }
   },

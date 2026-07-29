@@ -6,15 +6,17 @@ import {
 } from "../services/registrationStore";
 import { auth, db, setAuthPersistenceMode } from "../services/firebase";
 import {
+  onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
-  onAuthStateChanged,
   User,
 } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 
 const HANDOFF_KEY = "cwg_registration_handoff";
 const ADMIN_SESSION_KEY = "cwg_admin_session_active";
+const ADMIN_SESSION_PENDING = "pending";
+const ADMIN_SESSION_ACTIVE = "active";
 const ADMIN_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 type VerificationState = {
@@ -47,6 +49,40 @@ function waitForAuthUid(authRef: typeof auth, expectedUid: string, timeoutMs = 8
   });
 }
 
+const describeStudentAuthError = (err: any) => {
+  const code = String(err?.code || "").toLowerCase();
+  const message = String(err?.message || "").trim();
+  const lower = message.toLowerCase();
+
+  if (code.includes("popup-closed-by-user")) {
+    return "Google sign-in was cancelled before it finished.";
+  }
+  if (code.includes("popup-blocked")) {
+    return "Google sign-in was blocked. Please allow pop-ups and try again.";
+  }
+  if (code.includes("account-exists-with-different-credential")) {
+    return "This email already uses another sign-in method. Sign in with that method first.";
+  }
+  if (err?.requiresPasswordLink) {
+    return String(err?.message || "Sign in with your password once and we will connect Google automatically.");
+  }
+  if (code.includes("operation-not-allowed")) {
+    return "Google sign-in is not enabled in Firebase Authentication yet.";
+  }
+  if (code.includes("network-request-failed") || lower.includes("network")) {
+    return "We could not reach the server. Check your connection and try again.";
+  }
+  if (
+    code.includes("wrong-password") ||
+    code.includes("invalid-credential") ||
+    code.includes("user-not-found")
+  ) {
+    return "Incorrect email or password. Please try again.";
+  }
+
+  return message || "Sign-in failed. Please try again.";
+};
+
 export const useAppLogic = () => {
   const [currentView, setCurrentView] = useState<View>("home");
   const [selectedPath, setSelectedPath] = useState("");
@@ -64,15 +100,13 @@ export const useAppLogic = () => {
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [adminSessionRemainingMs, setAdminSessionRemainingMs] = useState(0);
 
-  const adminDeadlineRef = useRef<number | null>(null);
   const adminLogoutTimerRef = useRef<number | null>(null);
 
-  const resetAuthState = () => {
+  const clearAuthBuckets = () => {
     setAdminUser(null);
     setStudentUser(null);
     setStudentProfile(null);
     setVerificationState(null);
-    setAdminSessionRemainingMs(0);
   };
 
   const hydrateRegistrationFromHandoff = () => {
@@ -117,32 +151,28 @@ export const useAppLogic = () => {
 
     if (!profile) {
       navigateTo("continue-registration");
-    } else {
-      setStudentProfile(profile);
-      navigateTo("student-dashboard");
+      return;
     }
+
+    setStudentProfile(profile);
+    navigateTo("student-dashboard");
   };
 
   const syncSignedInUser = async (user: User) => {
     const adminSnap = await getDoc(doc(db, "admins", user.uid));
 
     if (adminSnap.exists()) {
-      if (!sessionStorage.getItem(ADMIN_SESSION_KEY)) {
-        await signOut(auth);
-        resetAuthState();
-        setCurrentView("admin-login");
-        return;
-      }
+      const adminSessionState = sessionStorage.getItem(ADMIN_SESSION_KEY);
 
-      if (!user.emailVerified) {
-        setAdminUser(null);
-        setStudentUser(null);
-        setStudentProfile(null);
-        setVerificationState({
-          role: "admin",
-          email: String(user.email || "").trim(),
-          uid: user.uid,
-        });
+      // Old persisted admin sessions should not revive without an explicit
+      // session marker from the current secure admin login flow.
+      if (
+        adminSessionState != ADMIN_SESSION_PENDING &&
+        adminSessionState != ADMIN_SESSION_ACTIVE
+      ) {
+        await signOut(auth);
+        clearAuthBuckets();
+        setCurrentView("admin-login");
         return;
       }
 
@@ -150,68 +180,36 @@ export const useAppLogic = () => {
       setAdminUser(user);
       setStudentUser(null);
       setStudentProfile(null);
+      if (adminSessionState == ADMIN_SESSION_PENDING) {
+        sessionStorage.setItem(ADMIN_SESSION_KEY, ADMIN_SESSION_ACTIVE);
+      }
       return;
     }
 
     if (!user.emailVerified) {
-      setAdminUser(null);
-      setStudentUser(null);
-      setStudentProfile(null);
       setVerificationState({
         role: "student",
         email: String(user.email || "").trim(),
         uid: user.uid,
       });
+      setAdminUser(null);
+      setStudentUser(null);
+      setStudentProfile(null);
       return;
     }
 
     const userSnap = await getDoc(doc(db, "users", user.uid));
+
     setVerificationState(null);
     setAdminUser(null);
     setStudentUser(user);
     setStudentProfile(userSnap.exists() ? (userSnap.data() as RegistrationEntry) : null);
   };
 
-  const refreshVerifiedSession = async () => {
-    try {
-      const snapshot = await registrationStore.reloadCurrentUser();
-      if (!snapshot) {
-        return { verified: false, error: "No signed-in user found." };
-      }
-
-      if (!snapshot.emailVerified) {
-        return {
-          verified: false,
-          error:
-            "This email is still unverified. Open the verification link, then try again.",
-        };
-      }
-
-      if (!auth.currentUser) {
-        return { verified: false, error: "No signed-in user found." };
-      }
-
-      await syncSignedInUser(auth.currentUser);
-
-      if (verificationState?.role === "admin") {
-        navigateTo("admin-dashboard");
-      } else {
-        await routeVerifiedStudent(auth.currentUser);
-      }
-
-      return { verified: true };
-    } catch (err: any) {
-      return {
-        verified: false,
-        error: err?.message || "Failed to refresh verification status.",
-      };
-    }
-  };
-
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (!user) {
-        resetAuthState();
+        clearAuthBuckets();
         setIsLoadingAuth(false);
         return;
       }
@@ -220,7 +218,7 @@ export const useAppLogic = () => {
         await syncSignedInUser(user);
       } catch (err) {
         console.error("Auth bootstrap failed:", err);
-        resetAuthState();
+        clearAuthBuckets();
       } finally {
         setIsLoadingAuth(false);
       }
@@ -248,20 +246,14 @@ export const useAppLogic = () => {
 
   useEffect(() => {
     if (!adminUser) {
-      adminDeadlineRef.current = null;
       if (adminLogoutTimerRef.current) {
         window.clearTimeout(adminLogoutTimerRef.current);
       }
       adminLogoutTimerRef.current = null;
-      setAdminSessionRemainingMs(0);
       return;
     }
 
-    const scheduleExpiry = () => {
-      const deadline = Date.now() + ADMIN_IDLE_TIMEOUT_MS;
-      adminDeadlineRef.current = deadline;
-      setAdminSessionRemainingMs(ADMIN_IDLE_TIMEOUT_MS);
-
+    const resetIdleTimeout = () => {
       if (adminLogoutTimerRef.current) {
         window.clearTimeout(adminLogoutTimerRef.current);
       }
@@ -269,14 +261,10 @@ export const useAppLogic = () => {
       adminLogoutTimerRef.current = window.setTimeout(async () => {
         sessionStorage.removeItem(ADMIN_SESSION_KEY);
         await signOut(auth);
-        resetAuthState();
+        clearAuthBuckets();
         setCurrentView("admin-login");
         window.alert("Admin session expired after 30 minutes of inactivity.");
       }, ADMIN_IDLE_TIMEOUT_MS);
-    };
-
-    const handleActivity = () => {
-      scheduleExpiry();
     };
 
     const events: Array<keyof WindowEventMap> = [
@@ -288,21 +276,14 @@ export const useAppLogic = () => {
     ];
 
     events.forEach((eventName) => {
-      window.addEventListener(eventName, handleActivity, { passive: true });
+      window.addEventListener(eventName, resetIdleTimeout, { passive: true });
     });
-
-    scheduleExpiry();
-
-    const ticker = window.setInterval(() => {
-      const deadline = adminDeadlineRef.current;
-      setAdminSessionRemainingMs(deadline ? Math.max(0, deadline - Date.now()) : 0);
-    }, 1000);
+    resetIdleTimeout();
 
     return () => {
       events.forEach((eventName) => {
-        window.removeEventListener(eventName, handleActivity);
+        window.removeEventListener(eventName, resetIdleTimeout);
       });
-      window.clearInterval(ticker);
       if (adminLogoutTimerRef.current) {
         window.clearTimeout(adminLogoutTimerRef.current);
       }
@@ -341,32 +322,29 @@ export const useAppLogic = () => {
   const loginAdmin = async (email: string, password: string) => {
     try {
       await setAuthPersistenceMode("session");
+      // Mark the current admin auth attempt before Firebase emits the auth
+      // state event, otherwise the bootstrap listener can reject the first
+      // successful login as an unsafe revived session.
+      sessionStorage.setItem(ADMIN_SESSION_KEY, ADMIN_SESSION_PENDING);
       const cred = await signInWithEmailAndPassword(auth, email, password);
 
       const adminSnap = await getDoc(doc(db, "admins", cred.user.uid));
       if (!adminSnap.exists()) {
         sessionStorage.removeItem(ADMIN_SESSION_KEY);
         await signOut(auth);
-        throw new Error("Access denied: Admins only");
+        throw new Error(
+          "Admin record missing: create Firestore document admins/" +
+            cred.user.uid,
+        );
       }
 
-      sessionStorage.setItem(ADMIN_SESSION_KEY, "active");
-
-      const reloaded = await registrationStore.reloadCurrentUser();
-      if (!reloaded?.emailVerified) {
-        setVerificationState({
-          role: "admin",
-          email: String(cred.user.email || "").trim(),
-          uid: cred.user.uid,
-        });
-        navigateTo("verify-email");
-        return { success: true };
-      }
+      sessionStorage.setItem(ADMIN_SESSION_KEY, ADMIN_SESSION_ACTIVE);
 
       await syncSignedInUser(auth.currentUser || cred.user);
       navigateTo("admin-dashboard");
       return { success: true };
     } catch (err: any) {
+      sessionStorage.removeItem(ADMIN_SESSION_KEY);
       return { success: false, error: err.message };
     }
   };
@@ -381,11 +359,14 @@ export const useAppLogic = () => {
     try {
       await setAuthPersistenceMode("local");
       const cred = await signInWithEmailAndPassword(auth, email, password);
+      // If Google was attempted first for the same email, attach it quietly
+      // after the trusted password login succeeds.
+      await registrationStore.linkPendingGoogleProviderIfNeeded(cred.user);
 
       await waitForAuthUid(auth, cred.user.uid, 15000);
 
-      const reloaded = await registrationStore.reloadCurrentUser();
-      if (!reloaded?.emailVerified) {
+      const refreshed = await registrationStore.reloadCurrentUser();
+      if (!refreshed?.emailVerified) {
         setVerificationState({
           role: "student",
           email: String(cred.user.email || "").trim(),
@@ -401,7 +382,33 @@ export const useAppLogic = () => {
 
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err?.message || "Login failed" };
+      return { success: false, error: describeStudentAuthError(err) };
+    }
+  };
+
+  const loginStudentWithGoogle = async () => {
+    try {
+      const snapshot = await registrationStore.signInStudentWithGoogle();
+      if (!snapshot.emailVerified) {
+        setVerificationState({
+          role: "student",
+          email: snapshot.email,
+          uid: snapshot.uid,
+        });
+        navigateTo("verify-email");
+        return { success: true };
+      }
+
+      const activeUser = auth.currentUser;
+      if (!activeUser) {
+        throw new Error("Google sign-in finished, but the auth session is missing.");
+      }
+
+      await syncSignedInUser(activeUser);
+      await routeVerifiedStudent(activeUser);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: describeStudentAuthError(err) };
     }
   };
 
@@ -418,6 +425,40 @@ export const useAppLogic = () => {
       return {
         success: false,
         error: err?.message || "Could not resend verification email.",
+      };
+    }
+  };
+
+  const refreshVerifiedSession = async () => {
+    try {
+      const snapshot = await registrationStore.reloadCurrentUser();
+      if (!snapshot?.emailVerified) {
+        return {
+          verified: false,
+          error:
+            "This email is still unverified. Open the email link, then try again.",
+        };
+      }
+
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        return { verified: false, error: "No signed-in user found." };
+      }
+
+      const role = verificationState?.role;
+      await syncSignedInUser(currentUser);
+
+      if (role === "admin") {
+        navigateTo("admin-dashboard");
+      } else {
+        await routeVerifiedStudent(currentUser);
+      }
+
+      return { verified: true };
+    } catch (err: any) {
+      return {
+        verified: false,
+        error: err?.message || "Failed to refresh verification status.",
       };
     }
   };
@@ -442,7 +483,6 @@ export const useAppLogic = () => {
     isLoadingAuth,
     studentProfile,
     verificationState,
-    adminSessionRemainingMs,
 
     navigateTo,
     handleRegistrationSubmit,
@@ -450,6 +490,7 @@ export const useAppLogic = () => {
     loginAdmin,
     logoutAdmin,
     loginStudent,
+    loginStudentWithGoogle,
     logoutStudent,
     resendVerificationEmail,
     refreshVerifiedSession,

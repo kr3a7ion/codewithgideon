@@ -66,6 +66,47 @@ const parsePricePerWeek = (label: string, fallback = 10000) => {
 const clamp = (n: number, min: number, max: number) =>
   Math.max(min, Math.min(max, n));
 
+const PAYSTACK_RATE = 0.015;
+const PAYSTACK_FLAT = 100;
+const PAYSTACK_CAP = 2000;
+const FLAT_THRESHOLD = 2500;
+
+const getPaystackFee = (amount: number) => {
+  const flat = amount >= FLAT_THRESHOLD ? PAYSTACK_FLAT : 0;
+  const fee = Math.round(amount * PAYSTACK_RATE) + flat;
+  return Math.min(fee, PAYSTACK_CAP);
+};
+
+const calculateSplitFee = (
+  weeklyFee: number,
+  weeks: number,
+  mode: "upfront" | "weekly",
+) => {
+  const amountPerTxn = mode === "upfront" ? weeklyFee * weeks : weeklyFee;
+  const transactions = mode === "upfront" ? 1 : weeks;
+  const totalFeePerTxn = getPaystackFee(amountPerTxn);
+  const yourFeeSharePerTxn = Math.floor(totalFeePerTxn / 2);
+  const studentFeeSharePerTxn = totalFeePerTxn - yourFeeSharePerTxn;
+  const chargeStudentPerTxn = amountPerTxn + studentFeeSharePerTxn;
+  const youReceivePerTxn = chargeStudentPerTxn - totalFeePerTxn;
+
+  return {
+    amountPerTxn,
+    totalFeePerTxn,
+    yourFeeSharePerTxn,
+    studentFeeSharePerTxn,
+    chargeStudentPerTxn,
+    youReceivePerTxn,
+    transactions,
+    totalCharged: chargeStudentPerTxn * transactions,
+    totalFees: totalFeePerTxn * transactions,
+    yourTotalCost: yourFeeSharePerTxn * transactions,
+    studentTotalExtra: studentFeeSharePerTxn * transactions,
+    yourTotalRevenue: youReceivePerTxn * transactions,
+    targetRevenue: weeklyFee * weeks,
+  };
+};
+
 const Badge = ({
   tone = "blue",
   children,
@@ -302,23 +343,22 @@ const Payment: React.FC<PaymentProps> = ({
 
   const weeklyRate = courseWeeklyRate || 10000;
 
-  // Base course cost
-  const basePrice = topUpWeeks * weeklyRate;
+  // Split the Paystack fee so the student covers half and the business absorbs half.
+  const splitFee = calculateSplitFee(weeklyRate, topUpWeeks, "upfront");
+  const basePrice = splitFee.targetRevenue;
+  const totalFee = splitFee.totalFees;
+  const yourFeeShare = splitFee.yourTotalCost;
+  const studentFeeShare = splitFee.studentTotalExtra;
+  const totalPrice = splitFee.totalCharged;
+  const yourRevenue = splitFee.yourTotalRevenue;
 
-  // Paystack processing fee
-  // Standard: 1.5% + ₦100
-  const percentFee = basePrice * 0.015;
-  const flatFee = 100;
-
-  const processingFee = Math.ceil(percentFee + flatFee);
-
-  // Total student pays
-  const totalPrice = basePrice + processingFee;
-
-  // Amounts in kobo (for Paystack + backend verification)
+  // Send all critical amounts in kobo to keep verification exact.
   const totalPriceKobo = totalPrice * 100;
   const basePriceKobo = basePrice * 100;
-  const processingFeeKobo = processingFee * 100;
+  const totalFeeKobo = totalFee * 100;
+  const yourFeeShareKobo = yourFeeShare * 100;
+  const studentFeeShareKobo = studentFeeShare * 100;
+  const yourRevenueKobo = yourRevenue * 100;
 
   const newTotalWeeks = u.isTopUp ? originalWeeks + topUpWeeks : topUpWeeks;
 
@@ -379,9 +419,10 @@ const Payment: React.FC<PaymentProps> = ({
       cohortKey,
       expectedAmountKobo: totalPriceKobo,
       baseAmountKobo: basePriceKobo,
-      processingFeeKobo: processingFeeKobo,
-      baseAmount: basePrice,
-      weeklyRate,
+      totalFeeKobo,
+      yourFeeShareKobo,
+      studentFeeShareKobo,
+      yourRevenueKobo,
       app: "codewithgideon-web",
       ts: Date.now(),
     }),
@@ -396,8 +437,10 @@ const Payment: React.FC<PaymentProps> = ({
       cohortLabel,
       cohortKey,
       totalPriceKobo,
-      basePrice,
-      weeklyRate,
+      totalFeeKobo,
+      yourFeeShareKobo,
+      studentFeeShareKobo,
+      yourRevenueKobo,
     ],
   );
 
@@ -902,8 +945,9 @@ const Payment: React.FC<PaymentProps> = ({
                         </p>
 
                         <p>Course Cost: ₦{basePrice.toLocaleString()}</p>
-
-                        <p>Processing Fee: ₦{processingFee.toLocaleString()}</p>
+                        <p>Total Fee: ₦{totalFee.toLocaleString()}</p>
+                        <p>Student Share: ₦{studentFeeShare.toLocaleString()}</p>
+                        <p>You Cover: ₦{yourFeeShare.toLocaleString()}</p>
                       </div>
                     </div>
                   </div>
@@ -912,6 +956,10 @@ const Payment: React.FC<PaymentProps> = ({
                     <SummaryRow label="Cohort" value={cohortLabel} />
                     <SummaryRow label="Cohort Key" value={cohortKey} mono />
                     <SummaryRow label="Reference" value={reference} mono />
+                    <SummaryRow
+                      label="You Receive"
+                      value={`₦${yourRevenue.toLocaleString()}`}
+                    />
                     {u.isTopUp ? (
                       <>
                         <SummaryRow
@@ -957,10 +1005,11 @@ const Payment: React.FC<PaymentProps> = ({
                       ₦{totalPrice.toLocaleString()}
                     </span>
 
-                    <p className="text-[11px] text-slate-400">
-                      ₦{basePrice.toLocaleString()} + ₦
-                      {processingFee.toLocaleString()} fee
-                    </p>
+                    <div className="mt-1 space-y-1 text-[11px] text-slate-400">
+                      <p>Target revenue: ₦{basePrice.toLocaleString()}</p>
+                      <p>Student fee share: ₦{studentFeeShare.toLocaleString()}</p>
+                      <p>You cover: ₦{yourFeeShare.toLocaleString()}</p>
+                    </div>
                   </div>
                 </div>
 
