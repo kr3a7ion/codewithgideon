@@ -98,6 +98,7 @@ export const useAppLogic = () => {
   const [verificationState, setVerificationState] =
     useState<VerificationState>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+  const [adminSessionRemainingMs, setAdminSessionRemainingMs] = useState(0);
 
   const adminLogoutTimerRef = useRef<number | null>(null);
 

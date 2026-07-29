@@ -593,6 +593,8 @@ const Payment: React.FC<PaymentProps> = ({
         kind: u.isTopUp ? "topup" : "initial",
         weeks: topUpWeeks,
         amount: totalPrice,
+        baseAmount: basePrice,
+        weeklyRate,
         reference,
       });
 

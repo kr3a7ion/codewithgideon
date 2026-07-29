@@ -102,7 +102,6 @@ const CreateAccount: React.FC<CreateAccountProps> = ({
         password,
       );
 
-      // ✅ flag to show ContinueRegistration after login
       localStorage.setItem(
         "cwg_account_created",
         JSON.stringify({
