@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { usePageMeta } from "../src/app/usePageMeta";
 import { View } from "../src/App";
 import { IMAGES } from "../assets/images";
 import {
@@ -247,6 +248,13 @@ const CourseDetail: React.FC<CourseDetailProps> = ({ onNavigate }) => {
     () => resolveCourse(token, courses) || null,
     [courses, token],
   );
+
+  usePageMeta({
+    title: course?.title || "Course",
+    description: course?.description
+      ? String(course.description).slice(0, 160)
+      : undefined,
+  });
 
   const syllabus = useMemo<SyllabusWeek[]>(() => {
     const list = Array.isArray(course?.syllabus) ? course?.syllabus : [];

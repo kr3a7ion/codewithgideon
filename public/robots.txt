@@ -1,4 +1,6 @@
 User-agent: *
 Allow: /
+Disallow: /admin
+Disallow: /student
 
 Sitemap: https://codewithgideon.com/sitemap.xml

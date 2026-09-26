@@ -1,100 +1,115 @@
-import React, { Suspense, lazy } from 'react';
-import Header from '../components/Header';
-import Hero from '../components/Hero';
-import HowItWorks from '../components/HowItWorks';
-import WhyGideon from '../components/WhyGideon';
-import Features from '../components/Features';
-import Courses from '../components/Courses';
-import Pricing from '../components/Pricing';
-import InstructorBio from '../components/InstructorBio';
-import AppPreview from '../components/AppPreview';
-import FAQ from '../components/FAQ';
-import Footer from '../components/Footer';
-import { useAppLogic } from '../hooks/useAppLogic';
-import ErrorBoundary from '../components/ErrorBoundary';
+import React, { Suspense, lazy } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import Header from "../components/Header";
+import Footer from "../components/Footer";
+import ErrorBoundary from "../components/ErrorBoundary";
+import { AppProvider, useApp } from "./app/AppContext";
+import { PageMeta } from "./app/usePageMeta";
+import { STUDENT_SECTIONS } from "./app/views";
+import { LoadingPanel } from "./ui";
+import HomePage from "./pages/HomePage";
 
-const Contact = lazy(() => import('../components/Contact'));
-const PrivacyPolicy = lazy(() => import('../components/PrivacyPolicy'));
-const TermsOfService = lazy(() => import('../components/TermsOfService'));
-const RefundPolicy = lazy(() => import('../components/RefundPolicy'));
-const Curriculums = lazy(() => import('../components/Curriculums'));
-const CourseDetail = lazy(() => import('../components/CourseDetail'));
-const Payment = lazy(() => import('../components/Payment'));
-const AdminLogin = lazy(() => import('../components/AdminLogin'));
-const AdminDashboard = lazy(() => import('../components/AdminDashboard'));
-const StudentLogin = lazy(() => import('../components/StudentLogin'));
-const StudentDashboard = lazy(() => import('../components/StudentDashboard'));
-const CreateAccount = lazy(() => import('@/components/CreateAccount'));
-const ContinueRegistration = lazy(() => import('@/components/ContinueRegistration'));
-const VerifyEmail = lazy(() => import('../components/VerifyEmail'));
+export type { View } from "./app/views";
 
-export type View =
-  | "home"
-  | "contact"
-  | "privacy"
-  | "terms"
-  | "refund"
-  | "curriculums"
-  | "course-detail"
-  | "path-flutter"
-  | "path-web"
-  | "path-ai"
-  | "registration"
-  | "payment"
-  | "student-login"
-  | "student-dashboard"
-  | "admin-login"
-  | "admin-dashboard"
-  | "create-account"
-  | "continue-registration"
-  | "verify-email";
+const Contact = lazy(() => import("../components/Contact"));
+const PrivacyPolicy = lazy(() => import("../components/PrivacyPolicy"));
+const TermsOfService = lazy(() => import("../components/TermsOfService"));
+const RefundPolicy = lazy(() => import("../components/RefundPolicy"));
+const Curriculums = lazy(() => import("../components/Curriculums"));
+const CourseDetail = lazy(() => import("../components/CourseDetail"));
+const Payment = lazy(() => import("../components/Payment"));
+const AdminLogin = lazy(() => import("../components/AdminLogin"));
+const AdminDashboard = lazy(() => import("../components/AdminDashboard"));
+const StudentLogin = lazy(() => import("../components/StudentLogin"));
+const StudentDashboard = lazy(() => import("../components/StudentDashboard"));
+const CreateAccount = lazy(() => import("../components/CreateAccount"));
+const ContinueRegistration = lazy(() => import("../components/ContinueRegistration"));
+const VerifyEmail = lazy(() => import("../components/VerifyEmail"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
-const App: React.FC = () => {
-  const {
-    currentView,
-    selectedPath,
-    activeRegistration,
+// ---------------------------------------------------------------------------
+// Guards
+// ---------------------------------------------------------------------------
 
-    // 🌗 Theme
-    isDark,
-    toggleTheme,
+/** Waits for Firebase Auth before rendering a private page. */
+const AuthReady: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isLoadingAuth } = useApp();
+  if (isLoadingAuth) return <LoadingPanel label="Signing you in" />;
+  return <>{children}</>;
+};
 
-    // 🔐 Auth
-    isAdminLoggedIn,
-    adminSessionRemainingMs,
-    isStudentLoggedIn,
-    isLoadingAuth,
-    studentProfile,
-    verificationState,
-
-    // 🧭 Actions
-    navigateTo,
-    handleRegistrationSubmit,
-    completePayment,
-    loginAdmin,
-    logoutAdmin,
-    loginStudent,
-    loginStudentWithGoogle,
-    logoutStudent,
-    resendVerificationEmail,
-    refreshVerifiedSession,
-    logoutPendingVerification,
-  } = useAppLogic();
-
-  const routeFallback = (
-    <div className="min-h-[55vh] px-6 py-20">
-      <div className="mx-auto max-w-md rounded-[2rem] border border-slate-200 bg-white p-8 text-center shadow-xl dark:border-slate-800 dark:bg-slate-900">
-        <div className="mx-auto mb-5 h-12 w-12 rounded-2xl border-4 border-slate-200 border-t-blue-900 dark:border-slate-700 dark:border-t-teal-400 animate-spin" />
-        <p className="text-xs font-black uppercase tracking-[0.24em] text-blue-900 dark:text-teal-300">
-          Loading workspace
-        </p>
-        <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">
-          Preparing this section for you.
-        </p>
-      </div>
-    </div>
+/** Student pages: show the login form in place until the student signs in. */
+const RequireStudent: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isStudentLoggedIn, navigateTo, loginStudent, loginStudentWithGoogle } =
+    useApp();
+  return (
+    <AuthReady>
+      {isStudentLoggedIn ? (
+        children
+      ) : (
+        <StudentLogin
+          onNavigate={navigateTo}
+          onLogin={loginStudent}
+          onGoogleAuth={loginStudentWithGoogle}
+        />
+      )}
+    </AuthReady>
   );
+};
 
+/** Admin pages: show the admin login in place until an admin signs in. */
+const RequireAdmin: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAdminLoggedIn, navigateTo, loginAdmin } = useApp();
+  return (
+    <AuthReady>
+      {isAdminLoggedIn ? (
+        children
+      ) : (
+        <AdminLogin onNavigate={navigateTo} onLogin={loginAdmin} />
+      )}
+    </AuthReady>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Route elements that need app state
+// ---------------------------------------------------------------------------
+
+const StudentLoginPage = () => {
+  const { navigateTo, loginStudent, loginStudentWithGoogle } = useApp();
+  return (
+    <StudentLogin
+      onNavigate={navigateTo}
+      onLogin={loginStudent}
+      onGoogleAuth={loginStudentWithGoogle}
+    />
+  );
+};
+
+const VerifyEmailPage = () => {
+  const {
+    verificationState,
+    navigateTo,
+    refreshVerifiedSession,
+    resendVerificationEmail,
+    logoutPendingVerification,
+  } = useApp();
+  if (!verificationState) return <StudentLoginPage />;
+  return (
+    <VerifyEmail
+      role={verificationState.role}
+      email={verificationState.email}
+      onNavigate={navigateTo}
+      onRefresh={refreshVerifiedSession}
+      onResend={resendVerificationEmail}
+      onLogout={logoutPendingVerification}
+    />
+  );
+};
+
+const PaymentPage = () => {
+  const { activeRegistration, studentProfile, selectedPath, navigateTo, completePayment } =
+    useApp();
   // After a page refresh on /student/payment there is no hand-off data yet,
   // so build the checkout from the signed-in student's profile.
   const paymentUserData: any =
@@ -115,13 +130,64 @@ const App: React.FC = () => {
           }
       : null);
 
-  const isProtectedView =
-    currentView === "student-dashboard" ||
-    currentView === "payment" ||
-    currentView === "admin-dashboard";
+  return (
+    <Payment
+      onNavigate={navigateTo}
+      selectedPath={paymentUserData?.path || selectedPath}
+      userData={paymentUserData}
+      onPaymentSuccess={completePayment}
+    />
+  );
+};
+
+const StudentDashboardPage = () => {
+  const { studentProfile, navigateTo, logoutStudent } = useApp();
+  return (
+    <StudentDashboard
+      profile={studentProfile}
+      onNavigate={navigateTo}
+      onLogout={logoutStudent}
+    />
+  );
+};
+
+const AdminDashboardPage = () => {
+  const { navigateTo, logoutAdmin, adminSessionRemainingMs } = useApp();
+  return (
+    <AdminDashboard
+      onNavigate={navigateTo}
+      onLogout={logoutAdmin}
+      sessionRemainingMs={adminSessionRemainingMs}
+    />
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Layout + routes
+// ---------------------------------------------------------------------------
+
+const AppShell: React.FC = () => {
+  const location = useLocation();
+  const {
+    currentView,
+    navigateTo,
+    isDark,
+    toggleTheme,
+    isStudentLoggedIn,
+    isAdminLoggedIn,
+  } = useApp();
+
+  const privateMeta = { noindex: true };
 
   return (
-    <div className="min-h-screen flex flex-col bg-white dark:bg-slate-900 transition-colors">
+    <div className="flex min-h-screen flex-col bg-white transition-colors dark:bg-slate-950">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-xl focus:bg-white focus:px-4 focus:py-2 focus:font-bold focus:text-blue-900 focus:shadow-lg"
+      >
+        Skip to content
+      </a>
+
       <Header
         currentView={currentView}
         onNavigate={navigateTo}
@@ -130,143 +196,114 @@ const App: React.FC = () => {
         isStudentLoggedIn={isStudentLoggedIn}
       />
 
-      <main className="flex-grow pt-20">
-        <ErrorBoundary resetKey={currentView}>
-        <Suspense fallback={routeFallback}>
-        {isLoadingAuth && isProtectedView ? routeFallback : null}
-        {/* HOME */}
-        {currentView === "home" && (
-          <>
-            <Hero />
-            <HowItWorks />
-            <WhyGideon />
-            <Features />
-            <Courses onNavigate={navigateTo} />
-            <Pricing onNavigate={navigateTo} />
-            <InstructorBio />
-            <AppPreview />
-            <FAQ />
+      <main id="main" className="flex-grow pt-20">
+        <ErrorBoundary resetKey={location.pathname}>
+          <Suspense fallback={<LoadingPanel />}>
+            <Routes>
+              <Route index element={<HomePage />} />
 
-            <section className="bg-blue-900 dark:bg-slate-950 py-24 text-center">
-              <div className="max-w-4xl mx-auto px-6">
-                <h2 className="text-3xl md:text-5xl font-bold text-white mb-6">
-                  You don’t have to learn alone.
-                </h2>
-                <p className="text-blue-100 text-lg mb-10 max-w-2xl mx-auto opacity-90">
-                  Join a cohort of motivated learners and professional mentors.
-                  The next class starts soon—reserve your seat today.
-                </p>
-                <button
-                  onClick={() => navigateTo("curriculums")}
-                  className="bg-orange-600 hover:bg-orange-700 text-white px-10 py-5 rounded-xl font-bold text-lg transition-all shadow-lg"
-                >
-                  Join Code with Gideon
-                </button>
-              </div>
-            </section>
-          </>
-        )}
+              {/* Public pages */}
+              <Route
+                path="courses"
+                element={
+                  <PageMeta
+                    title="Courses"
+                    description="Choose a learning path: Flutter mobile apps, web development & WordPress, or AI-assisted development. Live cohorts with a mentor."
+                  >
+                    <Curriculums onNavigate={navigateTo} />
+                  </PageMeta>
+                }
+              />
+              <Route
+                path="courses/:courseSlug"
+                element={<CourseDetail onNavigate={navigateTo} />}
+              />
+              <Route
+                path="contact"
+                element={
+                  <PageMeta title="Contact" description="Questions about a course, payment or your account? Send us a message.">
+                    <Contact />
+                  </PageMeta>
+                }
+              />
+              <Route path="privacy" element={<PageMeta title="Privacy Policy"><PrivacyPolicy /></PageMeta>} />
+              <Route path="terms" element={<PageMeta title="Terms of Service"><TermsOfService /></PageMeta>} />
+              <Route path="refund" element={<PageMeta title="Refund Policy"><RefundPolicy /></PageMeta>} />
 
-        {/* STATIC PAGES */}
-        {currentView === "contact" && <Contact />}
-        {currentView === "privacy" && <PrivacyPolicy />}
-        {currentView === "terms" && <TermsOfService />}
-        {currentView === "refund" && <RefundPolicy />}
+              {/* Legacy course URLs */}
+              <Route path="path-flutter" element={<Navigate to="/courses/flutter-mobile-app-development" replace />} />
+              <Route path="path-web" element={<Navigate to="/courses/web-development-wordpress" replace />} />
+              <Route path="path-ai" element={<Navigate to="/courses/ai-assisted-development" replace />} />
 
-        {/* CURRICULUM */}
-        {currentView === "curriculums" && (
-          <Curriculums onNavigate={navigateTo} />
-        )}
-        {(currentView === "course-detail" ||
-          currentView === "path-flutter" ||
-          currentView === "path-web" ||
-          currentView === "path-ai") && <CourseDetail onNavigate={navigateTo} />}
+              {/* Sign-up and sign-in */}
+              <Route
+                path="register"
+                element={
+                  <PageMeta title="Create account" description="Create your Code with Gideon account and join the next cohort.">
+                    <CreateAccountRoute />
+                  </PageMeta>
+                }
+              />
+              <Route path="student/login" element={<PageMeta title="Student login" {...privateMeta}><StudentLoginPage /></PageMeta>} />
+              <Route path="student/verify-email" element={<PageMeta title="Verify your email" {...privateMeta}><VerifyEmailPage /></PageMeta>} />
+              <Route
+                path="student/register"
+                element={
+                  <PageMeta title="Complete registration" {...privateMeta}>
+                    <ContinueRegistrationRoute />
+                  </PageMeta>
+                }
+              />
 
-        {/* REGISTRATION */}
-        {currentView === "create-account" && (
-          <CreateAccount
-            onNavigate={navigateTo}
-            onGoogleAuth={loginStudentWithGoogle}
-          />
-        )}
+              {/* Student area */}
+              <Route
+                path="student/payment"
+                element={
+                  <PageMeta title="Payment" {...privateMeta}>
+                    <AuthReady>
+                      <PaymentPage />
+                    </AuthReady>
+                  </PageMeta>
+                }
+              />
+              <Route path="student" element={<Navigate to="/student/dashboard" replace />} />
+              {STUDENT_SECTIONS.map((section) => (
+                <Route
+                  key={section}
+                  path={`student/${section}`}
+                  element={
+                    <PageMeta title="My learning" {...privateMeta}>
+                      <RequireStudent>
+                        <StudentDashboardPage />
+                      </RequireStudent>
+                    </PageMeta>
+                  }
+                />
+              ))}
 
-        {currentView === "verify-email" &&
-          (verificationState ? (
-            <VerifyEmail
-              role={verificationState.role}
-              email={verificationState.email}
-              onNavigate={navigateTo}
-              onRefresh={refreshVerifiedSession}
-              onResend={resendVerificationEmail}
-              onLogout={logoutPendingVerification}
-            />
-          ) : (
-            <StudentLogin
-              onNavigate={navigateTo}
-              onLogin={loginStudent}
-              onGoogleAuth={loginStudentWithGoogle}
-            />
-          ))}
+              {/* Admin */}
+              <Route
+                path="admin/login"
+                element={
+                  <PageMeta title="Admin" {...privateMeta}>
+                    <AdminLoginRoute />
+                  </PageMeta>
+                }
+              />
+              <Route
+                path="admin/*"
+                element={
+                  <PageMeta title="Admin" {...privateMeta}>
+                    <RequireAdmin>
+                      <AdminDashboardPage />
+                    </RequireAdmin>
+                  </PageMeta>
+                }
+              />
 
-        {currentView === "continue-registration" &&
-          (
-            <ContinueRegistration
-              onNavigate={navigateTo}
-              selectedPath={selectedPath}
-              onGoogleAuth={loginStudentWithGoogle}
-            />
-          )}
-
-        {/* STUDENT AUTH */}
-        {currentView === "student-login" && (
-          <StudentLogin
-            onNavigate={navigateTo}
-            onLogin={loginStudent}
-            onGoogleAuth={loginStudentWithGoogle}
-          />
-        )}
-
-        {currentView === "student-dashboard" && !isLoadingAuth &&
-          (isStudentLoggedIn ? (
-            <StudentDashboard
-              profile={studentProfile}
-              onNavigate={navigateTo}
-              onLogout={logoutStudent}
-            />
-          ) : (
-            <StudentLogin
-              onNavigate={navigateTo}
-              onLogin={loginStudent}
-              onGoogleAuth={loginStudentWithGoogle}
-            />
-          ))}
-
-        {/* PAYMENT */}
-        {currentView === "payment" && !isLoadingAuth && (
-          <Payment
-            onNavigate={navigateTo}
-            selectedPath={paymentUserData?.path || selectedPath}
-            userData={paymentUserData}
-            onPaymentSuccess={completePayment}
-          />
-        )}
-
-        {/* ADMIN AUTH */}
-        {currentView === "admin-login" && (
-          <AdminLogin onNavigate={navigateTo} onLogin={loginAdmin} />
-        )}
-
-        {currentView === "admin-dashboard" && !isLoadingAuth &&
-          (isAdminLoggedIn ? (
-            <AdminDashboard
-              onNavigate={navigateTo}
-              onLogout={logoutAdmin}
-              sessionRemainingMs={adminSessionRemainingMs}
-            />
-          ) : (
-            <AdminLogin onNavigate={navigateTo} onLogin={loginAdmin} />
-          ))}
-        </Suspense>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
         </ErrorBoundary>
       </main>
 
@@ -274,5 +311,32 @@ const App: React.FC = () => {
     </div>
   );
 };
+
+const CreateAccountRoute = () => {
+  const { navigateTo, loginStudentWithGoogle } = useApp();
+  return <CreateAccount onNavigate={navigateTo} onGoogleAuth={loginStudentWithGoogle} />;
+};
+
+const ContinueRegistrationRoute = () => {
+  const { navigateTo, selectedPath, loginStudentWithGoogle } = useApp();
+  return (
+    <ContinueRegistration
+      onNavigate={navigateTo}
+      selectedPath={selectedPath}
+      onGoogleAuth={loginStudentWithGoogle}
+    />
+  );
+};
+
+const AdminLoginRoute = () => {
+  const { navigateTo, loginAdmin } = useApp();
+  return <AdminLogin onNavigate={navigateTo} onLogin={loginAdmin} />;
+};
+
+const App: React.FC = () => (
+  <AppProvider>
+    <AppShell />
+  </AppProvider>
+);
 
 export default App;

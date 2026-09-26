@@ -18,8 +18,14 @@ export const coursePathFromValue = (value?: {
   title?: string;
   slug?: string;
 }) => {
+  // Readable URLs first (/courses/flutter-mobile-app-development); the course
+  // page also resolves ids, so old links keep working.
   const token =
-    value?.courseId || value?.id || value?.slug || slugifyCourse(value?.title || "");
+    value?.slug ||
+    slugifyCourse(value?.title || "") ||
+    value?.courseId ||
+    value?.id ||
+    "";
   return token ? `/courses/${encodeURIComponent(token)}` : "/courses";
 };
 
