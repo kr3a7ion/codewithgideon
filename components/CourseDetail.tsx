@@ -411,8 +411,8 @@ const CourseDetail: React.FC<CourseDetailProps> = ({ onNavigate }) => {
             </div>
             <p className="max-w-xl text-sm leading-7 text-slate-600 dark:text-slate-300">
               Each week is designed to unlock a practical milestone, not just
-              another lecture. The admin dashboard can update this outline as
-              the cohort evolves.
+              another lecture. The outline may be adjusted as the cohort
+              progresses.
             </p>
           </div>
 
