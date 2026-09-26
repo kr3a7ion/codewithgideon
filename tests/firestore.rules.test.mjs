@@ -189,6 +189,24 @@ test("server-written timestamps don't lock the student out", async () => {
   }));
 });
 
+test("pending student can change course before paying (registration form)", async () => {
+  const next = student("pending", {
+    status: "Pending", path: "Web Development & WordPress", pathId: "path_web",
+    courseId: "course_web", weeksToCommit: 2, totalPrice: 20000,
+    cohortId: "WEB", cohortKey: OTHER_COHORT, timestamp: Date.now(),
+  });
+  await assertSucceeds(setDoc(doc(db("pending"), "users/pending"), next));
+});
+
+test("paid student cannot rewrite enrolment via the registration form", async () => {
+  const next = student("paid", {weeksToCommit: 12, cohortKey: OTHER_COHORT});
+  await assertFails(setDoc(doc(db("paid"), "users/paid"), next));
+});
+
+test("pending student cannot mark themselves Complete via the form", async () => {
+  await assertFails(setDoc(doc(db("pending"), "users/pending"), student("pending")));
+});
+
 test("students can't read other students", async () => {
   await assertFails(getDoc(doc(db("paid"), "users/pending")));
 });

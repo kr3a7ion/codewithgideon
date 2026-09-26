@@ -11,6 +11,7 @@ import AppPreview from '../components/AppPreview';
 import FAQ from '../components/FAQ';
 import Footer from '../components/Footer';
 import { useAppLogic } from '../hooks/useAppLogic';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 const Contact = lazy(() => import('../components/Contact'));
 const PrivacyPolicy = lazy(() => import('../components/PrivacyPolicy'));
@@ -62,6 +63,7 @@ const App: React.FC = () => {
     isAdminLoggedIn,
     adminSessionRemainingMs,
     isStudentLoggedIn,
+    isLoadingAuth,
     studentProfile,
     verificationState,
 
@@ -93,6 +95,31 @@ const App: React.FC = () => {
     </div>
   );
 
+  // After a page refresh on /student/payment there is no hand-off data yet,
+  // so build the checkout from the signed-in student's profile.
+  const paymentUserData: any =
+    activeRegistration ||
+    (studentProfile
+      ? studentProfile.status === "Complete"
+        ? {
+            ...studentProfile,
+            isTopUp: true,
+            originalWeeks: Number(studentProfile.weeksToCommit || 0),
+            weeksToCommit: 1,
+            reference: studentProfile.pendingPayment?.reference,
+          }
+        : {
+            ...studentProfile,
+            isTopUp: false,
+            reference: studentProfile.pendingPayment?.reference,
+          }
+      : null);
+
+  const isProtectedView =
+    currentView === "student-dashboard" ||
+    currentView === "payment" ||
+    currentView === "admin-dashboard";
+
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-slate-900 transition-colors">
       <Header
@@ -104,7 +131,9 @@ const App: React.FC = () => {
       />
 
       <main className="flex-grow pt-20">
+        <ErrorBoundary resetKey={currentView}>
         <Suspense fallback={routeFallback}>
+        {isLoadingAuth && isProtectedView ? routeFallback : null}
         {/* HOME */}
         {currentView === "home" && (
           <>
@@ -197,7 +226,7 @@ const App: React.FC = () => {
           />
         )}
 
-        {currentView === "student-dashboard" &&
+        {currentView === "student-dashboard" && !isLoadingAuth &&
           (isStudentLoggedIn ? (
             <StudentDashboard
               profile={studentProfile}
@@ -213,11 +242,11 @@ const App: React.FC = () => {
           ))}
 
         {/* PAYMENT */}
-        {currentView === "payment" && (
+        {currentView === "payment" && !isLoadingAuth && (
           <Payment
             onNavigate={navigateTo}
-            selectedPath={(activeRegistration as any)?.path || selectedPath}
-            userData={activeRegistration as any}
+            selectedPath={paymentUserData?.path || selectedPath}
+            userData={paymentUserData}
             onPaymentSuccess={completePayment}
           />
         )}
@@ -227,7 +256,7 @@ const App: React.FC = () => {
           <AdminLogin onNavigate={navigateTo} onLogin={loginAdmin} />
         )}
 
-        {currentView === "admin-dashboard" &&
+        {currentView === "admin-dashboard" && !isLoadingAuth &&
           (isAdminLoggedIn ? (
             <AdminDashboard
               onNavigate={navigateTo}
@@ -238,6 +267,7 @@ const App: React.FC = () => {
             <AdminLogin onNavigate={navigateTo} onLogin={loginAdmin} />
           ))}
         </Suspense>
+        </ErrorBoundary>
       </main>
 
       <Footer onNavigate={navigateTo} isAdminLoggedIn={isAdminLoggedIn} />

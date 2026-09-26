@@ -331,21 +331,14 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
         if (!mounted) return;
 
+        // Display fallback only. A student's cohort is assigned by the
+        // payment function when they pay; the dashboard must never move a
+        // student into a newer cohort.
         setActiveForPath({
           cohortId: active.cohortId,
           cohortKey: active.cohortKey,
           label: active.label,
         });
-
-        try {
-          await registrationStore.updateStudentEnrollmentFields(profile.uid, {
-            cohortId: active.cohortId,
-            cohortLabel: active.label,
-            cohortKey: active.cohortKey,
-          });
-        } catch {
-          // ignore
-        }
       } catch {
         if (!mounted) return;
         setActiveForPath(null);
@@ -562,9 +555,9 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
       setResourcesLoading(true);
       try {
-        const isLocked =
-          profile.status === "Pending" ||
-          profile.pendingPayment?.status === "Pending";
+        // Only an unpaid enrolment locks content; a pending top-up never
+        // hides material the student has already paid for.
+        const isLocked = profile.status !== "Complete";
 
         if (isLocked) {
           if (mounted) setResources([]);
@@ -767,9 +760,9 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const hasCoursePricing = courseMaxWeeks > 0 && weeklyRate > 0 && !courseError;
 
   const progressPercent = clamp((paidWeeks / totalProgramWeeks) * 100, 0, 100);
-  const hasAnyPending =
-    profile?.status === "Pending" ||
-    profile?.pendingPayment?.status === "Pending";
+  // Locked only until the first payment is confirmed. A pending top-up is
+  // shown as a notice but never hides weeks the student already paid for.
+  const hasAnyPending = !isEnrolled;
 
   const hasPendingTopUp =
     profile?.pendingPayment?.status === "Pending" &&
@@ -795,11 +788,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
     unreadCohortMessages.length + (hasUnreadMentorReply ? 1 : 0);
 
   const remainingWeeks = Math.max(0, totalProgramWeeks - paidWeeks);
-  const canTopUp =
-    isEnrolled &&
-    hasCoursePricing &&
-    remainingWeeks > 0 &&
-    !(profile?.pendingPayment?.status === "Pending");
+  // An abandoned checkout must not block a new top-up.
+  const canTopUp = isEnrolled && hasCoursePricing && remainingWeeks > 0;
 
   const joinedDate = new Date(
     profile?.timestamp || Date.now(),

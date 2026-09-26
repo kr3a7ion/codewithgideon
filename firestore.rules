@@ -388,6 +388,25 @@ service cloud.firestore {
         && (!changed.hasAny(["updatedAt"]) || isNumberOrTimestamp(d.updatedAt));
     }
 
+    // Before the first payment is confirmed, a student may change their
+    // course selection and registration details (the registration form
+    // rewrites the whole doc). Status stays Pending, so this grants nothing;
+    // the payment function recomputes weeks, price and cohort anyway.
+    function validPendingReselect(userId) {
+      let d = request.resource.data;
+      let changed = d.diff(resource.data).affectedKeys();
+      return resource.data.status == "Pending"
+        && d.status == "Pending"
+        && changed.hasOnly([
+          "fullName", "phone", "ageRange", "gender",
+          "weeksToCommit", "totalPrice", "path", "pathId", "courseId",
+          "cohortId", "cohortLabel", "cohortKey",
+          "courseDurationWeeks", "weeklyRate",
+          "pendingPayment", "timestamp", "updatedAt"
+        ])
+        && validStudentProfile(d, userId);
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
 
@@ -396,7 +415,8 @@ service cloud.firestore {
         && request.resource.data.status == "Pending";
 
       allow update: if isAdmin()
-        || (ownsUserDoc(userId) && validStudentUpdate());
+        || (ownsUserDoc(userId)
+          && (validStudentUpdate() || validPendingReselect(userId)));
 
       allow delete: if isAdmin();
 
