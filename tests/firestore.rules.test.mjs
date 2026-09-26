@@ -246,8 +246,15 @@ test("pending top-up does not lock a paid student out of sessions", async () => 
   await assertSucceeds(getDocs(collection(db("topupPending"), `cohorts/${COHORT}/sessions`)));
 });
 
-test("unpaid student cannot read sessions", async () => {
-  await assertFails(getDocs(collection(db("pending"), `cohorts/${COHORT}/sessions`)));
+// TEMPORARY while mobile v1.0.0 is installed: an unpaid student registered in
+// the cohort can list its sessions (the app hides locked weeks). When the
+// strict rule is switched on, change this to assertFails.
+test("TEMPORARY: unpaid student in the cohort can list sessions (APK v1.0.0)", async () => {
+  await assertSucceeds(getDocs(collection(db("pending"), `cohorts/${COHORT}/sessions`)));
+});
+
+test("student with no profile cannot read sessions", async () => {
+  await assertFails(getDocs(collection(db("stranger"), `cohorts/${COHORT}/sessions`)));
 });
 
 test("student cannot read another cohort's sessions", async () => {

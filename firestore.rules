@@ -486,17 +486,19 @@ service cloud.firestore {
 
       match /sessions/{sessionId} {
         // TEMPORARY (APK compatibility): mobile v1.0.0 lists every session in
-        // the cohort and filters by paid week on the device. A rule that looks
-        // at the session's fields makes that whole query fail, so for now any
-        // enrolled student in the cohort can read its sessions.
-        // After the updated APK is out, replace the student branch with:
+        // the cohort - even for students who haven't paid yet - and hides
+        // locked weeks on the device. A rule that looks at the session's
+        // fields or the payment status makes that whole query fail and the
+        // app's dashboard shows an error, so for now any student registered
+        // in the cohort can read its sessions (this matches how v1.0.0 was
+        // built). After the updated APK is out, replace the student branch
+        // with:
         //   isCompleteStudent()
         //   && ownsCohort(cohortId)
         //   && resource.data.isPublished == true
         //   && resource.data.week <= studentProfile().weeksToCommit
         //   && studentMatchesSessionPath(resource.data)
-        allow read: if isAdmin()
-          || (isCompleteStudent() && ownsCohort(cohortId));
+        allow read: if isAdmin() || ownsCohort(cohortId);
         allow create: if isAdmin() && validSession(request.resource.data);
         allow update: if isAdmin()
           && validSession(request.resource.data)
