@@ -174,10 +174,11 @@ flutter build apk --release
 Then upload the APK and update the APK link in **Admin → Settings**
 (`config/app`).
 
-CI on the mobile PR runs `flutter analyze` and `flutter test` on Flutter
-**3.38.7**, and both pass. Build with Flutter 3.38–3.41: `phosphor_flutter`
-2.1.0 doesn't compile on Flutter 3.44 or newer (`IconData` became a final
-class). Don't upgrade Flutter until that package is replaced.
+Merge mobile PR #1 and then PR #2 before building. PR #2 replaces
+`phosphor_flutter`, which doesn't compile on Flutter 3.44+, with Material
+Icons. After that, any current stable Flutter works. Mobile CI runs analyze,
+test and a debug APK build on both Flutter 3.38.7 and the latest stable.
+If you build from PR #1 alone, use Flutter 3.38–3.41.
 
 ---
 
@@ -231,6 +232,32 @@ then refund it from the Paystack dashboard.
 **Admin**
 - [ ] Login, 30-minute auto-lock countdown, every section route (`/admin/...`), refresh on each.
 - [ ] Manual approval of a pending payment credits once; approving the same reference again is refused.
+
+---
+
+## Phase 1 release (web UI: PR #11)
+
+Phase 1 changes only the website: new design, real routes, and the rebuilt
+student and admin areas. It needs no function, rule or index deploys, so do
+Phase 0 first and then:
+
+```bash
+git checkout main && git pull   # after merging PR #11
+npm ci
+npm run build
+firebase hosting:channel:deploy phase1 --expires 7d
+```
+
+On the preview URL, check:
+- [ ] The Step 10 **Public site** and **Student area** items.
+- [ ] Every admin section at `/admin/<section>` (paths, cohorts, sessions, messages, mobile-chat, community, courses, resources, payments, settings, registrations). Refresh each one.
+- [ ] An unknown URL such as `/nope` shows the 404 page.
+
+Then run `firebase deploy --only hosting`. To roll back, use Hosting release
+history (below).
+
+Tip: `npm run preview:ui` shows the student and admin areas with sample data
+and no Firebase, which is handy for UI changes.
 
 ---
 
