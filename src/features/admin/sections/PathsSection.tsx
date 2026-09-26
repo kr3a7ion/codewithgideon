@@ -85,8 +85,8 @@ const PathsSection: React.FC = () => {
                   key={p.id}
                   className="p-5 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
                       {editingPathId === p.id ? (
                         <div className="space-y-3">
                           <input
@@ -123,7 +123,7 @@ const PathsSection: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => togglePathActive(p)}
                         className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border transition-colors ${

@@ -85,17 +85,22 @@ const CohortSessionsSection: React.FC = () => {
                     : c.path || "";
 
                   return (
-                    <button
+                    <div
                       key={c.id}
-                      onClick={() => setSelectedCohortId(c.id)} // ✅ doc id
-                      className={`w-full text-left p-4 rounded-2xl border transition ${
+                      className={`flex items-start justify-between gap-4 p-4 rounded-2xl border transition ${
                         isSelected
                           ? "border-blue-900 dark:border-teal-600 bg-blue-50 dark:bg-teal-900/20"
                           : "border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30"
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
+                        {/* Selecting uses the doc id. Delete is a sibling button,
+                            since a button can't contain another button. */}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCohortId(c.id)}
+                          aria-pressed={isSelected}
+                          className="min-w-0 flex-1 text-left"
+                        >
                           <p className="text-sm font-black text-blue-900 dark:text-white">
                             {c.label}
                           </p>
@@ -135,20 +140,16 @@ const CohortSessionsSection: React.FC = () => {
                               ) : null}
                             </p>
                           ) : null}
-                        </div>
+                        </button>
 
                         <button
                           type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteCohort(c);
-                          }}
-                          className="px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
+                          onClick={() => deleteCohort(c)}
+                          className="shrink-0 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-red-600 text-white hover:opacity-90 transition"
                         >
                           Delete
                         </button>
-                      </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>

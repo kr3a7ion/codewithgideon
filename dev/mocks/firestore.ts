@@ -16,6 +16,22 @@ export const serverTimestamp = () => new Date();
 export const deleteField = () => undefined;
 export const increment = (n: number) => n;
 
+// A document or collection reference with the id/parent chain real refs have.
+type ChainRef = { id: string; path: string; parent: ChainRef | null };
+const refFor = (path: string): ChainRef => {
+  const parts = path.split("/");
+  return {
+    id: parts[parts.length - 1],
+    path,
+    parent: parts.length > 1 ? refFor(parts.slice(0, -1).join("/")) : null,
+  };
+};
+
+const docPath = (collectionPath: string, d: any) =>
+  collectionPath.startsWith("**/")
+    ? `users/${d.uid || "unknown"}/${collectionPath.slice(3)}/${d.id}`
+    : `${collectionPath}/${d.id}`;
+
 const snapFor = (path: string) => {
   const value = previewDb[path];
   // Collections have an odd number of path segments (users, users/x/payments).
@@ -24,7 +40,7 @@ const snapFor = (path: string) => {
     return { docs: [], empty: true, size: 0, forEach() {} };
   }
   if (Array.isArray(value)) {
-    const docs = value.map((d: any) => ({ id: d.id, data: () => d, ref: { path: `${path}/${d.id}` } }));
+    const docs = value.map((d: any) => ({ id: d.id, data: () => d, ref: refFor(docPath(path, d)) }));
     return { docs, empty: !docs.length, size: docs.length, forEach: (fn: any) => docs.forEach(fn) };
   }
   return { exists: () => value != null, data: () => value ?? null, id: path.split("/").pop() };
