@@ -15,6 +15,12 @@ service cloud.firestore {
       return (x is int) || (x is float);
     }
 
+    // Client writes use Date.now() numbers; Cloud Functions may write
+    // server timestamps. Accept both so neither side locks the other out.
+    function isNumberOrTimestamp(x) {
+      return isNumber(x) || (x is timestamp);
+    }
+
     function ownsUserDoc(userId) {
       return signedIn() && request.auth.uid == userId;
     }
@@ -28,10 +34,11 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    // A pending top-up must never take away weeks the student already paid
+    // for, so only the enrolment status matters here.
     function isCompleteStudent() {
       return hasUserProfile()
-        && studentProfile().status == "Complete"
-        && !("pendingPayment" in studentProfile());
+        && studentProfile().status == "Complete";
     }
 
     function ownsCohort(cohortId) {
@@ -170,8 +177,11 @@ service cloud.firestore {
     }
 
     match /resources/{resourceId} {
-      allow read: if isAdmin()
-        || (signedIn() && resource.data.isPublished == true);
+      // TEMPORARY (APK compatibility): mobile v1.0.0 lists the whole
+      // collection and filters on the device, which Firestore rejects if the
+      // rule depends on isPublished. After the updated APK is out, change to:
+      //   isAdmin() || (hasUserProfile() && resource.data.isPublished == true)
+      allow read: if isAdmin() || hasUserProfile();
       allow create: if isAdmin() && validResource(request.resource.data);
       allow update: if isAdmin()
         && validResource(request.resource.data)
@@ -206,8 +216,10 @@ service cloud.firestore {
     }
 
     match /communitySpaces/{spaceId} {
-      allow read: if isAdmin()
-        || (signedIn() && resource.data.isPublished == true);
+      // TEMPORARY (APK compatibility), same as resources. After the updated
+      // APK is out, change to:
+      //   isAdmin() || (signedIn() && resource.data.isPublished == true)
+      allow read: if isAdmin() || signedIn();
       allow create: if isAdmin() && validCommunitySpace(request.resource.data);
       allow update: if isAdmin()
         && validCommunitySpace(request.resource.data)
@@ -257,8 +269,17 @@ service cloud.firestore {
       }
     }
 
+    // Thread ids are "mentor_<uid>" (current) or "mentor_<uid>_<sessionId>"
+    // (mobile v1.0.0). Matching on the id lets a student open their thread
+    // before the first message exists.
+    function ownsMentorThreadId(threadId) {
+      return signedIn()
+        && threadId.matches("mentor_" + request.auth.uid + "(_.*)?");
+    }
+
     match /mentorThreads/{threadId} {
       allow read: if isAdmin()
+        || ownsMentorThreadId(threadId)
         || (signedIn() && request.auth.uid == resource.data.studentUid);
       allow create, delete: if isAdmin();
       allow update: if isAdmin()
@@ -274,23 +295,32 @@ service cloud.firestore {
 
       match /messages/{messageId} {
         allow read: if isAdmin()
+          || ownsMentorThreadId(threadId)
           || (
             signedIn()
+            && exists(/databases/$(database)/documents/mentorThreads/$(threadId))
             && request.auth.uid == get(/databases/$(database)/documents/mentorThreads/$(threadId)).data.studentUid
           );
         allow create, update, delete: if isAdmin();
       }
     }
 
+    // pendingPayment is informational only (admin visibility). It never
+    // grants or removes access; Cloud Functions credit weeks.
     function validPendingPayment(p) {
       return p is map
-        && p.keys().hasOnly(["kind", "status", "weeks", "amount", "reference", "createdAt"])
+        && p.keys().hasOnly([
+          "kind", "status", "weeks", "amount", "baseAmount", "weeklyRate",
+          "reference", "createdAt"
+        ])
         && (p.kind == "initial" || p.kind == "topup")
         && p.status == "Pending"
         && p.weeks is int && p.weeks >= 1 && p.weeks <= 52
         && isNumber(p.amount) && p.amount >= 0
+        && (!("baseAmount" in p) || (isNumber(p.baseAmount) && p.baseAmount >= 0))
+        && (!("weeklyRate" in p) || (isNumber(p.weeklyRate) && p.weeklyRate >= 0))
         && p.reference is string && p.reference.size() >= 6
-        && isNumber(p.createdAt);
+        && isNumberOrTimestamp(p.createdAt);
     }
 
     function validNotificationRead(d, userId) {
@@ -337,7 +367,25 @@ service cloud.firestore {
         && (!("courseDurationWeeks" in d) || (d.courseDurationWeeks is int && d.courseDurationWeeks >= 1 && d.courseDurationWeeks <= 52))
         && (!("weeklyRate" in d) || (isNumber(d.weeklyRate) && d.weeklyRate >= 0))
         && (!("pendingPayment" in d) || validPendingPayment(d.pendingPayment))
-        && (!("updatedAt" in d) || isNumber(d.updatedAt));
+        && (!("updatedAt" in d) || isNumberOrTimestamp(d.updatedAt));
+    }
+
+    // Students may only edit their name, phone and the informational
+    // pendingPayment. Status, weeks, price, course and cohort are written by
+    // Cloud Functions (payments) or admins only. Only the changed keys are
+    // validated, so older docs with extra fields don't lock students out.
+    function validStudentUpdate() {
+      let d = request.resource.data;
+      let changed = d.diff(resource.data).affectedKeys();
+      return changed.hasOnly(["fullName", "phone", "pendingPayment", "updatedAt"])
+        && (!changed.hasAny(["fullName"])
+          || (d.fullName is string && d.fullName.size() >= 2 && d.fullName.size() <= 120))
+        && (!changed.hasAny(["phone"])
+          || (d.phone is string && d.phone.size() >= 6 && d.phone.size() <= 30))
+        && (!changed.hasAny(["pendingPayment"])
+          || !("pendingPayment" in d)
+          || validPendingPayment(d.pendingPayment))
+        && (!changed.hasAny(["updatedAt"]) || isNumberOrTimestamp(d.updatedAt));
     }
 
     match /users/{userId} {
@@ -348,29 +396,7 @@ service cloud.firestore {
         && request.resource.data.status == "Pending";
 
       allow update: if isAdmin()
-        || (
-          ownsUserDoc(userId)
-          && validStudentProfile(request.resource.data, userId)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            "pendingPayment",
-            "cohortId", "cohortLabel", "cohortKey",
-            "updatedAt"
-          ])
-          && request.resource.data.uid == resource.data.uid
-          && request.resource.data.role == resource.data.role
-          && request.resource.data.status == resource.data.status
-          && request.resource.data.timestamp == resource.data.timestamp
-          && request.resource.data.fullName == resource.data.fullName
-          && request.resource.data.email == resource.data.email
-          && request.resource.data.phone == resource.data.phone
-          && request.resource.data.ageRange == resource.data.ageRange
-          && request.resource.data.gender == resource.data.gender
-          && request.resource.data.weeksToCommit == resource.data.weeksToCommit
-          && request.resource.data.totalPrice == resource.data.totalPrice
-          && request.resource.data.path == resource.data.path
-          && (!("pendingPayment" in request.resource.data)
-            || validPendingPayment(request.resource.data.pendingPayment))
-        );
+        || (ownsUserDoc(userId) && validStudentUpdate());
 
       allow delete: if isAdmin();
 
@@ -439,14 +465,18 @@ service cloud.firestore {
       allow write: if isAdmin();
 
       match /sessions/{sessionId} {
+        // TEMPORARY (APK compatibility): mobile v1.0.0 lists every session in
+        // the cohort and filters by paid week on the device. A rule that looks
+        // at the session's fields makes that whole query fail, so for now any
+        // enrolled student in the cohort can read its sessions.
+        // After the updated APK is out, replace the student branch with:
+        //   isCompleteStudent()
+        //   && ownsCohort(cohortId)
+        //   && resource.data.isPublished == true
+        //   && resource.data.week <= studentProfile().weeksToCommit
+        //   && studentMatchesSessionPath(resource.data)
         allow read: if isAdmin()
-          || (
-            isCompleteStudent()
-            && ownsCohort(cohortId)
-            && resource.data.isPublished == true
-            && resource.data.week <= studentProfile().weeksToCommit
-            && studentMatchesSessionPath(resource.data)
-          );
+          || (isCompleteStudent() && ownsCohort(cohortId));
         allow create: if isAdmin() && validSession(request.resource.data);
         allow update: if isAdmin()
           && validSession(request.resource.data)
@@ -460,6 +490,12 @@ service cloud.firestore {
         allow create: if isAdmin() && validCohortMessage(request.resource.data, cohortId);
         allow update, delete: if isAdmin();
       }
+    }
+
+    // Admin payment records use a collection-group query over every
+    // users/{uid}/payments subcollection, which needs its own rule.
+    match /{path=**}/payments/{paymentId} {
+      allow read: if isAdmin();
     }
 
     match /{document=**} {
