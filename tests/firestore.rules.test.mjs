@@ -157,13 +157,17 @@ test("student can edit name and phone (mobile profile edit)", async () => {
   }));
 });
 
-test("student cannot change status, weeks, price, course or cohort", async () => {
-  const d = doc(db("pending"), "users/pending");
-  await assertFails(updateDoc(d, {status: "Complete"}));
+test("paid student cannot change status, weeks, price, course or cohort", async () => {
+  const d = doc(db("paid"), "users/paid");
+  await assertFails(updateDoc(d, {status: "Pending"}));
   await assertFails(updateDoc(d, {weeksToCommit: 12}));
   await assertFails(updateDoc(d, {totalPrice: 0}));
   await assertFails(updateDoc(d, {courseId: "other"}));
-  await assertFails(updateDoc(doc(db("paid"), "users/paid"), {cohortKey: OTHER_COHORT}));
+  await assertFails(updateDoc(d, {cohortKey: OTHER_COHORT}));
+});
+
+test("pending student cannot mark themselves Complete", async () => {
+  await assertFails(updateDoc(doc(db("pending"), "users/pending"), {status: "Complete"}));
 });
 
 test("web pending-payment write (with baseAmount/weeklyRate) is allowed", async () => {
