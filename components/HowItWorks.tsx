@@ -15,7 +15,7 @@ const steps: Step[] = [
   {
     id: 2,
     title: "Flexible Weekly Commitment",
-    description: "No massive upfront costs. Pay ₦10,000 per week. You control your learning pace and budget—pause or resume at any time.",
+    description: "No massive upfront costs. Choose a weekly commitment from the active course options and control your learning pace.",
     icon: (
       <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 1.343-3 3s1.343 3 3 3 3 1.343 3 3-1.343 3-3 3m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

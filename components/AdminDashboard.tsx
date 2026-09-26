@@ -15,6 +15,12 @@ import {
 } from "../services/registrationStore";
 import AdminResourcesPanel from "./AdminResourcesPanel";
 import AdminCommunitySpacesPanel from "./AdminCommunitySpacesPanel";
+import {
+  defaultSiteConfig,
+  getSiteConfig,
+  saveSiteConfig,
+  SiteConfig,
+} from "../services/siteConfig";
 
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -31,7 +37,6 @@ import {
   GraduationCap,
   CalendarDays,
   CreditCard,
-  Inbox,
   Mail,
   ExternalLink,
   Copy,
@@ -47,6 +52,7 @@ import {
 } from "lucide-react";
 import {
   collection,
+  collectionGroup,
   getDocs,
   limit,
   query,
@@ -65,6 +71,48 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
+type AdminSectionKey =
+  | "paths"
+  | "cohorts"
+  | "sessions"
+  | "messages"
+  | "mobileChat"
+  | "community"
+  | "courses"
+  | "resources"
+  | "payments"
+  | "settings"
+  | "registrations";
+
+const adminSectionRoutes: Record<AdminSectionKey, string> = {
+  paths: "/admin/paths",
+  cohorts: "/admin/cohorts",
+  sessions: "/admin/sessions",
+  messages: "/admin/messages",
+  mobileChat: "/admin/mobile-chat",
+  community: "/admin/community",
+  courses: "/admin/courses",
+  resources: "/admin/resources",
+  payments: "/admin/payments",
+  settings: "/admin/settings",
+  registrations: "/admin/registrations",
+};
+
+const adminSectionFromPathname = (pathname: string): AdminSectionKey => {
+  const path = String(pathname || "").replace(/\/+$/, "");
+  if (path.endsWith("/cohorts")) return "cohorts";
+  if (path.endsWith("/sessions")) return "sessions";
+  if (path.endsWith("/messages")) return "messages";
+  if (path.endsWith("/mobile-chat")) return "mobileChat";
+  if (path.endsWith("/community")) return "community";
+  if (path.endsWith("/courses")) return "courses";
+  if (path.endsWith("/resources")) return "resources";
+  if (path.endsWith("/payments")) return "payments";
+  if (path.endsWith("/settings")) return "settings";
+  if (path.endsWith("/registrations")) return "registrations";
+  return "paths";
+};
+
 const getCohortDocId = (c: any) => String(c?.id || "").trim();
 const getCohortKey = (c: any) => String(c?.cohortKey || "").trim();
 
@@ -79,12 +127,29 @@ const findCohortDocIdByKey = (list: any[], cohortKey: string) => {
 };
 type ContactMessageDoc = {
   id: string;
-  name: string;
-  email: string;
-  message: string;
+  name?: string;
+  email?: string;
+  message?: string;
+  studentName?: string;
+  studentEmail?: string;
+  studentUid?: string;
+  studentPhone?: string;
+  sessionId?: string;
+  sessionTitle?: string;
+  pathTitle?: string;
   lastMessage?: string;
+  lastMessagePreview?: string;
+  lastMessageAt?: any;
+  lastMessageId?: string;
+  lastMessageSenderType?: string;
+  lastMessageSenderName?: string;
+  lastMessageSenderEmail?: string;
   status?: string;
   source?: string;
+  category?: string;
+  channel?: string;
+  threadType?: string;
+  threadCollection?: "mentorThreads" | "contactMessages";
   createdAt?: any;
   updatedAt?: any;
   repliedAt?: any;
@@ -92,9 +157,6 @@ type ContactMessageDoc = {
   senderName?: string;
   senderEmail?: string;
   uid?: string;
-  thread?: any[];
-  messages?: any[];
-  replies?: any[];
   auth?: {
     uid?: string | null;
   };
@@ -113,9 +175,47 @@ type InboxThreadMessage = {
   source?: string;
 };
 
+type PaymentRecordDoc = {
+  id: string;
+  userId: string;
+  uid?: string;
+  reference?: string;
+  kind?: string;
+  weeks?: number;
+  amount?: number;
+  amountKobo?: number;
+  chargedAmountKobo?: number;
+  baseAmountKobo?: number;
+  gatewayFeeKobo?: number | null;
+  email?: string | null;
+  path?: string;
+  pathId?: string | null;
+  courseId?: string | null;
+  cohortLabel?: string | null;
+  cohortKey?: string | null;
+  verifiedAt?: any;
+  timestamp?: any;
+  paystack?: {
+    id?: string | number | null;
+    status?: string | null;
+    currency?: string | null;
+    paidAt?: string | null;
+    channel?: string | null;
+  } | null;
+};
+
 type AdminNotice = {
   tone: "info" | "success" | "error";
   message: string;
+};
+
+type ConfirmDialogState = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  tone: "danger" | "warning" | "info";
+  resolve: (confirmed: boolean) => void;
 };
 
 type CourseForm = {
@@ -147,7 +247,7 @@ const emptyCourse: CourseForm = {
   sessions: "2× Weekly",
   level: "Beginner",
   description: "",
-  priceLabel: "₦10k/wk",
+  priceLabel: "",
   imageUrl: "",
   syllabusView: "",
 
@@ -156,7 +256,7 @@ const emptyCourse: CourseForm = {
   showInExplore: true,
 
   weeks: 4,
-  pricePerWeek: 10000,
+  pricePerWeek: 0,
   syllabus: [{ week: 1, title: "Introduction", topics: ["Overview", "Setup"] }],
 };
 
@@ -241,6 +341,12 @@ const primaryActionClass =
   "px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-900 text-white hover:bg-slate-700 dark:bg-teal-500 dark:text-slate-900 dark:hover:bg-teal-400 transition inline-flex items-center gap-2";
 const successActionClass =
   "px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-emerald-600 text-white hover:bg-emerald-500 shadow-md transition inline-flex items-center gap-2";
+const adminMobileRecordClass =
+  "rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/80";
+const adminFieldLabelClass =
+  "text-[10px] font-black uppercase tracking-widest text-slate-400";
+const adminFieldValueClass =
+  "mt-1 text-sm font-black text-slate-900 dark:text-white";
 
 const toDateMs = (v: any): number => {
   if (!v) return 0;
@@ -274,25 +380,41 @@ const getInboxMessageBody = (message: any) =>
       message?.message ||
       message?.text ||
       message?.content ||
+      message?.lastMessagePreview ||
       message?.lastMessage ||
       "",
   ).trim();
 
 const getInboxDisplayName = (message: any) =>
   String(
-    message?.name ||
+    message?.studentName ||
+      message?.name ||
       message?.fullName ||
+      message?.lastMessageSenderName ||
       message?.senderName ||
       message?.displayName ||
       "",
   ).trim() || "Unknown sender";
 
 const getInboxEmail = (message: any) =>
-  String(message?.email || message?.senderEmail || "").trim();
+  String(
+    message?.studentEmail ||
+      message?.email ||
+      message?.lastMessageSenderEmail ||
+      message?.senderEmail ||
+      "",
+  ).trim();
 
 const getInboxSourceLabel = (message: any) => {
+  const channel = String(message?.channel || message?.threadType || "")
+    .trim()
+    .toLowerCase();
+  if (channel.includes("mobile") || channel.includes("mentor")) {
+    return "mobile-app-chat";
+  }
+
   const source = String(message?.source || "").trim().toLowerCase();
-  if (!source) return "web-contact-form";
+  if (!source) return "mobile-app-chat";
   if (source.includes("mobile")) return "mobile-app-chat";
   if (source.includes("web")) return source;
   return source;
@@ -301,9 +423,36 @@ const getInboxSourceLabel = (message: any) => {
 const getInboxPreview = (message: any) =>
   getInboxMessageBody(message) || "No message";
 
+const isMentorContactMessage = (message: any) => {
+  const category = String(message?.category || "").toLowerCase();
+  const source = String(message?.source || "").toLowerCase();
+  const channel = String(message?.channel || "").toLowerCase();
+  const threadType = String(message?.threadType || "").toLowerCase();
+
+  return (
+    category === "ask-mentor" ||
+    source.includes("mobile-ask-mentor") ||
+    channel === "mobile_chat" ||
+    threadType.includes("mentor")
+  );
+};
+
+const isUnreadLearnerChat = (message: any) =>
+  String(message?.status || "new").toLowerCase() === "new" &&
+  !isAdminInboxMessage(message);
+
+const getInboxThreadCollection = (message: ContactMessageDoc | null) =>
+  message?.threadCollection === "contactMessages"
+    ? "contactMessages"
+    : "mentorThreads";
+
 const isAdminInboxMessage = (message: any) => {
   const senderType = String(
-    message?.senderType || message?.senderRole || message?.role || "",
+    message?.lastMessageSenderType ||
+      message?.senderType ||
+      message?.senderRole ||
+      message?.role ||
+      "",
   ).toLowerCase();
   const source = String(message?.source || "").toLowerCase();
   const sentBy = String(message?.sentBy || "").toLowerCase();
@@ -377,6 +526,37 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [filter, setFilter] = useState<"All" | "Pending" | "Complete">("All");
   const [search, setSearch] = useState("");
   const [adminNotice, setAdminNotice] = useState<AdminNotice | null>(null);
+  const [confirmDialog, setConfirmDialog] =
+    useState<ConfirmDialogState | null>(null);
+
+  const notify = (tone: AdminNotice["tone"], message: string) => {
+    setAdminNotice({ tone, message });
+  };
+
+  const confirmAction = (options: {
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    tone?: ConfirmDialogState["tone"];
+  }) =>
+    new Promise<boolean>((resolve) => {
+      setConfirmDialog({
+        title: options.title,
+        message: options.message,
+        confirmLabel: options.confirmLabel || "Confirm",
+        cancelLabel: options.cancelLabel || "Cancel",
+        tone: options.tone || "warning",
+        resolve,
+      });
+    });
+
+  const closeConfirmDialog = (confirmed: boolean) => {
+    setConfirmDialog((current) => {
+      current?.resolve(confirmed);
+      return null;
+    });
+  };
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -394,7 +574,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editingPathTitle, setEditingPathTitle] = useState("");
 
   // -------------------------
-  // Inbox (Contact Messages)
+  // Mobile Chat (mentorThreads)
   // -------------------------
   const [inboxMessages, setInboxMessages] = useState<ContactMessageDoc[]>([]);
   const [inboxLoading, setInboxLoading] = useState(true);
@@ -406,23 +586,49 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [replyError, setReplyError] = useState("");
   const [replyBusy, setReplyBusy] = useState(false);
   const [showInboxModal, setShowInboxModal] = useState(false);
-  const [activeAdminSection, setActiveAdminSection] = useState<
-    | "paths"
-    | "cohorts"
-    | "sessions"
-    | "messages"
-    | "community"
-    | "courses"
-    | "resources"
-    | "payments"
-    | "registrations"
-  >("paths");
+
+  // -------------------------
+  // Mail Support Inbox (contactMessages)
+  // -------------------------
+  const [supportMessages, setSupportMessages] = useState<ContactMessageDoc[]>([]);
+  const [supportLoading, setSupportLoading] = useState(true);
+  const [supportError, setSupportError] = useState("");
+  const [selectedSupportId, setSelectedSupportId] = useState<string>("");
+  const [supportFilter, setSupportFilter] = useState<
+    "all" | "new" | "read" | "resolved"
+  >("all");
+  const [showSupportInboxModal, setShowSupportInboxModal] = useState(false);
+  const [siteConfigForm, setSiteConfigForm] =
+    useState<SiteConfig>(defaultSiteConfig);
+  const [siteConfigLoading, setSiteConfigLoading] = useState(false);
+  const [siteConfigError, setSiteConfigError] = useState("");
+  const [siteConfigSaved, setSiteConfigSaved] = useState("");
+  const [activeAdminSection, setActiveAdminSection] = useState<AdminSectionKey>(
+    () => adminSectionFromPathname(window.location.pathname),
+  );
+
+  const selectAdminSection = (section: AdminSectionKey) => {
+    setActiveAdminSection(section);
+    const nextPath = adminSectionRoutes[section] || "/admin";
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({ adminSection: section }, "", nextPath);
+    }
+  };
 
   const pathsById = useMemo(() => {
     const m = new Map<string, PathDoc>();
     (paths || []).forEach((p) => m.set(p.id, p));
     return m;
   }, [paths]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setActiveAdminSection(adminSectionFromPathname(window.location.pathname));
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   // ✅ Legacy mapper: title -> pathId (for old docs missing pathId)
   const findPathIdByTitle = (title: string) => {
@@ -449,7 +655,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const createPath = async () => {
     const title = newPathTitle.trim();
-    if (title.length < 2) return alert("Path title is too short.");
+    if (title.length < 2) {
+      notify("info", "Path title is too short.");
+      return;
+    }
     if (pathBusyId) return;
 
     setPathBusyId("create");
@@ -459,7 +668,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await fetchPaths();
     } catch (e: any) {
       console.error("createPath failed:", e);
-      alert(e?.message || "Failed to create path.");
+      notify("error", e?.message || "Failed to create path.");
     } finally {
       setPathBusyId(null);
     }
@@ -478,14 +687,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const saveEditPath = async () => {
     if (!editingPathId) return;
     const title = editingPathTitle.trim();
-    if (title.length < 2) return alert("Path title is too short.");
+    if (title.length < 2) {
+      notify("info", "Path title is too short.");
+      return;
+    }
     try {
       await registrationStore.updatePath(editingPathId, { title });
       cancelEditPath();
       await fetchPaths();
     } catch (e: any) {
       console.error("saveEditPath failed:", e);
-      alert(e?.message || "Failed to update path.");
+      notify("error", e?.message || "Failed to update path.");
     }
   };
 
@@ -499,7 +711,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await fetchPaths();
     } catch (e: any) {
       console.error("togglePathActive failed:", e);
-      alert(e?.message || "Failed to toggle path.");
+      notify("error", e?.message || "Failed to toggle path.");
     } finally {
       setPathBusyId(null);
     }
@@ -507,12 +719,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const deletePath = async (p: PathDoc) => {
     if (pathBusyId) return;
-    if (
-      !confirm(
-        `Delete path "${p.title}"?\n\nOnly do this if you are sure no course/session depends on it.`,
-      )
-    )
-      return;
+    const ok = await confirmAction({
+      title: "Delete path?",
+      message: `Delete "${p.title}"? Only do this if you are sure no course or session depends on it.`,
+      confirmLabel: "Delete Path",
+      tone: "danger",
+    });
+    if (!ok) return;
 
     setPathBusyId(p.id);
     try {
@@ -520,7 +733,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await fetchPaths();
     } catch (e: any) {
       console.error("deletePath failed:", e);
-      alert(e?.message || "Failed to delete path.");
+      notify("error", e?.message || "Failed to delete path.");
     } finally {
       setPathBusyId(null);
     }
@@ -572,6 +785,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [courseBusyId, setCourseBusyId] = useState<string | null>(null);
   const [sessionBusyId, setSessionBusyId] = useState<string | null>(null);
   const [pendingBusyUid, setPendingBusyUid] = useState<string | null>(null);
+  const [paymentRecords, setPaymentRecords] = useState<PaymentRecordDoc[]>([]);
+  const [paymentRecordsLoading, setPaymentRecordsLoading] = useState(false);
+  const [paymentRecordsError, setPaymentRecordsError] = useState("");
   const [sessionsError, setSessionsError] = useState<string>("");
   const [inboxFilter, setInboxFilter] = useState<
     "all" | "new" | "read" | "resolved"
@@ -658,13 +874,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setInboxError("");
 
     try {
-      const snap = await getDocs(collection(db, "contactMessages"));
+      const [threadSnap, contactSnap] = await Promise.all([
+        getDocs(collection(db, "mentorThreads")),
+        getDocs(collection(db, "contactMessages")),
+      ]);
 
       const list = sortInboxMessagesByActivity(
-        snap.docs.map((doc) => ({
-        id: doc.id,
-        ...(doc.data() as Omit<ContactMessageDoc, "id">),
-        })),
+        [
+          ...threadSnap.docs.map((doc) => ({
+            id: doc.id,
+            threadCollection: "mentorThreads" as const,
+            ...(doc.data() as Omit<ContactMessageDoc, "id">),
+          })),
+          ...contactSnap.docs
+            .map((doc) => ({
+              id: doc.id,
+              threadCollection: "contactMessages" as const,
+              ...(doc.data() as Omit<ContactMessageDoc, "id">),
+            }))
+            .filter(isMentorContactMessage),
+        ],
       );
 
       setInboxMessages(list);
@@ -688,6 +917,40 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const fetchSupportMessages = async () => {
+    setSupportLoading(true);
+    setSupportError("");
+
+    try {
+      const snap = await getDocs(collection(db, "contactMessages"));
+      const list = sortInboxMessagesByActivity(
+        snap.docs.map((doc) => ({
+          id: doc.id,
+          ...(doc.data() as Omit<ContactMessageDoc, "id">),
+        })),
+      ).filter((message) => !isMentorContactMessage(message));
+
+      setSupportMessages(list);
+
+      if (!selectedSupportId && list.length) {
+        setSelectedSupportId(list[0].id);
+      } else if (
+        selectedSupportId &&
+        !list.some((m) => m.id === selectedSupportId)
+      ) {
+        setSelectedSupportId(list[0]?.id || "");
+      }
+    } catch (e: any) {
+      console.error("fetchSupportMessages failed:", e);
+      setSupportMessages([]);
+      setSupportError(
+        e?.message || "Failed to load support inbox. Check Firestore rules.",
+      );
+    } finally {
+      setSupportLoading(false);
+    }
+  };
+
   const fetchInboxThread = async (message: ContactMessageDoc | null) => {
     if (!message?.id) {
       setInboxThread([]);
@@ -698,32 +961,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setReplyError("");
 
     try {
-      const rootThread = [
-        normalizeInboxThreadMessage(
-          {
-            ...message,
-            senderType: "user",
-            senderName: getInboxDisplayName(message),
-            senderEmail: getInboxEmail(message),
-          },
-          `${message.id}-root`,
-        ),
-      ].filter(Boolean) as InboxThreadMessage[];
-
-      const embeddedThreadRaw = [
-        ...(Array.isArray(message.thread) ? message.thread : []),
-        ...(Array.isArray(message.messages) ? message.messages : []),
-        ...(Array.isArray(message.replies) ? message.replies : []),
-      ];
-
-      const embeddedThread = embeddedThreadRaw
-        .map((entry, index) =>
-          normalizeInboxThreadMessage(entry, `${message.id}-embedded-${index}`),
-        )
-        .filter(Boolean) as InboxThreadMessage[];
-
+      const rootThread =
+        getInboxThreadCollection(message) === "contactMessages"
+          ? ([
+              normalizeInboxThreadMessage(
+                {
+                  ...message,
+                  senderType: "user",
+                  senderName: getInboxDisplayName(message),
+                  senderEmail: getInboxEmail(message),
+                },
+                `${message.id}-root`,
+              ),
+            ].filter(Boolean) as InboxThreadMessage[])
+          : [];
       const q = query(
-        collection(db, "contactMessages", message.id, "messages"),
+        collection(db, getInboxThreadCollection(message), message.id, "messages"),
         orderBy("createdAt", "asc"),
         limit(100),
       );
@@ -740,28 +993,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )
         .filter(Boolean) as InboxThreadMessage[];
 
-      const merged = mergeInboxThreadEntries([
-        ...rootThread,
-        ...embeddedThread,
-        ...subcollectionThread,
-      ]);
-
-      setInboxThread(merged);
+      setInboxThread(
+        mergeInboxThreadEntries([...rootThread, ...subcollectionThread]),
+      );
     } catch (e) {
       console.error("fetchInboxThread failed:", e);
-      setInboxThread(
-        [
-          normalizeInboxThreadMessage(
-            {
-              ...message,
-              senderType: "user",
-              senderName: getInboxDisplayName(message),
-              senderEmail: getInboxEmail(message),
-            },
-            `${message.id}-fallback`,
-          ),
-        ].filter(Boolean) as InboxThreadMessage[],
-      );
+      setInboxThread([]);
     } finally {
       setInboxThreadLoading(false);
     }
@@ -821,7 +1058,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (!id) return;
 
     try {
-      await updateDoc(doc(db, "contactMessages", id), {
+      const target = inboxMessages.find((m) => m.id === id) || null;
+      await updateDoc(doc(db, getInboxThreadCollection(target), id), {
         status,
       });
 
@@ -830,16 +1068,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       );
     } catch (e) {
       console.error("markInboxStatus failed:", e);
-      alert("Failed to update message status.");
+      notify("error", "Failed to update message status.");
     }
   };
 
   const deleteInboxMessage = async (id: string) => {
     if (!id) return;
-    if (!confirm("Delete this message? This action cannot be undone.")) return;
+    const ok = await confirmAction({
+      title: "Delete mobile chat?",
+      message: "This removes the selected chat thread from the admin inbox.",
+      confirmLabel: "Delete Chat",
+      tone: "danger",
+    });
+    if (!ok) return;
 
     try {
-      await deleteDoc(doc(db, "contactMessages", id));
+      const target = inboxMessages.find((m) => m.id === id) || null;
+      await deleteDoc(doc(db, getInboxThreadCollection(target), id));
 
       setInboxMessages((prev) => {
         const next = prev.filter((m) => m.id !== id);
@@ -850,7 +1095,49 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       });
     } catch (e) {
       console.error("deleteInboxMessage failed:", e);
-      alert("Failed to delete message.");
+      notify("error", "Failed to delete message.");
+    }
+  };
+
+  const markSupportStatus = async (
+    id: string,
+    status: "new" | "read" | "resolved",
+  ) => {
+    if (!id) return;
+
+    try {
+      await updateDoc(doc(db, "contactMessages", id), { status });
+      setSupportMessages((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, status } : m)),
+      );
+    } catch (e) {
+      console.error("markSupportStatus failed:", e);
+      notify("error", "Failed to update support message status.");
+    }
+  };
+
+  const deleteSupportMessage = async (id: string) => {
+    if (!id) return;
+    const ok = await confirmAction({
+      title: "Delete support message?",
+      message: "This removes the selected website support message.",
+      confirmLabel: "Delete Message",
+      tone: "danger",
+    });
+    if (!ok) return;
+
+    try {
+      await deleteDoc(doc(db, "contactMessages", id));
+      setSupportMessages((prev) => {
+        const next = prev.filter((m) => m.id !== id);
+        setSelectedSupportId((current) =>
+          current === id ? (next[0]?.id ?? "") : current,
+        );
+        return next;
+      });
+    } catch (e) {
+      console.error("deleteSupportMessage failed:", e);
+      notify("error", "Failed to delete support message.");
     }
   };
 
@@ -873,7 +1160,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         "Admin Support";
 
       await addDoc(
-        collection(db, "contactMessages", selectedInboxMessage.id, "messages"),
+        collection(
+          db,
+          getInboxThreadCollection(selectedInboxMessage),
+          selectedInboxMessage.id,
+          "messages",
+        ),
         {
           body,
           message: body,
@@ -886,13 +1178,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         },
       );
 
-      await updateDoc(doc(db, "contactMessages", selectedInboxMessage.id), {
+      await updateDoc(
+        doc(
+          db,
+          getInboxThreadCollection(selectedInboxMessage),
+          selectedInboxMessage.id,
+        ),
+        {
         status: "resolved",
         lastMessage: body,
+        lastMessagePreview: body,
+        lastMessageSenderType: "admin",
+        lastMessageSenderName: adminLabel,
+        lastMessageSenderEmail: auth.currentUser?.email || "",
         lastMessageAt: serverTimestamp(),
         repliedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
+        },
+      );
 
       setReplyDraft("");
       await Promise.all([
@@ -975,6 +1278,61 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const fetchPaymentRecords = async () => {
+    setPaymentRecordsLoading(true);
+    setPaymentRecordsError("");
+
+    try {
+      const snap = await getDocs(
+        query(
+          collectionGroup(db, "payments"),
+          orderBy("verifiedAt", "desc"),
+          limit(40),
+        ),
+      );
+
+      const rows = snap.docs.map((paymentDoc) => {
+        const data = paymentDoc.data() as any;
+        const userId =
+          paymentDoc.ref.parent.parent?.id || String(data.uid || "").trim();
+
+        return {
+          id: paymentDoc.id,
+          userId,
+          ...data,
+        } as PaymentRecordDoc;
+      });
+
+      setPaymentRecords(rows);
+    } catch (e) {
+      console.error("fetchPaymentRecords failed:", e);
+      setPaymentRecords([]);
+      setPaymentRecordsError(
+        "Verified payment records could not load. Check admin permissions if this stays empty.",
+      );
+    } finally {
+      setPaymentRecordsLoading(false);
+    }
+  };
+
+  const fetchSiteConfig = async () => {
+    setSiteConfigLoading(true);
+    setSiteConfigError("");
+
+    try {
+      const config = await getSiteConfig();
+      setSiteConfigForm(config);
+    } catch (e) {
+      console.error("fetchSiteConfig failed:", e);
+      setSiteConfigForm(defaultSiteConfig);
+      setSiteConfigError(
+        "Site settings could not load. Defaults are shown for now.",
+      );
+    } finally {
+      setSiteConfigLoading(false);
+    }
+  };
+
   const handleRefreshAll = async () => {
     await runBusy("refreshAll", async () => {
       try {
@@ -987,6 +1345,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           fetchCommunitySpaces(),
           fetchCohorts(),
           fetchInboxMessages(),
+          fetchSupportMessages(),
+          fetchPaymentRecords(),
+          fetchSiteConfig(),
         ]);
 
         if (selectedCohortId) {
@@ -1117,16 +1478,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleDelete = async (uid: string) => {
-    if (confirm("Are you sure you want to delete this registration?")) {
-      await registrationStore.delete(uid);
-      await fetchRegistrations();
-    }
+    const ok = await confirmAction({
+      title: "Delete registration?",
+      message: "This permanently removes the selected registration record.",
+      confirmLabel: "Delete Registration",
+      tone: "danger",
+    });
+    if (!ok) return;
+
+    await registrationStore.delete(uid);
+    await fetchRegistrations();
   };
 
   const handleClearAll = async () => {
-    const ok = confirm(
-      "DANGER: This will permanently delete ALL registration records. Are you absolutely sure?",
-    );
+    const ok = await confirmAction({
+      title: "Delete all registrations?",
+      message:
+        "This permanently deletes every registration record. Use this only for a confirmed cleanup.",
+      confirmLabel: "Delete All",
+      tone: "danger",
+    });
     if (!ok) return;
 
     try {
@@ -1134,12 +1505,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setRegistrations([]);
     } catch (e) {
       console.error("clearAll failed:", e);
-      alert("Failed to clear all registrations.");
+      notify("error", "Failed to clear all registrations.");
     }
   };
 
   const handleExportCSV = () => {
-    if (registrations.length === 0) return alert("No data to export.");
+    if (registrations.length === 0) {
+      notify("info", "No registration data to export.");
+      return;
+    }
 
     const headers = [
       "Name",
@@ -1239,12 +1613,45 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       );
   }, [registrations]);
 
+  const registrationsByUid = useMemo(() => {
+    const map = new Map<string, RegistrationEntry>();
+    registrations.forEach((reg) => map.set(reg.uid, reg));
+    return map;
+  }, [registrations]);
+
+  const formatPaymentAmount = (koboValue?: any, fallbackNaira?: any) => {
+    const hasKobo =
+      koboValue !== undefined && koboValue !== null && koboValue !== "";
+    const kobo = Number(koboValue);
+    if (hasKobo && Number.isFinite(kobo)) {
+      const naira = kobo / 100;
+      const hasDecimals = Math.abs(kobo % 100) > 0;
+      return `₦${naira.toLocaleString(undefined, {
+        minimumFractionDigits: hasDecimals ? 2 : 0,
+        maximumFractionDigits: 2,
+      })}`;
+    }
+
+    const hasFallback =
+      fallbackNaira !== undefined && fallbackNaira !== null && fallbackNaira !== "";
+    const fallback = Number(fallbackNaira);
+    if (hasFallback && Number.isFinite(fallback)) {
+      return `₦${fallback.toLocaleString()}`;
+    }
+    return "—";
+  };
+
+  const formatPaymentDate = (value: any) => {
+    const ms = toDateMs(value);
+    return ms ? new Date(ms).toLocaleString() : "—";
+  };
+
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      alert("Copied!");
+      notify("success", "Copied to clipboard.");
     } catch {
-      alert("Copy failed (browser permissions).");
+      notify("error", "Copy failed because browser permissions blocked it.");
     }
   };
 
@@ -1253,12 +1660,95 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     [inboxMessages, selectedInboxId],
   );
 
+  const selectedSupportMessage = useMemo(
+    () => supportMessages.find((m) => m.id === selectedSupportId) || null,
+    [supportMessages, selectedSupportId],
+  );
+
   const unreadInboxCount = useMemo(
+    () => inboxMessages.filter(isUnreadLearnerChat).length,
+    [inboxMessages],
+  );
+
+  const unreadSupportCount = useMemo(
     () =>
-      inboxMessages.filter(
+      supportMessages.filter(
         (m) => String(m.status || "new").toLowerCase() === "new",
       ).length,
-    [inboxMessages],
+    [supportMessages],
+  );
+
+  const totalInboxCount = inboxMessages.length;
+  const totalSupportCount = supportMessages.length;
+
+  const dashboardCounters = useMemo(
+    () => [
+      {
+        label: "Total Students",
+        value: stats.total,
+        icon: Users,
+        valueClass: "text-blue-900 dark:text-white",
+      },
+      {
+        label: "Pending",
+        value: stats.pending,
+        icon: Clock3,
+        valueClass: "text-orange-600",
+      },
+      {
+        label: "Complete",
+        value: stats.complete,
+        icon: ShieldCheck,
+        valueClass: "text-teal-600",
+      },
+      {
+        label: "Revenue",
+        value: `₦${stats.revenue.toLocaleString()}`,
+        icon: CircleDollarSign,
+        valueClass: "text-blue-900 dark:text-white",
+      },
+      {
+        label: "Pending Payments",
+        value: stats.pendingPaymentsCount,
+        icon: CreditCard,
+        valueClass: "text-purple-600",
+      },
+      {
+        label: "All Mobile Chats",
+        value: totalInboxCount,
+        icon: MessageSquare,
+        valueClass: "text-cyan-600",
+      },
+      {
+        label: "Unread Mobile",
+        value: unreadInboxCount,
+        icon: MessageSquare,
+        valueClass: "text-pink-600",
+      },
+      {
+        label: "All Support Mail",
+        value: totalSupportCount,
+        icon: Mail,
+        valueClass: "text-blue-600",
+      },
+      {
+        label: "Unread Support",
+        value: unreadSupportCount,
+        icon: Mail,
+        valueClass: "text-rose-600",
+      },
+    ],
+    [
+      stats.complete,
+      stats.pending,
+      stats.pendingPaymentsCount,
+      stats.revenue,
+      stats.total,
+      totalInboxCount,
+      totalSupportCount,
+      unreadInboxCount,
+      unreadSupportCount,
+    ],
   );
   const adminSections = useMemo(
     () =>
@@ -1319,6 +1809,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             "bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-900/40 dark:text-violet-200 dark:border-violet-700/50",
         },
         {
+          key: "mobileChat",
+          label: "Mobile Chat",
+          description: "Reply to in-app mentor chats",
+          icon: MessageSquare,
+          badge: unreadInboxCount,
+          tone: "cyan",
+          activeClass:
+            "bg-cyan-600 text-white border-cyan-500 shadow-cyan-500/20",
+          inactiveClass:
+            "bg-cyan-50/60 text-cyan-900 border-cyan-100 hover:border-cyan-300 dark:bg-cyan-950/20 dark:text-cyan-200 dark:border-cyan-900/40 dark:hover:border-cyan-700/60",
+          badgeClass:
+            "bg-cyan-100 text-cyan-700 border-cyan-200 dark:bg-cyan-900/40 dark:text-cyan-200 dark:border-cyan-700/50",
+        },
+        {
           key: "community",
           label: "Community",
           description: "Publish student spaces",
@@ -1375,6 +1879,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/40 dark:text-rose-200 dark:border-rose-700/50",
         },
         {
+          key: "settings",
+          label: "Site Settings",
+          description: "Contact, socials, CTA, APK",
+          icon: Settings2,
+          badge: siteConfigForm.apkDownloadUrl ? 1 : 0,
+          tone: "blue",
+          activeClass:
+            "bg-blue-600 text-white border-blue-500 shadow-blue-500/20",
+          inactiveClass:
+            "bg-blue-50/60 text-blue-900 border-blue-100 hover:border-blue-300 dark:bg-blue-950/20 dark:text-blue-200 dark:border-blue-900/40 dark:hover:border-blue-700/60",
+          badgeClass:
+            "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-700/50",
+        },
+        {
           key: "registrations",
           label: "Registrations",
           description: "Student enrollment records",
@@ -1399,6 +1917,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       pendingPayments.length,
       resources.length,
       sessions.length,
+      siteConfigForm.apkDownloadUrl,
+      unreadInboxCount,
     ],
   );
 
@@ -1451,9 +1971,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const inboxCounts = useMemo(() => {
     const all = inboxMessages.length;
-    const fresh = inboxMessages.filter(
-      (m) => String(m.status || "new").toLowerCase() === "new",
-    ).length;
+    const fresh = inboxMessages.filter(isUnreadLearnerChat).length;
     const read = inboxMessages.filter(
       (m) => String(m.status || "").toLowerCase() === "read",
     ).length;
@@ -1464,13 +1982,39 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return { all, new: fresh, read, resolved };
   }, [inboxMessages]);
 
+  const supportCounts = useMemo(() => {
+    const all = supportMessages.length;
+    const fresh = supportMessages.filter(
+      (m) => String(m.status || "new").toLowerCase() === "new",
+    ).length;
+    const read = supportMessages.filter(
+      (m) => String(m.status || "").toLowerCase() === "read",
+    ).length;
+    const resolved = supportMessages.filter(
+      (m) => String(m.status || "").toLowerCase() === "resolved",
+    ).length;
+
+    return { all, new: fresh, read, resolved };
+  }, [supportMessages]);
+
   const filteredInboxMessages = useMemo(() => {
     if (inboxFilter === "all") return inboxMessages;
+    if (inboxFilter === "new") {
+      return inboxMessages.filter(isUnreadLearnerChat);
+    }
 
     return inboxMessages.filter(
       (m) => String(m.status || "new").toLowerCase() === inboxFilter,
     );
   }, [inboxMessages, inboxFilter]);
+
+  const filteredSupportMessages = useMemo(() => {
+    if (supportFilter === "all") return supportMessages;
+
+    return supportMessages.filter(
+      (m) => String(m.status || "new").toLowerCase() === supportFilter,
+    );
+  }, [supportMessages, supportFilter]);
 
   const openEditCourse = (c: CourseDoc) => {
     setCourseError("");
@@ -1484,7 +2028,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const inferredPricePerWeek =
       (c as any).pricePerWeek && Number.isFinite((c as any).pricePerWeek)
         ? Number((c as any).pricePerWeek)
-        : parsePricePerWeek(c.priceLabel || "₦10k/wk") || 10000;
+        : parsePricePerWeek(c.priceLabel || "") || 0;
 
     const inferredSyllabus: SyllabusWeek[] = Array.isArray((c as any).syllabus)
       ? (c as any).syllabus
@@ -1542,12 +2086,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const pricePerWeek =
       Number.isFinite(courseForm.pricePerWeek) && courseForm.pricePerWeek > 0
         ? Math.floor(courseForm.pricePerWeek)
-        : parsePricePerWeek(courseForm.priceLabel || "₦10k/wk");
+        : parsePricePerWeek(courseForm.priceLabel || "");
 
     if (!weeks || weeks < 1) return setCourseError("Weeks must be at least 1.");
     if (!pricePerWeek || pricePerWeek < 100)
       return setCourseError(
-        'Invalid price. Use 10000 or label like "₦10k/wk".',
+        'Enter a valid weekly price, for example 10000.',
       );
 
     const payload: any = {
@@ -1585,16 +2129,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const deleteCourse = async (c: CourseDoc) => {
-    if (
-      !confirm(`Delete course "${c.title}"? This will remove it from the site.`)
-    )
-      return;
+    const ok = await confirmAction({
+      title: "Delete course?",
+      message: `Delete "${c.title}"? This removes it from the public course catalog.`,
+      confirmLabel: "Delete Course",
+      tone: "danger",
+    });
+    if (!ok) return;
     try {
       await registrationStore.deleteCourse(c.id);
       await fetchCourses();
     } catch (e) {
       console.error("Delete course failed:", e);
-      alert("Failed to delete course.");
+      notify("error", "Failed to delete course.");
     }
   };
 
@@ -1753,12 +2300,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const deleteCohort = async (c: CohortDoc) => {
-    if (
-      !confirm(
-        `Delete cohort "${c.label}"? (Sessions under it will also be inaccessible)`,
-      )
-    )
-      return;
+    const ok = await confirmAction({
+      title: "Delete cohort?",
+      message: `Delete "${c.label}"? Sessions under it may become inaccessible.`,
+      confirmLabel: "Delete Cohort",
+      tone: "danger",
+    });
+    if (!ok) return;
     try {
       await registrationStore.deleteCohort(c.id);
       await fetchCohorts();
@@ -1893,7 +2441,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const deleteSession = async (s: SessionDoc) => {
     if (!selectedCohortId) return;
     if (sessionBusyId) return;
-    if (!confirm(`Delete session "${s.title}"?`)) return;
+    const ok = await confirmAction({
+      title: "Delete session?",
+      message: `Delete "${s.title}" from this cohort schedule?`,
+      confirmLabel: "Delete Session",
+      tone: "danger",
+    });
+    if (!ok) return;
 
     setSessionBusyId(s.id);
     try {
@@ -2010,7 +2564,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const deleteMessage = async (msgId: string) => {
     if (!selectedCohortId) return;
-    if (!confirm("Delete this message? This action cannot be undone.")) return;
+    const ok = await confirmAction({
+      title: "Delete cohort message?",
+      message: "This removes the announcement from this cohort message list.",
+      confirmLabel: "Delete Message",
+      tone: "danger",
+    });
+    if (!ok) return;
 
     setMessageBusyId(msgId);
     try {
@@ -2032,7 +2592,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // -------------------------
   const clearPending = async (uid: string) => {
     if (pendingBusyUid) return;
-    if (!confirm("Clear pending payment for this user?")) return;
+    const ok = await confirmAction({
+      title: "Clear pending payment?",
+      message:
+        "This removes the pending payment request without crediting access.",
+      confirmLabel: "Clear Pending",
+      tone: "warning",
+    });
+    if (!ok) return;
 
     setPendingBusyUid(uid);
     try {
@@ -2040,7 +2607,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await fetchRegistrations();
     } catch (e) {
       console.error("clearPending failed:", e);
-      alert("Failed to clear pending payment.");
+      notify("error", "Failed to clear pending payment.");
     } finally {
       setPendingBusyUid(null);
     }
@@ -2051,9 +2618,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const pending = (reg as any).pendingPayment;
     if (!pending) return;
 
-    const ok = confirm(
-      `Approve ${pending.kind.toUpperCase()} payment?\n\nUser: ${reg.fullName}\nWeeks: ${pending.weeks}\nAmount: ₦${Number(pending.amount || 0).toLocaleString()}\nRef: ${pending.reference}`,
-    );
+    const ok = await confirmAction({
+      title: "Manual payment override?",
+      message: `Only continue after confirming this Paystack transaction in the gateway dashboard. User: ${reg.fullName}. Weeks: ${pending.weeks}. Amount: ₦${Number(pending.amount || 0).toLocaleString()}. Ref: ${pending.reference}.`,
+      confirmLabel: "Reconcile Payment",
+      tone: "warning",
+    });
     if (!ok) return;
 
     setPendingBusyUid(reg.uid);
@@ -2075,11 +2645,57 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await fetchRegistrations();
     } catch (e) {
       console.error("approvePending failed:", e);
-      alert("Failed to approve pending payment.");
+      notify("error", "Failed to approve pending payment.");
     } finally {
       setPendingBusyUid(null);
     }
   };
+
+  const updateSiteConfigField = <K extends keyof SiteConfig>(
+    key: K,
+    value: SiteConfig[K],
+  ) => {
+    setSiteConfigForm((current) => ({
+      ...current,
+      [key]: value,
+    }));
+    setSiteConfigError("");
+    setSiteConfigSaved("");
+  };
+
+  const updateSupportTopics = (value: string) => {
+    updateSiteConfigField(
+      "supportTopics",
+      value
+        .split(",")
+        .map((topic) => topic.trim())
+        .filter(Boolean),
+    );
+  };
+
+  const handleSaveSiteConfig = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSiteConfigLoading(true);
+    setSiteConfigError("");
+    setSiteConfigSaved("");
+
+    try {
+      await saveSiteConfig(siteConfigForm);
+      const fresh = await getSiteConfig();
+      setSiteConfigForm(fresh);
+      setSiteConfigSaved("Site settings saved.");
+    } catch (e) {
+      console.error("saveSiteConfig failed:", e);
+      setSiteConfigError("Site settings could not be saved. Please try again.");
+    } finally {
+      setSiteConfigLoading(false);
+    }
+  };
+
+  const settingsLabelClass =
+    "text-[10px] font-black uppercase tracking-widest text-slate-400";
+  const settingsInputClass =
+    "mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-800 dark:bg-slate-950 dark:text-white";
 
   // ---------- UI helpers ----------
   const Spinner = ({ className = "h-4 w-4" }: { className?: string }) => (
@@ -2138,22 +2754,28 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
   };
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, "contactMessages"),
-      (snap) => {
-        const list = sortInboxMessagesByActivity(
-          snap.docs.map((doc) => ({
-            id: doc.id,
-            ...(doc.data() as Omit<ContactMessageDoc, "id">),
-          })),
-        );
+    let mentorThreadList: ContactMessageDoc[] = [];
+    let legacyMentorList: ContactMessageDoc[] = [];
+    const publishInbox = () => {
+      setInboxMessages(
+        sortInboxMessagesByActivity([...mentorThreadList, ...legacyMentorList]),
+      );
+      setInboxLoading(false);
+      setInboxError("");
+    };
 
-        setInboxMessages(list);
-        setInboxLoading(false);
-        setInboxError("");
+    const unsubscribeMentorThreads = onSnapshot(
+      collection(db, "mentorThreads"),
+      (snap) => {
+        mentorThreadList = snap.docs.map((doc) => ({
+          id: doc.id,
+          threadCollection: "mentorThreads" as const,
+          ...(doc.data() as Omit<ContactMessageDoc, "id">),
+        }));
+        publishInbox();
       },
       (error) => {
-        console.error("contactMessages subscription failed:", error);
+        console.error("mentorThreads subscription failed:", error);
         setInboxError(
           (error as any)?.message ||
             "Failed to keep inbox synced. Check Firestore rules/index.",
@@ -2162,20 +2784,73 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       },
     );
 
+    const unsubscribeLegacyMentor = onSnapshot(
+      collection(db, "contactMessages"),
+      (snap) => {
+        legacyMentorList = snap.docs
+          .map((doc) => ({
+            id: doc.id,
+            threadCollection: "contactMessages" as const,
+            ...(doc.data() as Omit<ContactMessageDoc, "id">),
+          }))
+          .filter(isMentorContactMessage);
+        publishInbox();
+      },
+      (error) => {
+        console.error("legacy mentor contactMessages subscription failed:", error);
+        setInboxError(
+          (error as any)?.message ||
+            "Failed to keep inbox synced. Check Firestore rules/index.",
+        );
+        setInboxLoading(false);
+      },
+    );
+
+    return () => {
+      unsubscribeMentorThreads();
+      unsubscribeLegacyMentor();
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "contactMessages"),
+      (snap) => {
+        const list = sortInboxMessagesByActivity(
+          snap.docs.map((doc) => ({
+            id: doc.id,
+            ...(doc.data() as Omit<ContactMessageDoc, "id">),
+          })),
+        ).filter((message) => !isMentorContactMessage(message));
+
+        setSupportMessages(list);
+        setSupportLoading(false);
+        setSupportError("");
+      },
+      (error) => {
+        console.error("contactMessages subscription failed:", error);
+        setSupportError(
+          (error as any)?.message ||
+            "Failed to keep support inbox synced. Check Firestore rules.",
+        );
+        setSupportLoading(false);
+      },
+    );
+
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (!selectedInboxMessage?.id) return;
+    if (!selectedSupportMessage?.id) return;
 
     const currentStatus = String(
-      selectedInboxMessage.status || "new",
+      selectedSupportMessage.status || "new",
     ).toLowerCase();
     if (currentStatus !== "new") return;
 
-    markInboxStatus(selectedInboxMessage.id, "read");
+    markSupportStatus(selectedSupportMessage.id, "read");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedInboxMessage?.id]);
+  }, [selectedSupportMessage?.id]);
 
   useEffect(() => {
     if (!selectedInboxMessage) {
@@ -2188,39 +2863,28 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setInboxThreadLoading(true);
     setReplyError("");
 
-    const rootThread = [
-      normalizeInboxThreadMessage(
-        {
-          ...selectedInboxMessage,
-          senderType: "user",
-          senderName: getInboxDisplayName(selectedInboxMessage),
-          senderEmail: getInboxEmail(selectedInboxMessage),
-        },
-        `${selectedInboxMessage.id}-root`,
-      ),
-    ].filter(Boolean) as InboxThreadMessage[];
-
-    const embeddedThread = [
-      ...(Array.isArray(selectedInboxMessage.thread)
-        ? selectedInboxMessage.thread
-        : []),
-      ...(Array.isArray(selectedInboxMessage.messages)
-        ? selectedInboxMessage.messages
-        : []),
-      ...(Array.isArray(selectedInboxMessage.replies)
-        ? selectedInboxMessage.replies
-        : []),
-    ]
-      .map((entry, index) =>
-        normalizeInboxThreadMessage(
-          entry,
-          `${selectedInboxMessage.id}-embedded-${index}`,
-        ),
-      )
-      .filter(Boolean) as InboxThreadMessage[];
+    const rootThread =
+      getInboxThreadCollection(selectedInboxMessage) === "contactMessages"
+        ? ([
+            normalizeInboxThreadMessage(
+              {
+                ...selectedInboxMessage,
+                senderType: "user",
+                senderName: getInboxDisplayName(selectedInboxMessage),
+                senderEmail: getInboxEmail(selectedInboxMessage),
+              },
+              `${selectedInboxMessage.id}-root`,
+            ),
+          ].filter(Boolean) as InboxThreadMessage[])
+        : [];
 
     const threadQuery = query(
-      collection(db, "contactMessages", selectedInboxMessage.id, "messages"),
+      collection(
+        db,
+        getInboxThreadCollection(selectedInboxMessage),
+        selectedInboxMessage.id,
+        "messages",
+      ),
       orderBy("createdAt", "asc"),
       limit(200),
     );
@@ -2241,17 +2905,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           .filter(Boolean) as InboxThreadMessage[];
 
         setInboxThread(
-          mergeInboxThreadEntries([
-            ...rootThread,
-            ...embeddedThread,
-            ...subcollectionThread,
-          ]),
+          mergeInboxThreadEntries([...rootThread, ...subcollectionThread]),
         );
         setInboxThreadLoading(false);
       },
       (error) => {
-        console.error("contactMessages thread subscription failed:", error);
-        setInboxThread(mergeInboxThreadEntries([...rootThread, ...embeddedThread]));
+        console.error("mentor chat thread subscription failed:", error);
+        setInboxThread([]);
         setInboxThreadLoading(false);
       },
     );
@@ -2273,6 +2933,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setSelectedInboxId(filteredInboxMessages[0].id);
     }
   }, [filteredInboxMessages, selectedInboxId]);
+
+  useEffect(() => {
+    if (!filteredSupportMessages.length) {
+      setSelectedSupportId("");
+      return;
+    }
+
+    const stillVisible = filteredSupportMessages.some(
+      (m) => m.id === selectedSupportId,
+    );
+
+    if (!stillVisible) {
+      setSelectedSupportId(filteredSupportMessages[0].id);
+    }
+  }, [filteredSupportMessages, selectedSupportId]);
 
   // -------------------------
   // RETURN JSX (your UI preserved)
@@ -2303,12 +2978,30 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 Admin Control Center
               </h1>
               <p className="text-slate-600 dark:text-slate-300 mt-2 max-w-2xl">
-                Manage paths, cohorts, sessions, payments, inbox, and
-                integrations
+                Manage paths, cohorts, sessions, payments, mobile chats, and
+                support inboxes
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => {
+                  setSupportFilter("all");
+                  setShowSupportInboxModal(true);
+                  if (!supportMessages.length) fetchSupportMessages();
+                }}
+                className="relative p-2.5 bg-white dark:bg-slate-900 text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 rounded-xl border border-gray-100 dark:border-slate-800 transition-colors"
+                title="Open Support Inbox"
+                aria-label="Open Support Inbox"
+              >
+                <Mail className="w-5 h-5" />
+                {unreadSupportCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center">
+                    {unreadSupportCount > 9 ? "9+" : unreadSupportCount}
+                  </span>
+                )}
+              </button>
+
               <button
                 onClick={() => {
                   setInboxFilter("all");
@@ -2316,10 +3009,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   if (!inboxMessages.length) fetchInboxMessages();
                 }}
                 className="relative p-2.5 bg-white dark:bg-slate-900 text-slate-400 hover:text-blue-900 dark:hover:text-teal-400 rounded-xl border border-gray-100 dark:border-slate-800 transition-colors"
-                title="Open Inbox"
-                aria-label="Open Inbox"
+                title="Open Mobile Chat"
+                aria-label="Open Mobile Chat"
               >
-                <Inbox className="w-5 h-5" />
+                <MessageSquare className="w-5 h-5" />
                 {unreadInboxCount > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-pink-600 text-white text-[10px] font-black flex items-center justify-center">
                     {unreadInboxCount > 9 ? "9+" : unreadInboxCount}
@@ -2402,48 +3095,73 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           ) : null}
 
+          <AnimatePresence>
+            {confirmDialog && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+                onClick={() => closeConfirmDialog(false)}
+              >
+                <motion.div
+                  initial={{ opacity: 0, y: 18, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 12, scale: 0.98 }}
+                  className="w-full max-w-md rounded-[2rem] border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div
+                    className={`mb-4 flex h-12 w-12 items-center justify-center rounded-2xl ${
+                      confirmDialog.tone === "danger"
+                        ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-300"
+                        : confirmDialog.tone === "warning"
+                          ? "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-300"
+                          : "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300"
+                    }`}
+                  >
+                    <AlertCircle className="h-6 w-6" />
+                  </div>
+
+                  <h3 className="text-xl font-black tracking-tight text-slate-900 dark:text-white">
+                    {confirmDialog.title}
+                  </h3>
+                  <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                    {confirmDialog.message}
+                  </p>
+
+                  <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={() => closeConfirmDialog(false)}
+                      className={subtleActionClass}
+                    >
+                      {confirmDialog.cancelLabel}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => closeConfirmDialog(true)}
+                      className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest text-white transition ${
+                        confirmDialog.tone === "danger"
+                          ? "bg-red-600 hover:bg-red-500"
+                          : confirmDialog.tone === "warning"
+                            ? "bg-orange-600 hover:bg-orange-500"
+                            : "bg-blue-600 hover:bg-blue-500"
+                      }`}
+                    >
+                      {confirmDialog.confirmLabel}
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <motion.div
             variants={fadeUp}
-            className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-8"
+            className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-8"
           >
-            {[
-              {
-                label: "Total Students",
-                value: stats.total,
-                icon: Users,
-                valueClass: "text-blue-900 dark:text-white",
-              },
-              {
-                label: "Pending",
-                value: stats.pending,
-                icon: Clock3,
-                valueClass: "text-orange-600",
-              },
-              {
-                label: "Complete",
-                value: stats.complete,
-                icon: ShieldCheck,
-                valueClass: "text-teal-600",
-              },
-              {
-                label: "Revenue",
-                value: `₦${stats.revenue.toLocaleString()}`,
-                icon: CircleDollarSign,
-                valueClass: "text-blue-900 dark:text-white",
-              },
-              {
-                label: "Pending Payments",
-                value: stats.pendingPaymentsCount,
-                icon: CreditCard,
-                valueClass: "text-purple-600",
-              },
-              {
-                label: "Inbox (New)",
-                value: unreadInboxCount,
-                icon: Inbox,
-                valueClass: "text-pink-600",
-              },
-            ].map((s) => {
+            {dashboardCounters.map((s) => {
               const Icon = s.icon;
               return (
                 <motion.div
@@ -2503,7 +3221,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 return (
                   <button
                     key={section.key}
-                    onClick={() => setActiveAdminSection(section.key)}
+                    onClick={() => selectAdminSection(section.key)}
                     className={`text-left p-4 rounded-2xl border transition-all ${
                       active ? section.activeClass : section.inactiveClass
                     }`}
@@ -3281,14 +3999,259 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
 
+          {activeAdminSection === "mobileChat" && (
+            <div className={`mb-8 p-6 md:p-8 ${surfaceCardClass}`}>
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
+                <div>
+                  <h2 className={sectionTitleClass}>Mobile Mentor Chat</h2>
+                  <p className={sectionCopyClass}>
+                    One thread per learner from the mobile app. Class context is
+                    shown inside each message instead of splitting chats.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={fetchInboxMessages} className={subtleActionClass}>
+                    Refresh
+                  </button>
+                  <button
+                    onClick={() => setShowInboxModal(true)}
+                    className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-blue-900 text-white hover:bg-blue-800 transition"
+                  >
+                    Full Chat View
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-5">
+                <div className="rounded-[1.75rem] border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 p-3 space-y-3 max-h-[680px] overflow-auto">
+                  <div className="flex flex-wrap gap-2 px-1 pb-1">
+                    {[
+                      { key: "all", label: "All", count: inboxCounts.all },
+                      { key: "new", label: "New", count: inboxCounts.new },
+                      { key: "read", label: "Read", count: inboxCounts.read },
+                      {
+                        key: "resolved",
+                        label: "Resolved",
+                        count: inboxCounts.resolved,
+                      },
+                    ].map((tab) => {
+                      const active = inboxFilter === tab.key;
+                      return (
+                        <button
+                          key={tab.key}
+                          onClick={() =>
+                            setInboxFilter(
+                              tab.key as "all" | "new" | "read" | "resolved",
+                            )
+                          }
+                          className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border ${
+                            active
+                              ? "bg-cyan-600 text-white border-cyan-600"
+                              : "bg-white dark:bg-slate-950 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-800"
+                          }`}
+                        >
+                          {tab.label} · {tab.count}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {inboxError ? (
+                    <div className="p-4 rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-200 text-sm font-bold">
+                      {inboxError}
+                    </div>
+                  ) : inboxLoading ? (
+                    <div className="p-5 rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300">
+                      Loading mobile chats…
+                    </div>
+                  ) : filteredInboxMessages.length === 0 ? (
+                    <div className="p-5 rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300">
+                      No mobile chats in this filter.
+                    </div>
+                  ) : (
+                    filteredInboxMessages.map((m) => {
+                      const isSelected = selectedInboxId === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={() => {
+                            setSelectedInboxId(m.id);
+                            if (isUnreadLearnerChat(m)) {
+                              void markInboxStatus(m.id, "read");
+                            }
+                          }}
+                          className={`w-full text-left rounded-2xl border p-4 transition ${
+                            isSelected
+                              ? "border-cyan-400 dark:border-cyan-500/50 bg-white dark:bg-slate-950 ring-2 ring-cyan-500/10"
+                              : "border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-950/70 hover:border-cyan-200 dark:hover:border-cyan-700"
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-cyan-600 to-teal-500 text-white flex items-center justify-center font-black text-sm shrink-0">
+                              {(getInboxDisplayName(m) || "?")
+                                .charAt(0)
+                                .toUpperCase()}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-black text-slate-900 dark:text-white truncate">
+                                {getInboxDisplayName(m)}
+                              </p>
+                              <p className="text-xs text-slate-400 truncate mt-0.5">
+                                {getInboxPreview(m)}
+                              </p>
+                              <p className="text-[10px] font-bold text-slate-400 mt-2">
+                                {formatInboxDate(m.lastMessageAt || m.updatedAt)}
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="rounded-[1.75rem] border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 md:p-6 min-h-[540px]">
+                  {!selectedInboxMessage ? (
+                    <div className="h-full min-h-[420px] flex items-center justify-center text-center">
+                      <div>
+                        <div className="w-16 h-16 mx-auto rounded-3xl bg-cyan-50 dark:bg-cyan-500/10 text-cyan-600 dark:text-cyan-300 flex items-center justify-center mb-5">
+                          <MessageSquare className="w-7 h-7" />
+                        </div>
+                        <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                          Select a mobile chat
+                        </h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
+                          Open a learner thread to reply inside the mobile app.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-5">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-cyan-600 dark:text-cyan-300 mb-2">
+                            Mobile App Thread
+                          </p>
+                          <h3 className="text-2xl font-black text-slate-900 dark:text-white break-words">
+                            {getInboxDisplayName(selectedInboxMessage)}
+                          </h3>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 break-all mt-1">
+                            {getInboxEmail(selectedInboxMessage) ||
+                              "No email on file"}
+                          </p>
+                          <p className="text-xs text-slate-400 mt-2">
+                            Last context:{" "}
+                            {selectedInboxMessage.sessionTitle ||
+                              selectedInboxMessage.pathTitle ||
+                              "General mentor support"}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() =>
+                              markInboxStatus(selectedInboxMessage.id, "read")
+                            }
+                            className={subtleActionClass}
+                          >
+                            Mark Read
+                          </button>
+                          <button
+                            onClick={() =>
+                              markInboxStatus(
+                                selectedInboxMessage.id,
+                                "resolved",
+                              )
+                            }
+                            className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:bg-teal-500 transition"
+                          >
+                            Resolve
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-[1.5rem] border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-4 max-h-[360px] overflow-auto space-y-3">
+                        {inboxThreadLoading ? (
+                          <div className="text-sm text-slate-500 dark:text-slate-300">
+                            Loading conversation…
+                          </div>
+                        ) : inboxThread.length === 0 ? (
+                          <div className="text-sm text-slate-500 dark:text-slate-300">
+                            No messages in this thread yet.
+                          </div>
+                        ) : (
+                          inboxThread.map((entry) => {
+                            const isAdmin = entry.senderType === "admin";
+                            return (
+                              <div
+                                key={entry.id}
+                                className={`flex ${
+                                  isAdmin ? "justify-end" : "justify-start"
+                                }`}
+                              >
+                                <div
+                                  className={`max-w-[86%] rounded-[1.35rem] px-4 py-3 border ${
+                                    isAdmin
+                                      ? "bg-blue-900 text-white border-blue-800"
+                                      : "bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800"
+                                  }`}
+                                >
+                                  <p className="text-[10px] font-black uppercase tracking-widest opacity-70 mb-2">
+                                    {entry.senderName || (isAdmin ? "Admin" : "Learner")} ·{" "}
+                                    {formatInboxDate(entry.createdAt)}
+                                  </p>
+                                  <p className="text-[15px] leading-7 whitespace-pre-wrap break-words">
+                                    {entry.body}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      <div className="mt-5 rounded-[1.5rem] border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-4">
+                        {replyError ? (
+                          <div className="mb-3 rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm font-bold text-red-700 dark:text-red-200">
+                            {replyError}
+                          </div>
+                        ) : null}
+                        <textarea
+                          value={replyDraft}
+                          onChange={(e) => setReplyDraft(e.target.value)}
+                          rows={4}
+                          placeholder="Type your reply to the learner..."
+                          className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-cyan-500/20"
+                        />
+                        <div className="mt-3 flex justify-end">
+                          <BusyButton
+                            type="button"
+                            onClick={sendInboxReply}
+                            busy={replyBusy}
+                            busyText="Sending reply..."
+                            disabled={!selectedInboxMessage?.id}
+                            className="px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-widest bg-cyan-600 text-white hover:bg-cyan-500 transition inline-flex items-center gap-2"
+                          >
+                            <Send className="w-4 h-4" />
+                            Send Mobile Reply
+                          </BusyButton>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Pending Payments */}
           {activeAdminSection === "payments" && (
-            <div className={`mb-8 p-8 ${surfaceCardClass}`}>
-              <div className="flex items-center justify-between gap-4 mb-6">
+            <div className={`mb-8 p-5 md:p-8 ${surfaceCardClass}`}>
+              <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h2 className={sectionTitleClass}>Pending Payments</h2>
                   <p className={sectionCopyClass}>
-                    Approve or clear pending Paystack references.
+                    Reconcile pending Paystack references only after checking
+                    the gateway dashboard.
                   </p>
                 </div>
 
@@ -3305,7 +4268,84 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   No pending payments right now.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                <>
+                <div className="mb-5 rounded-2xl border border-orange-200 bg-orange-50 px-5 py-4 text-sm font-semibold text-orange-900 dark:border-orange-500/20 dark:bg-orange-500/10 dark:text-orange-100">
+                  Manual approval is an admin override. It credits learner
+                  access without re-running Paystack verification, so confirm
+                  the transaction reference in Paystack before approving.
+                </div>
+
+                <div className="space-y-3 lg:hidden">
+                  {pendingPayments.map((r) => {
+                    const p = (r as any).pendingPayment;
+                    return (
+                      <div key={`${r.uid}-mobile-pending`} className={adminMobileRecordClass}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-base font-black text-slate-900 dark:text-white">
+                              {r.fullName}
+                            </p>
+                            <p className="mt-1 break-all text-xs font-medium text-slate-500 dark:text-slate-400">
+                              {r.email}
+                            </p>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-orange-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-orange-700 dark:bg-orange-500/10 dark:text-orange-200">
+                            {p?.kind || "payment"}
+                          </span>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-2 gap-3">
+                          <div>
+                            <p className={adminFieldLabelClass}>Weeks</p>
+                            <p className={adminFieldValueClass}>{p?.weeks || "—"}</p>
+                          </div>
+                          <div>
+                            <p className={adminFieldLabelClass}>Amount</p>
+                            <p className="mt-1 text-sm font-black text-teal-600 dark:text-teal-300">
+                              ₦{Number(p?.amount || 0).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-950/60">
+                          <p className={adminFieldLabelClass}>Reference</p>
+                          <p className="mt-1 break-all font-mono text-xs font-bold text-slate-700 dark:text-slate-200">
+                            {p?.reference || "No reference"}
+                          </p>
+                          <button
+                            onClick={() =>
+                              copyToClipboard(String(p?.reference || ""))
+                            }
+                            className="mt-2 text-[10px] font-black uppercase tracking-widest text-blue-700 hover:underline dark:text-blue-400"
+                          >
+                            Copy Ref
+                          </button>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <BusyButton
+                            busy={pendingBusyUid === r.uid}
+                            onClick={() => approvePending(r)}
+                            className="justify-center rounded-xl bg-teal-600 px-3 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:opacity-90"
+                            busyText="Reconciling..."
+                          >
+                            Admin Override
+                          </BusyButton>
+                          <BusyButton
+                            busy={pendingBusyUid === r.uid}
+                            onClick={() => clearPending(r.uid)}
+                            className="justify-center rounded-xl bg-orange-600 px-3 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:opacity-90"
+                            busyText="Clearing..."
+                          >
+                            Clear
+                          </BusyButton>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="hidden overflow-x-auto lg:block">
                   <table className="w-full text-left">
                     <thead className="bg-gray-50 dark:bg-slate-800/50 border-b border-gray-100 dark:border-slate-800">
                       <tr>
@@ -3374,9 +4414,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   busy={pendingBusyUid === r.uid}
                                   onClick={() => approvePending(r)}
                                   className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:opacity-90 transition"
-                                  busyText="Approving..."
+                                  busyText="Reconciling..."
                                 >
-                                  Approve
+                                  Admin Override
                                 </BusyButton>
                                 <BusyButton
                                   busy={pendingBusyUid === r.uid}
@@ -3394,8 +4434,599 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </tbody>
                   </table>
                 </div>
+                </>
               )}
+
+              <div className="mt-8 border-t border-slate-100 pt-8 dark:border-slate-800">
+                <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="text-lg font-black tracking-tight text-slate-900 dark:text-white">
+                      Verified Gateway Records
+                    </h3>
+                    <p className={sectionCopyClass}>
+                      Recent successful Paystack verifications from the Cloud
+                      Function, including charged amount, base access amount,
+                      and returned gateway fee.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchPaymentRecords}
+                    className={subtleActionClass}
+                  >
+                    {paymentRecordsLoading ? "Loading..." : "Refresh Records"}
+                  </button>
+                </div>
+
+                {paymentRecordsError ? (
+                  <div className="rounded-2xl border border-orange-200 bg-orange-50 px-5 py-4 text-sm font-semibold text-orange-900 dark:border-orange-500/20 dark:bg-orange-500/10 dark:text-orange-100">
+                    {paymentRecordsError}
+                  </div>
+                ) : paymentRecordsLoading ? (
+                  <div className="rounded-2xl bg-slate-50 px-5 py-4 text-sm font-semibold text-slate-500 dark:bg-slate-800/40 dark:text-slate-300">
+                    Loading verified payment records...
+                  </div>
+                ) : paymentRecords.length === 0 ? (
+                  <div className="rounded-2xl bg-slate-50 px-5 py-4 text-sm font-semibold text-slate-500 dark:bg-slate-800/40 dark:text-slate-300">
+                    No verified gateway records yet. Successful Paystack
+                    confirmations will appear here after the verification
+                    function completes.
+                  </div>
+                ) : (
+                  <>
+                  <div className="space-y-3 lg:hidden">
+                    {paymentRecords.map((payment) => {
+                      const student =
+                        registrationsByUid.get(payment.userId) || null;
+                      const reference = String(
+                        payment.reference || payment.id || "",
+                      );
+                      const status = String(
+                        payment.paystack?.status || "success",
+                      );
+                      const channel = String(
+                        payment.paystack?.channel || "paystack",
+                      );
+
+                      return (
+                        <div
+                          key={`${payment.userId}-${payment.id}-mobile`}
+                          className={adminMobileRecordClass}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-base font-black text-slate-900 dark:text-white">
+                                {student?.fullName || payment.email || "Student"}
+                              </p>
+                              <p className="mt-1 break-all text-xs font-medium text-slate-500 dark:text-slate-400">
+                                {student?.email || payment.email || payment.userId}
+                              </p>
+                            </div>
+                            <span className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">
+                              {status}
+                            </span>
+                          </div>
+
+                          {(payment.path || student?.path) && (
+                            <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                              {payment.path || student?.path}
+                            </p>
+                          )}
+
+                          <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-950/60">
+                            <p className={adminFieldLabelClass}>Reference</p>
+                            <p className="mt-1 break-all font-mono text-xs font-bold text-slate-700 dark:text-slate-200">
+                              {reference || "—"}
+                            </p>
+                            {reference && (
+                              <button
+                                type="button"
+                                onClick={() => copyToClipboard(reference)}
+                                className="mt-2 text-[10px] font-black uppercase tracking-widest text-blue-700 hover:underline dark:text-blue-400"
+                              >
+                                Copy Ref
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div>
+                              <p className={adminFieldLabelClass}>Payment</p>
+                              <p className={adminFieldValueClass}>
+                                {payment.kind || "payment"} ·{" "}
+                                {Number(payment.weeks || 0) || "—"} week(s)
+                              </p>
+                            </div>
+                            <div>
+                              <p className={adminFieldLabelClass}>Gateway</p>
+                              <p className={adminFieldValueClass}>{channel}</p>
+                            </div>
+                            <div>
+                              <p className={adminFieldLabelClass}>Charged</p>
+                              <p className={adminFieldValueClass}>
+                                {formatPaymentAmount(
+                                  payment.chargedAmountKobo ??
+                                    payment.amountKobo,
+                                  payment.amount,
+                                )}
+                              </p>
+                            </div>
+                            <div>
+                              <p className={adminFieldLabelClass}>Base</p>
+                              <p className={adminFieldValueClass}>
+                                {formatPaymentAmount(
+                                  payment.baseAmountKobo,
+                                  payment.amount,
+                                )}
+                              </p>
+                            </div>
+                            <div>
+                              <p className={adminFieldLabelClass}>Gateway Fee</p>
+                              <p className={adminFieldValueClass}>
+                                {formatPaymentAmount(payment.gatewayFeeKobo)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className={adminFieldLabelClass}>Verified</p>
+                              <p className="mt-1 text-xs font-bold text-slate-600 dark:text-slate-300">
+                                {formatPaymentDate(
+                                  payment.verifiedAt ||
+                                    payment.paystack?.paidAt ||
+                                    payment.timestamp,
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="hidden overflow-x-auto lg:block">
+                    <table className="w-full text-left">
+                      <thead className="border-b border-gray-100 bg-gray-50 dark:border-slate-800 dark:bg-slate-800/50">
+                        <tr>
+                          <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                            Student
+                          </th>
+                          <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                            Reference
+                          </th>
+                          <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                            Payment
+                          </th>
+                          <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                            Gateway
+                          </th>
+                          <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                            Verified
+                          </th>
+                        </tr>
+                      </thead>
+
+                      <tbody className="divide-y divide-gray-50 dark:divide-slate-800">
+                        {paymentRecords.map((payment) => {
+                          const student =
+                            registrationsByUid.get(payment.userId) || null;
+                          const reference = String(
+                            payment.reference || payment.id || "",
+                          );
+                          const status = String(
+                            payment.paystack?.status || "success",
+                          );
+                          const channel = String(
+                            payment.paystack?.channel || "paystack",
+                          );
+
+                          return (
+                            <tr
+                              key={`${payment.userId}-${payment.id}`}
+                              className="transition-colors hover:bg-gray-50/50 dark:hover:bg-slate-800/30"
+                            >
+                              <td className="px-6 py-4">
+                                <p className="text-sm font-black text-blue-900 dark:text-white">
+                                  {student?.fullName || payment.email || "Student"}
+                                </p>
+                                <p className="text-xs font-medium text-slate-400">
+                                  {student?.email || payment.email || payment.userId}
+                                </p>
+                                {(payment.path || student?.path) && (
+                                  <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    {payment.path || student?.path}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="px-6 py-4">
+                                <p className="max-w-[220px] break-all font-mono text-xs font-bold text-slate-700 dark:text-slate-200">
+                                  {reference || "—"}
+                                </p>
+                                {reference && (
+                                  <button
+                                    type="button"
+                                    onClick={() => copyToClipboard(reference)}
+                                    className="mt-2 text-[10px] font-black uppercase tracking-widest text-blue-700 hover:underline dark:text-blue-400"
+                                  >
+                                    Copy Ref
+                                  </button>
+                                )}
+                              </td>
+                              <td className="px-6 py-4">
+                                <p className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-300">
+                                  {payment.kind || "payment"} ·{" "}
+                                  {Number(payment.weeks || 0) || "—"} week(s)
+                                </p>
+                                <div className="mt-2 space-y-1 text-xs font-bold text-slate-500 dark:text-slate-300">
+                                  <p>
+                                    Charged:{" "}
+                                    <span className="text-slate-900 dark:text-white">
+                                      {formatPaymentAmount(
+                                        payment.chargedAmountKobo ??
+                                          payment.amountKobo,
+                                        payment.amount,
+                                      )}
+                                    </span>
+                                  </p>
+                                  <p>
+                                    Base:{" "}
+                                    <span className="text-slate-900 dark:text-white">
+                                      {formatPaymentAmount(
+                                        payment.baseAmountKobo,
+                                        payment.amount,
+                                      )}
+                                    </span>
+                                  </p>
+                                  <p>
+                                    Gateway fee:{" "}
+                                    <span className="text-slate-900 dark:text-white">
+                                      {formatPaymentAmount(
+                                        payment.gatewayFeeKobo,
+                                      )}
+                                    </span>
+                                  </p>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">
+                                  {status}
+                                </span>
+                                <p className="mt-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300">
+                                  {channel}
+                                </p>
+                              </td>
+                              <td className="px-6 py-4 text-xs font-bold text-slate-600 dark:text-slate-300">
+                                {formatPaymentDate(
+                                  payment.verifiedAt ||
+                                    payment.paystack?.paidAt ||
+                                    payment.timestamp,
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  </>
+                )}
+              </div>
             </div>
+          )}
+
+          {activeAdminSection === "settings" && (
+            <form
+              onSubmit={handleSaveSiteConfig}
+              className={`mb-8 p-8 ${surfaceCardClass}`}
+            >
+              <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className={sectionTitleClass}>Site Settings</h2>
+                  <p className={sectionCopyClass}>
+                    Manage homepage CTA, contact links, social links, APK link,
+                    and support copy from one Firestore config document.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={fetchSiteConfig}
+                    className={subtleActionClass}
+                  >
+                    Reload
+                  </button>
+                  <BusyButton
+                    type="submit"
+                    busy={siteConfigLoading}
+                    busyText="Saving..."
+                    className={primaryActionClass}
+                  >
+                    Save Settings
+                  </BusyButton>
+                </div>
+              </div>
+
+              {siteConfigError && (
+                <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-semibold text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-100">
+                  {siteConfigError}
+                </div>
+              )}
+
+              {siteConfigSaved && (
+                <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-100">
+                  {siteConfigSaved}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+                <div className="rounded-[1.75rem] border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-950/50">
+                  <h3 className="mb-4 text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">
+                    Contact Copy
+                  </h3>
+
+                  <div className="space-y-4">
+                    <label className="block">
+                      <span className={settingsLabelClass}>Heading</span>
+                      <input
+                        value={siteConfigForm.contactHeading}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "contactHeading",
+                            event.target.value,
+                          )
+                        }
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className={settingsLabelClass}>Subheading</span>
+                      <input
+                        value={siteConfigForm.contactSubheading}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "contactSubheading",
+                            event.target.value,
+                          )
+                        }
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className={settingsLabelClass}>Intro Title</span>
+                      <input
+                        value={siteConfigForm.contactIntroTitle}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "contactIntroTitle",
+                            event.target.value,
+                          )
+                        }
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className={settingsLabelClass}>Intro Text</span>
+                      <textarea
+                        value={siteConfigForm.contactIntroText}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "contactIntroText",
+                            event.target.value,
+                          )
+                        }
+                        rows={5}
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className={settingsLabelClass}>Support Topics</span>
+                      <input
+                        value={siteConfigForm.supportTopics.join(", ")}
+                        onChange={(event) =>
+                          updateSupportTopics(event.target.value)
+                        }
+                        placeholder="Enrollment, Billing, App Access"
+                        className={settingsInputClass}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="rounded-[1.75rem] border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-950/50">
+                  <h3 className="mb-4 text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">
+                    Contact Links
+                  </h3>
+
+                  <div className="space-y-4">
+                    <label className="block">
+                      <span className={settingsLabelClass}>Email</span>
+                      <input
+                        type="email"
+                        value={siteConfigForm.contactEmail}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "contactEmail",
+                            event.target.value,
+                          )
+                        }
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className={settingsLabelClass}>Response Time</span>
+                      <input
+                        value={siteConfigForm.responseTime}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "responseTime",
+                            event.target.value,
+                          )
+                        }
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className={settingsLabelClass}>WhatsApp URL</span>
+                      <input
+                        value={siteConfigForm.whatsappUrl}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "whatsappUrl",
+                            event.target.value,
+                          )
+                        }
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className={settingsLabelClass}>Instagram URL</span>
+                      <input
+                        value={siteConfigForm.instagramUrl}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "instagramUrl",
+                            event.target.value,
+                          )
+                        }
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className={settingsLabelClass}>
+                        Instagram Handle
+                      </span>
+                      <input
+                        value={siteConfigForm.instagramHandle}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "instagramHandle",
+                            event.target.value,
+                          )
+                        }
+                        className={settingsInputClass}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="rounded-[1.75rem] border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-950/50">
+                  <h3 className="mb-4 text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">
+                    Homepage & App
+                  </h3>
+
+                  <div className="space-y-4">
+                    <label className="block">
+                      <span className={settingsLabelClass}>TikTok URL</span>
+                      <input
+                        value={siteConfigForm.tiktokUrl}
+                        onChange={(event) =>
+                          updateSiteConfigField("tiktokUrl", event.target.value)
+                        }
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className={settingsLabelClass}>TikTok Handle</span>
+                      <input
+                        value={siteConfigForm.tiktokHandle}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "tiktokHandle",
+                            event.target.value,
+                          )
+                        }
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className={settingsLabelClass}>
+                        Homepage CTA Label
+                      </span>
+                      <input
+                        value={siteConfigForm.homepageCtaLabel}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "homepageCtaLabel",
+                            event.target.value,
+                          )
+                        }
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className={settingsLabelClass}>
+                        Homepage CTA URL
+                      </span>
+                      <input
+                        value={siteConfigForm.homepageCtaHref}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "homepageCtaHref",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="/contact or https://..."
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className={settingsLabelClass}>APK URL</span>
+                      <input
+                        value={siteConfigForm.apkDownloadUrl}
+                        onChange={(event) =>
+                          updateSiteConfigField(
+                            "apkDownloadUrl",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="https://..."
+                        className={settingsInputClass}
+                      />
+                    </label>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <label className="block">
+                        <span className={settingsLabelClass}>APK Label</span>
+                        <input
+                          value={siteConfigForm.apkDownloadLabel}
+                          onChange={(event) =>
+                            updateSiteConfigField(
+                              "apkDownloadLabel",
+                              event.target.value,
+                            )
+                          }
+                          className={settingsInputClass}
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className={settingsLabelClass}>APK Subtext</span>
+                        <input
+                          value={siteConfigForm.apkDownloadSubLabel}
+                          onChange={(event) =>
+                            updateSiteConfigField(
+                              "apkDownloadSubLabel",
+                              event.target.value,
+                            )
+                          }
+                          className={settingsInputClass}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </form>
           )}
 
           {activeAdminSection === "resources" && (
@@ -3411,6 +5042,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               selectedCohortId={selectedCohortId}
               onSelectCohort={setSelectedCohortId}
               onRefresh={fetchResources}
+              onConfirm={confirmAction}
             />
           )}
 
@@ -3422,24 +5054,25 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               loading={communitySpacesLoading}
               error={communitySpacesError}
               onRefresh={fetchCommunitySpaces}
+              onConfirm={confirmAction}
             />
           )}
 
-          {/* Inbox Modal */}
+          {/* Mobile Chat Modal */}
           <AnimatePresence>
             {showInboxModal && (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="fixed inset-0 z-[70] bg-slate-950/75 backdrop-blur-md p-3 md:p-6"
+                className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/75 p-2 backdrop-blur-md sm:p-3 md:p-6"
               >
                 <motion.div
                   initial={{ opacity: 0, y: 20, scale: 0.985 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 12, scale: 0.985 }}
                   transition={{ duration: 0.2 }}
-                  className="mx-auto h-[92vh] max-w-7xl rounded-[2rem] border border-white/10 bg-white dark:bg-slate-950 shadow-[0_20px_80px_rgba(0,0,0,0.35)] overflow-hidden"
+                  className="mx-auto flex min-h-[96vh] max-w-7xl flex-col overflow-hidden rounded-[1.5rem] border border-white/10 bg-white shadow-[0_20px_80px_rgba(0,0,0,0.35)] dark:bg-slate-950 md:h-[92vh] md:min-h-0 md:rounded-[2rem]"
                 >
                   {/* Top bar */}
                   <div className="relative border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-white via-slate-50 to-blue-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900/70">
@@ -3449,23 +5082,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
 
                     <div className="relative flex flex-col gap-4 px-5 py-5 md:px-7 md:py-6">
-                      <div className="flex items-start justify-between gap-4">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
                           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-pink-50 dark:bg-pink-500/10 border border-pink-100 dark:border-pink-500/20 text-pink-600 dark:text-pink-300 text-[10px] font-black uppercase tracking-[0.18em] mb-3">
-                            <Inbox className="w-3.5 h-3.5" />
-                            Support Inbox
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            Mobile Chat
                           </div>
 
                           <h3 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
-                            Web + Mobile Conversations
+                            Mobile Mentor Conversations
                           </h3>
                           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                            Review enquiries, continue mobile app chats, and
-                            reply without leaving the dashboard.
+                            Continue learner mentor chats from the mobile app
+                            without mixing them with email support.
                           </p>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex shrink-0 items-center gap-2">
                           <button
                             onClick={fetchInboxMessages}
                             className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition inline-flex items-center gap-2"
@@ -3477,7 +5110,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <button
                             onClick={() => setShowInboxModal(false)}
                             className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 transition"
-                            aria-label="Close Inbox"
+                            aria-label="Close Mobile Chat"
                           >
                             <X className="w-5 h-5" />
                           </button>
@@ -3538,9 +5171,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
 
                   {/* Body */}
-                  <div className="grid h-[calc(92vh-158px)] grid-cols-1 xl:grid-cols-[380px_1fr]">
+                  <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[380px_1fr]">
                     {/* Left rail */}
-                    <div className="border-r border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 overflow-hidden">
+                    <div className="max-h-[34vh] overflow-hidden border-b border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/50 xl:max-h-none xl:border-b-0 xl:border-r">
                       <div className="h-full overflow-auto p-4 space-y-3">
                         {inboxError ? (
                           <div className="p-4 rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-200 text-sm font-bold inline-flex items-start gap-3 w-full">
@@ -3550,11 +5183,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         ) : inboxLoading ? (
                           <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 inline-flex items-center gap-3 w-full shadow-sm">
                             <span className="h-4 w-4 rounded-full border-2 border-slate-300 dark:border-slate-600 border-t-blue-600 dark:border-t-teal-400 animate-spin" />
-                            Loading inbox…
+                            Loading mobile chats…
                           </div>
                         ) : filteredInboxMessages.length === 0 ? (
                           <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 shadow-sm">
-                            No messages in this filter.
+                            No mobile chats in this filter.
                           </div>
                         ) : (
                           filteredInboxMessages.map((m) => {
@@ -3566,7 +5199,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             return (
                               <button
                                 key={m.id}
-                                onClick={() => setSelectedInboxId(m.id)}
+                                onClick={() => {
+                                  setSelectedInboxId(m.id);
+                                  if (isUnreadLearnerChat(m)) {
+                                    void markInboxStatus(m.id, "read");
+                                  }
+                                }}
                                 className={`w-full text-left rounded-3xl border p-4 transition-all shadow-sm ${
                                   isSelected
                                     ? "border-blue-200 dark:border-teal-500/30 bg-white dark:bg-slate-900 ring-2 ring-blue-500/10 dark:ring-teal-500/10"
@@ -3636,20 +5274,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
 
                     {/* Right detail */}
-                    <div className="bg-white dark:bg-slate-950 overflow-hidden">
+                    <div className="min-h-0 overflow-hidden bg-white dark:bg-slate-950">
                       <div className="h-full overflow-auto p-5 md:p-7">
                         {!selectedInboxMessage ? (
                           <div className="h-full flex items-center justify-center">
                             <div className="max-w-md text-center">
                               <div className="w-16 h-16 mx-auto rounded-3xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mb-5">
-                                <Mail className="w-7 h-7" />
+                                <MessageSquare className="w-7 h-7" />
                               </div>
                               <h4 className="text-xl font-black text-slate-900 dark:text-white mb-2">
-                                Select a message
+                                Select a mobile chat
                               </h4>
                               <p className="text-slate-500 dark:text-slate-400">
-                                Open a conversation from the left to preview and
-                                manage it.
+                                Open a learner conversation from the left to reply
+                                in-app.
                               </p>
                             </div>
                           </div>
@@ -3659,7 +5297,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <div className="min-w-0">
                                 <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300 mb-4">
                                   <MessageSquare className="w-3.5 h-3.5" />
-                                  Conversation
+                                  Mobile App Thread
                                 </div>
 
                                 <h3 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white break-words">
@@ -3678,19 +5316,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 </p>
                               </div>
 
-                              <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                  onClick={() =>
-                                    copyToClipboard(
-                                      getInboxEmail(selectedInboxMessage) || "",
-                                    )
-                                  }
-                                  className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition inline-flex items-center gap-2"
-                                >
-                                  <Copy className="w-4 h-4" />
-                                  Copy Email
-                                </button>
-
+                              <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
                                 <button
                                   onClick={() =>
                                     markInboxStatus(
@@ -3714,24 +5340,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 >
                                   Resolve
                                 </button>
-
-                                <a
-                                  href={`mailto:${getInboxEmail(selectedInboxMessage)}`}
-                                  onClick={() =>
-                                    markInboxStatus(
-                                      selectedInboxMessage.id,
-                                      "resolved",
-                                    )
-                                  }
-                                  className={`px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition inline-flex items-center gap-2 ${
-                                    getInboxEmail(selectedInboxMessage)
-                                      ? "bg-blue-900 text-white hover:bg-blue-800"
-                                      : "bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed pointer-events-none"
-                                  }`}
-                                >
-                                  <Mail className="w-4 h-4" />
-                                  Email Reply
-                                </a>
 
                                 <button
                                   onClick={() =>
@@ -3768,7 +5376,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                               <div className="rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                  Source
+                                  Channel
                                 </p>
                                 <p className="text-sm font-black text-slate-900 dark:text-white mt-2">
                                   {getInboxSourceLabel(selectedInboxMessage)}
@@ -3777,10 +5385,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                               <div className="rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                  Auth UID
+                                  Student UID
                                 </p>
                                 <p className="text-sm font-black text-slate-900 dark:text-white mt-2 break-all">
-                                  {selectedInboxMessage.auth?.uid ||
+                                  {selectedInboxMessage.studentUid ||
+                                    selectedInboxMessage.auth?.uid ||
                                     "Anonymous"}
                                 </p>
                               </div>
@@ -3810,10 +5419,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     return (
                                       <div
                                         key={entry.id}
-                                        className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}
+                                      className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}
                                       >
                                         <div
-                                          className={`max-w-[85%] rounded-[1.5rem] px-4 py-3 border shadow-sm ${
+                                          className={`max-w-[92%] rounded-[1.5rem] border px-4 py-3 shadow-sm sm:max-w-[85%] ${
                                             isAdmin
                                               ? "bg-blue-900 text-white border-blue-800"
                                               : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800"
@@ -3849,8 +5458,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     Admin Reply
                                   </p>
                                   <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                                    Sends a reply into the conversation thread
-                                    so the mobile app can pick it up.
+                                    Sends a reply into the learner's mobile
+                                    mentor thread.
                                   </p>
                                 </div>
                               </div>
@@ -3869,11 +5478,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 className="w-full rounded-3xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/20 dark:focus:ring-teal-500/20"
                               />
 
-                              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                                 <p className="text-xs text-slate-400">
                                   Replies are stored under{" "}
                                   <span className="font-black text-slate-500 dark:text-slate-300">
-                                    contactMessages/{selectedInboxMessage.id}/messages
+                                    {getInboxThreadCollection(selectedInboxMessage)}/
+                                    {selectedInboxMessage.id}/messages
                                   </span>
                                 </p>
 
@@ -3893,6 +5503,255 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </>
                         )}
                       </div>
+                    </div>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Mail Support Inbox Modal */}
+          <AnimatePresence>
+            {showSupportInboxModal && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/75 p-2 backdrop-blur-md sm:p-3 md:p-6"
+              >
+                <motion.div
+                  initial={{ opacity: 0, y: 20, scale: 0.985 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 12, scale: 0.985 }}
+                  transition={{ duration: 0.2 }}
+                  className="mx-auto flex min-h-[96vh] max-w-6xl flex-col overflow-hidden rounded-[1.5rem] border border-white/10 bg-white shadow-[0_20px_80px_rgba(0,0,0,0.35)] dark:bg-slate-950 md:h-[92vh] md:min-h-0 md:rounded-[2rem]"
+                >
+                  <div className="border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-white via-slate-50 to-blue-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 px-5 py-5 md:px-7">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20 text-blue-600 dark:text-blue-300 text-[10px] font-black uppercase tracking-[0.18em] mb-3">
+                          <Mail className="w-3.5 h-3.5" />
+                          Mail Support Inbox
+                        </div>
+                        <h3 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
+                          Website Contact Messages
+                        </h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                          Email enquiries from the website stay here, separate
+                          from mobile mentor chats.
+                        </p>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button
+                          onClick={fetchSupportMessages}
+                          className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition inline-flex items-center gap-2"
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                          Refresh
+                        </button>
+                        <button
+                          onClick={() => setShowSupportInboxModal(false)}
+                          className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+                          aria-label="Close Support Inbox"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 mt-5">
+                      {[
+                        { key: "all", label: "All", count: supportCounts.all },
+                        { key: "new", label: "New", count: supportCounts.new },
+                        { key: "read", label: "Read", count: supportCounts.read },
+                        {
+                          key: "resolved",
+                          label: "Resolved",
+                          count: supportCounts.resolved,
+                        },
+                      ].map((tab) => {
+                        const active = supportFilter === tab.key;
+                        return (
+                          <button
+                            key={tab.key}
+                            onClick={() =>
+                              setSupportFilter(
+                                tab.key as
+                                  | "all"
+                                  | "new"
+                                  | "read"
+                                  | "resolved",
+                              )
+                            }
+                            className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all inline-flex items-center gap-2 border ${
+                              active
+                                ? "bg-blue-900 dark:bg-blue-600 text-white border-blue-900 dark:border-blue-600 shadow-lg"
+                                : "bg-white/80 dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800"
+                            }`}
+                          >
+                            <span>{tab.label}</span>
+                            <span className="min-w-[22px] h-[22px] px-1 rounded-full text-[10px] flex items-center justify-center bg-white/15">
+                              {tab.count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[360px_1fr]">
+                    <div className="max-h-[34vh] space-y-3 overflow-auto border-b border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/50 lg:max-h-none lg:border-b-0 lg:border-r">
+                      {supportError ? (
+                        <div className="p-4 rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-200 text-sm font-bold">
+                          {supportError}
+                        </div>
+                      ) : supportLoading ? (
+                        <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300">
+                          Loading support inbox…
+                        </div>
+                      ) : filteredSupportMessages.length === 0 ? (
+                        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300">
+                          No support messages in this filter.
+                        </div>
+                      ) : (
+                        filteredSupportMessages.map((m) => {
+                          const isSelected = selectedSupportId === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              onClick={() => setSelectedSupportId(m.id)}
+                              className={`w-full text-left rounded-3xl border p-4 transition-all shadow-sm ${
+                                isSelected
+                                  ? "border-blue-200 dark:border-blue-500/30 bg-white dark:bg-slate-900 ring-2 ring-blue-500/10"
+                                  : "border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/70 hover:border-slate-300 dark:hover:border-slate-700"
+                              }`}
+                            >
+                              <p className="text-sm font-black text-slate-900 dark:text-white truncate">
+                                {getInboxDisplayName(m)}
+                              </p>
+                              <p className="text-xs text-slate-400 font-medium truncate mt-0.5">
+                                {getInboxEmail(m) || "No email"}
+                              </p>
+                              <p className="mt-3 text-[12px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                                {getInboxPreview(m)}
+                              </p>
+                              <p className="text-[10px] font-bold text-slate-400 mt-3">
+                                {formatInboxDate(m.updatedAt || m.createdAt)}
+                              </p>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="min-h-0 overflow-auto bg-white p-5 dark:bg-slate-950 md:p-7">
+                      {!selectedSupportMessage ? (
+                        <div className="h-full flex items-center justify-center text-center">
+                          <div>
+                            <div className="w-16 h-16 mx-auto rounded-3xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mb-5">
+                              <Mail className="w-7 h-7" />
+                            </div>
+                            <h4 className="text-xl font-black text-slate-900 dark:text-white mb-2">
+                              Select a support message
+                            </h4>
+                            <p className="text-slate-500 dark:text-slate-400">
+                              Open an email enquiry from the left to manage it.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5 mb-6">
+                            <div className="min-w-0">
+                              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-500/10 text-[10px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-300 mb-4">
+                                <Mail className="w-3.5 h-3.5" />
+                                Email Support
+                              </div>
+                              <h3 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white break-words">
+                                {getInboxDisplayName(selectedSupportMessage)}
+                              </h3>
+                              <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 break-all">
+                                {getInboxEmail(selectedSupportMessage) ||
+                                  "No email on file"}
+                              </p>
+                              <p className="text-[11px] text-slate-400 font-bold mt-3">
+                                {formatInboxDate(selectedSupportMessage.createdAt)}
+                              </p>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
+                              <button
+                                onClick={() =>
+                                  copyToClipboard(
+                                    getInboxEmail(selectedSupportMessage) || "",
+                                  )
+                                }
+                                className={subtleActionClass}
+                              >
+                                <Copy className="w-4 h-4" />
+                                Copy Email
+                              </button>
+                              <button
+                                onClick={() =>
+                                  markSupportStatus(
+                                    selectedSupportMessage.id,
+                                    "read",
+                                  )
+                                }
+                                className={subtleActionClass}
+                              >
+                                Mark Read
+                              </button>
+                              <button
+                                onClick={() =>
+                                  markSupportStatus(
+                                    selectedSupportMessage.id,
+                                    "resolved",
+                                  )
+                                }
+                                className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-teal-600 text-white hover:bg-teal-500 transition"
+                              >
+                                Resolve
+                              </button>
+                              <a
+                                href={`mailto:${getInboxEmail(selectedSupportMessage)}`}
+                                onClick={() =>
+                                  markSupportStatus(
+                                    selectedSupportMessage.id,
+                                    "resolved",
+                                  )
+                                }
+                                className={`px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition inline-flex items-center gap-2 ${
+                                  getInboxEmail(selectedSupportMessage)
+                                    ? "bg-blue-900 text-white hover:bg-blue-800"
+                                    : "bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed pointer-events-none"
+                                }`}
+                              >
+                                <Mail className="w-4 h-4" />
+                                Email Reply
+                              </a>
+                              <button
+                                onClick={() =>
+                                  deleteSupportMessage(selectedSupportMessage.id)
+                                }
+                                className="px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-red-600 text-white hover:bg-red-500 transition"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-gradient-to-br from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 p-6 shadow-sm">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">
+                              Message
+                            </p>
+                            <p className="text-[15px] leading-8 whitespace-pre-wrap break-words text-slate-700 dark:text-slate-200">
+                              {getInboxPreview(selectedSupportMessage)}
+                            </p>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </motion.div>
@@ -4629,7 +6488,105 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               ) : (
                 <div className={`overflow-hidden ${surfaceCardClass}`}>
-                  <div className="overflow-x-auto">
+                  <div className="space-y-4 p-4 lg:hidden">
+                    {filteredData.length === 0 ? (
+                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300">
+                        No registration records found for this filter.
+                      </div>
+                    ) : (
+                      filteredData.map((reg) => {
+                        const regPathTitle = (reg as any).pathId
+                          ? pathsById.get(String((reg as any).pathId))?.title
+                          : null;
+
+                        return (
+                          <div key={`${reg.uid}-mobile-reg`} className={adminMobileRecordClass}>
+                            <div className="flex items-start gap-3">
+                              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-900 text-sm font-black text-white dark:bg-teal-600">
+                                {reg.fullName?.charAt(0)}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="font-black leading-tight text-slate-900 dark:text-white">
+                                      {reg.fullName}
+                                    </p>
+                                    <p className="mt-1 break-all text-xs font-medium text-slate-500 dark:text-slate-400">
+                                      {reg.email}
+                                    </p>
+                                  </div>
+                                  {(reg as any).pendingPayment ? (
+                                    <span className="rounded-full bg-purple-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-purple-700 dark:bg-purple-500/10 dark:text-purple-200">
+                                      Pending Pay
+                                    </span>
+                                  ) : null}
+                                </div>
+
+                                <p className="mt-2 text-[11px] font-bold text-slate-400">
+                                  {reg.phone} · {reg.gender}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              <div>
+                                <p className={adminFieldLabelClass}>Path</p>
+                                <p className={adminFieldValueClass}>
+                                  {regPathTitle || reg.path}
+                                </p>
+                                {(reg as any).pathId ? (
+                                  <p className="mt-1 break-all text-[10px] font-bold text-slate-400">
+                                    ID: {String((reg as any).pathId)}
+                                  </p>
+                                ) : null}
+                              </div>
+                              <div>
+                                <p className={adminFieldLabelClass}>Duration</p>
+                                <p className={adminFieldValueClass}>
+                                  {reg.weeksToCommit} Weeks
+                                </p>
+                              </div>
+                              <div>
+                                <p className={adminFieldLabelClass}>Total Price</p>
+                                <p className="mt-1 text-sm font-black text-teal-600 dark:text-teal-300">
+                                  ₦{Number(reg.totalPrice || 0).toLocaleString()}
+                                </p>
+                              </div>
+                              <div>
+                                <p className={adminFieldLabelClass}>
+                                  Payment Status
+                                </p>
+                                <button
+                                  onClick={() =>
+                                    handleToggleStatus(reg.uid, reg.status)
+                                  }
+                                  className={`mt-2 rounded-full border px-3 py-1 text-[9px] font-black uppercase tracking-widest transition-colors ${
+                                    reg.status === "Complete"
+                                      ? "border-teal-200 bg-teal-50 text-teal-600 dark:border-teal-800 dark:bg-teal-900/30 dark:text-teal-300"
+                                      : "border-orange-200 bg-orange-50 text-orange-600 dark:border-orange-800 dark:bg-orange-900/30 dark:text-orange-300"
+                                  }`}
+                                >
+                                  {reg.status}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="mt-5 flex justify-end">
+                              <button
+                                onClick={() => handleDelete(reg.uid)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-black uppercase tracking-widest text-red-600 transition hover:bg-red-100 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="hidden overflow-x-auto lg:block">
                     <table className="w-full text-left">
                       <thead className="bg-gray-50 dark:bg-slate-800/50 border-b border-gray-100 dark:border-slate-800">
                         <tr>

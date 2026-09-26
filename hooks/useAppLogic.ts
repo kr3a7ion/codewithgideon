@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { View } from "../src/App";
+import { coursePathFromValue } from "../utils/courseRoutes";
 import {
   RegistrationEntry,
   registrationStore,
@@ -18,6 +20,68 @@ const ADMIN_SESSION_KEY = "cwg_admin_session_active";
 const ADMIN_SESSION_PENDING = "pending";
 const ADMIN_SESSION_ACTIVE = "active";
 const ADMIN_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+
+const viewRoutes: Record<View, string> = {
+  home: "/",
+  contact: "/contact",
+  privacy: "/privacy",
+  terms: "/terms",
+  refund: "/refund",
+  curriculums: "/courses",
+  "course-detail": "/courses",
+  "path-flutter": "/courses/flutter-mobile-app-development",
+  "path-web": "/courses/web-development-wordpress",
+  "path-ai": "/courses/ai-assisted-development",
+  registration: "/register",
+  payment: "/student/payment",
+  "student-login": "/student/login",
+  "student-dashboard": "/student/dashboard",
+  "admin-login": "/admin/login",
+  "admin-dashboard": "/admin",
+  "create-account": "/register",
+  "continue-registration": "/student/register",
+  "verify-email": "/student/verify-email",
+};
+
+const cleanPathname = (pathname: string) => {
+  const cleaned = String(pathname || "/").replace(/\/+$/, "");
+  return cleaned || "/";
+};
+
+const viewFromPathname = (pathname: string): View => {
+  const path = cleanPathname(pathname);
+
+  if (path === "/") return "home";
+  if (path === "/contact") return "contact";
+  if (path === "/privacy") return "privacy";
+  if (path === "/terms") return "terms";
+  if (path === "/refund") return "refund";
+  if (path === "/courses") return "curriculums";
+  if (path.startsWith("/courses/")) return "course-detail";
+  if (path === "/register") return "create-account";
+  if (path === "/student/login") return "student-login";
+  if (path === "/student/register") return "continue-registration";
+  if (path === "/student/verify-email") return "verify-email";
+  if (path === "/student/payment") return "payment";
+  if (
+    path === "/student/dashboard" ||
+    path === "/student/classes" ||
+    path === "/student/resources" ||
+    path === "/student/community" ||
+    path === "/student/chat" ||
+    path === "/student/notifications" ||
+    path === "/student/badges"
+  ) {
+    return "student-dashboard";
+  }
+  if (path === "/admin/login") return "admin-login";
+  if (path === "/admin" || path.startsWith("/admin/")) return "admin-dashboard";
+
+  return "home";
+};
+
+const normalizeView = (view: View): View =>
+  view === "registration" ? "create-account" : view;
 
 type VerificationState = {
   role: "admin" | "student";
@@ -84,7 +148,11 @@ const describeStudentAuthError = (err: any) => {
 };
 
 export const useAppLogic = () => {
-  const [currentView, setCurrentView] = useState<View>("home");
+  const routerNavigate = useNavigate();
+  const location = useLocation();
+  const [currentView, setCurrentView] = useState<View>(() =>
+    viewFromPathname(location.pathname),
+  );
   const [selectedPath, setSelectedPath] = useState("");
   const [activeRegistration, setActiveRegistration] =
     useState<RegistrationEntry | null>(null);
@@ -108,6 +176,29 @@ export const useAppLogic = () => {
     setVerificationState(null);
   };
 
+  const syncUrlForView = (
+    view: View,
+    mode: "push" | "replace" = "push",
+    extraData?: unknown,
+  ) => {
+    const nextView = normalizeView(view);
+    const nextPath =
+      nextView === "course-detail"
+        ? coursePathFromValue(
+            typeof extraData === "object" && extraData
+              ? (extraData as any)
+              : { slug: String(extraData || "") },
+          )
+        : viewRoutes[nextView] || "/";
+    const currentPath = cleanPathname(location.pathname);
+    if (currentPath === nextPath) return;
+
+    routerNavigate(nextPath, {
+      replace: mode === "replace",
+      state: { view: nextView, extraData },
+    });
+  };
+
   const hydrateRegistrationFromHandoff = () => {
     const raw = localStorage.getItem(HANDOFF_KEY);
     const data = safeJsonParse(raw);
@@ -123,7 +214,9 @@ export const useAppLogic = () => {
   };
 
   const navigateTo = (view: View, extraData?: any) => {
-    if (view === "payment") {
+    const nextView = normalizeView(view);
+
+    if (nextView === "payment") {
       if (extraData) {
         if (extraData?.userData?.uid) {
           setActiveRegistration(extraData.userData);
@@ -141,7 +234,8 @@ export const useAppLogic = () => {
       setSelectedPath(extraData);
     }
 
-    setCurrentView(view);
+    syncUrlForView(nextView, "push", extraData);
+    setCurrentView(nextView);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -171,6 +265,7 @@ export const useAppLogic = () => {
       ) {
         await signOut(auth);
         clearAuthBuckets();
+        syncUrlForView("admin-login", "replace");
         setCurrentView("admin-login");
         return;
       }
@@ -227,7 +322,13 @@ export const useAppLogic = () => {
   }, []);
 
   useEffect(() => {
+    setCurrentView(viewFromPathname(location.pathname));
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [location.pathname]);
+
+  useEffect(() => {
     if (verificationState && currentView !== "verify-email") {
+      syncUrlForView("verify-email", "replace");
       setCurrentView("verify-email");
     }
   }, [verificationState, currentView]);
@@ -261,8 +362,12 @@ export const useAppLogic = () => {
         sessionStorage.removeItem(ADMIN_SESSION_KEY);
         await signOut(auth);
         clearAuthBuckets();
+        sessionStorage.setItem(
+          "cwg_admin_notice",
+          "Admin session expired after 30 minutes of inactivity. Please sign in again.",
+        );
+        syncUrlForView("admin-login", "replace");
         setCurrentView("admin-login");
-        window.alert("Admin session expired after 30 minutes of inactivity.");
       }, ADMIN_IDLE_TIMEOUT_MS);
     };
 

@@ -1,0 +1,469 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isNumber(x) {
+      return (x is int) || (x is float);
+    }
+
+    function ownsUserDoc(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function hasUserProfile() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function studentProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isCompleteStudent() {
+      return hasUserProfile()
+        && studentProfile().status == "Complete"
+        && !("pendingPayment" in studentProfile());
+    }
+
+    function ownsCohort(cohortId) {
+      return hasUserProfile()
+        && (
+          studentProfile().cohortKey == cohortId
+          || studentProfile().cohortId == cohortId
+        );
+    }
+
+    function studentMatchesSessionPath(sessionData) {
+      return (
+          !("pathId" in sessionData)
+          || !("pathId" in studentProfile())
+          || sessionData.pathId == studentProfile().pathId
+        )
+        && (
+          ("pathId" in sessionData)
+          || !("path" in sessionData)
+          || sessionData.path == studentProfile().path
+        );
+    }
+
+    match /admins/{adminId} {
+      allow read: if ownsUserDoc(adminId);
+      allow write: if false;
+    }
+
+    function validPath(d) {
+      return d is map
+        && d.keys().hasOnly(["title", "isActive", "createdAt", "updatedAt"])
+        && d.title is string && d.title.size() >= 2
+        && (!("isActive" in d) || d.isActive is bool)
+        && isNumber(d.createdAt)
+        && isNumber(d.updatedAt);
+    }
+
+    match /paths/{pathId} {
+      allow read: if true;
+      allow create: if isAdmin() && validPath(request.resource.data);
+      allow update: if isAdmin()
+        && validPath(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+
+    function validSyllabusWeek(w) {
+      return w is map
+        && w.keys().hasOnly(["week", "title", "topics"])
+        && w.week is int
+        && w.week >= 1
+        && w.week <= 52
+        && w.title is string
+        && w.title.size() >= 1
+        && w.topics is list
+        && w.topics.size() <= 50;
+    }
+
+    function validSyllabusList(listVal) {
+      return (listVal is list)
+        && listVal.size() <= 52
+        && (listVal.size() == 0
+          || (
+            validSyllabusWeek(listVal[0])
+            && (listVal.size() < 2 || validSyllabusWeek(listVal[1]))
+            && (listVal.size() < 3 || validSyllabusWeek(listVal[2]))
+            && (listVal.size() < 4 || validSyllabusWeek(listVal[3]))
+            && (listVal.size() < 5 || validSyllabusWeek(listVal[4]))
+            && (listVal.size() < 6 || validSyllabusWeek(listVal[5]))
+            && (listVal.size() < 7 || validSyllabusWeek(listVal[6]))
+            && (listVal.size() < 8 || validSyllabusWeek(listVal[7]))
+            && (listVal.size() < 9 || validSyllabusWeek(listVal[8]))
+            && (listVal.size() < 10 || validSyllabusWeek(listVal[9]))
+          )
+        );
+    }
+
+    function validCourse(data) {
+      return data is map
+        && data.keys().hasOnly([
+          "pathId",
+          "title", "duration", "sessions", "level", "description",
+          "priceLabel", "imageUrl", "syllabusView",
+          "isActive", "createdAt", "updatedAt",
+          "weeks", "pricePerWeek", "syllabus",
+          "showOnLanding", "showInExplore"
+        ])
+        && data.title is string && data.title.size() >= 3
+        && data.duration is string && data.duration.size() >= 2
+        && data.sessions is string && data.sessions.size() >= 2
+        && data.level is string && data.level.size() >= 3
+        && data.description is string && data.description.size() >= 3
+        && data.isActive is bool
+        && isNumber(data.createdAt)
+        && isNumber(data.updatedAt)
+        && (!("pathId" in data) || data.pathId is string)
+        && (!("priceLabel" in data) || data.priceLabel is string)
+        && (!("imageUrl" in data) || data.imageUrl is string)
+        && (!("syllabusView" in data) || data.syllabusView is string)
+        && (!("showOnLanding" in data) || data.showOnLanding is bool)
+        && (!("showInExplore" in data) || data.showInExplore is bool)
+        && (!("weeks" in data) || (data.weeks is int && data.weeks >= 1 && data.weeks <= 52))
+        && (!("pricePerWeek" in data) || (isNumber(data.pricePerWeek) && data.pricePerWeek >= 0))
+        && (!("syllabus" in data) || validSyllabusList(data.syllabus));
+    }
+
+    match /courses/{courseId} {
+      allow read: if true;
+      allow create: if isAdmin() && validCourse(request.resource.data);
+      allow update: if isAdmin()
+        && validCourse(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+
+    function validResource(data) {
+      return data is map
+        && data.keys().hasOnly([
+          "name", "type", "size", "folder", "url", "description",
+          "pathId", "courseId", "sessionId", "sessionWeek",
+          "isPublished", "createdAt", "updatedAt"
+        ])
+        && data.name is string && data.name.size() >= 2
+        && data.type is string && data.type.size() >= 2
+        && data.size is string
+        && data.folder is string && data.folder.size() >= 1
+        && data.url is string && data.url.size() >= 8
+        && data.isPublished is bool
+        && isNumber(data.createdAt)
+        && isNumber(data.updatedAt)
+        && (!("description" in data) || data.description is string)
+        && (!("pathId" in data) || data.pathId is string)
+        && (!("courseId" in data) || data.courseId is string)
+        && (!("sessionId" in data) || data.sessionId is string)
+        && (!("sessionWeek" in data) || (data.sessionWeek is int && data.sessionWeek >= 1 && data.sessionWeek <= 52));
+    }
+
+    match /resources/{resourceId} {
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.isPublished == true);
+      allow create: if isAdmin() && validResource(request.resource.data);
+      allow update: if isAdmin()
+        && validResource(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+
+    function validCommunitySpace(data) {
+      return data is map
+        && data.keys().hasOnly([
+          "title", "description",
+          "cohortId", "cohortLabel",
+          "pathId", "roomUrl", "ctaLabel",
+          "category", "icon",
+          "isPublished", "sortOrder",
+          "createdAt", "updatedAt"
+        ])
+        && data.title is string && data.title.size() >= 2
+        && data.description is string && data.description.size() >= 8
+        && data.isPublished is bool
+        && data.sortOrder is int
+        && data.sortOrder >= 0
+        && isNumber(data.createdAt)
+        && isNumber(data.updatedAt)
+        && (!("cohortId" in data) || data.cohortId is string)
+        && (!("cohortLabel" in data) || data.cohortLabel is string)
+        && (!("pathId" in data) || data.pathId is string)
+        && (!("roomUrl" in data) || data.roomUrl is string)
+        && (!("ctaLabel" in data) || data.ctaLabel is string)
+        && (!("category" in data) || data.category is string)
+        && (!("icon" in data) || data.icon is string);
+    }
+
+    match /communitySpaces/{spaceId} {
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.isPublished == true);
+      allow create: if isAdmin() && validCommunitySpace(request.resource.data);
+      allow update: if isAdmin()
+        && validCommunitySpace(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    function validActiveCohortMap(d) {
+      return d is map
+        && d.keys().hasOnly([
+          "pathId",
+          "path", "pathKey", "cohortId", "seasonKey", "cohortKey", "label", "updatedAt"
+        ])
+        && (!("pathId" in d) || d.pathId is string)
+        && d.path is string && d.path.size() >= 2
+        && d.pathKey is string && d.pathKey.size() >= 2
+        && d.cohortId is string && d.cohortId.size() >= 2
+        && d.seasonKey is string && d.seasonKey.size() >= 4
+        && d.cohortKey is string && d.cohortKey.size() >= 4
+        && d.label is string && d.label.size() >= 2
+        && (!("updatedAt" in d) || d.updatedAt is timestamp);
+    }
+
+    match /activeCohorts/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin() && validActiveCohortMap(request.resource.data);
+    }
+
+    match /contactMessages/{messageId} {
+      allow create: if false;
+      allow read: if isAdmin()
+        || (signedIn() && request.auth.uid == resource.data.studentUid);
+      allow update, delete: if isAdmin();
+
+      match /messages/{replyId} {
+        allow read: if isAdmin()
+          || (
+            signedIn()
+            && request.auth.uid == get(/databases/$(database)/documents/contactMessages/$(messageId)).data.studentUid
+          );
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
+    match /mentorThreads/{threadId} {
+      allow read: if isAdmin()
+        || (signedIn() && request.auth.uid == resource.data.studentUid);
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (
+          signedIn()
+          && request.auth.uid == resource.data.studentUid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "status", "studentLastReadAt", "updatedAt"
+          ])
+          && request.resource.data.studentUid == resource.data.studentUid
+          && request.resource.data.threadType == resource.data.threadType
+        );
+
+      match /messages/{messageId} {
+        allow read: if isAdmin()
+          || (
+            signedIn()
+            && request.auth.uid == get(/databases/$(database)/documents/mentorThreads/$(threadId)).data.studentUid
+          );
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
+    function validPendingPayment(p) {
+      return p is map
+        && p.keys().hasOnly(["kind", "status", "weeks", "amount", "reference", "createdAt"])
+        && (p.kind == "initial" || p.kind == "topup")
+        && p.status == "Pending"
+        && p.weeks is int && p.weeks >= 1 && p.weeks <= 52
+        && isNumber(p.amount) && p.amount >= 0
+        && p.reference is string && p.reference.size() >= 6
+        && isNumber(p.createdAt);
+    }
+
+    function validNotificationRead(d, userId) {
+      return d is map
+        && d.keys().hasOnly([
+          "uid", "cohortKey", "messageId", "readAt", "updatedAt"
+        ])
+        && d.uid == userId
+        && d.cohortKey is string && d.cohortKey.size() >= 2
+        && d.messageId is string && d.messageId.size() >= 2
+        && d.readAt is timestamp
+        && d.updatedAt is timestamp;
+    }
+
+    function validStudentProfile(d, userId) {
+      return d is map
+        && d.keys().hasOnly([
+          "uid", "role", "status", "timestamp",
+          "fullName", "email", "phone", "ageRange", "gender",
+          "weeksToCommit", "totalPrice", "path",
+          "pathId", "courseId",
+          "cohortId", "cohortLabel", "cohortKey",
+          "courseDurationWeeks", "weeklyRate",
+          "pendingPayment",
+          "updatedAt"
+        ])
+        && d.uid == userId
+        && d.role == "student"
+        && (d.status == "Pending" || d.status == "Complete")
+        && isNumber(d.timestamp)
+        && d.fullName is string && d.fullName.size() >= 2
+        && d.email is string && d.email.size() >= 5
+        && d.phone is string && d.phone.size() >= 6
+        && d.ageRange is string && d.ageRange.size() >= 1
+        && d.gender is string && d.gender.size() >= 1
+        && d.weeksToCommit is int && d.weeksToCommit >= 1 && d.weeksToCommit <= 52
+        && isNumber(d.totalPrice) && d.totalPrice >= 0
+        && d.path is string && d.path.size() >= 2
+        && (!("pathId" in d) || (d.pathId is string && d.pathId.size() >= 2))
+        && (!("courseId" in d) || (d.courseId is string && d.courseId.size() >= 2))
+        && (!("cohortId" in d) || (d.cohortId is string && d.cohortId.size() >= 2))
+        && (!("cohortLabel" in d) || (d.cohortLabel is string && d.cohortLabel.size() >= 2))
+        && (!("cohortKey" in d) || (d.cohortKey is string && d.cohortKey.size() >= 2))
+        && (!("courseDurationWeeks" in d) || (d.courseDurationWeeks is int && d.courseDurationWeeks >= 1 && d.courseDurationWeeks <= 52))
+        && (!("weeklyRate" in d) || (isNumber(d.weeklyRate) && d.weeklyRate >= 0))
+        && (!("pendingPayment" in d) || validPendingPayment(d.pendingPayment))
+        && (!("updatedAt" in d) || isNumber(d.updatedAt));
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+
+      allow create: if ownsUserDoc(userId)
+        && validStudentProfile(request.resource.data, userId)
+        && request.resource.data.status == "Pending";
+
+      allow update: if isAdmin()
+        || (
+          ownsUserDoc(userId)
+          && validStudentProfile(request.resource.data, userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "pendingPayment",
+            "cohortId", "cohortLabel", "cohortKey",
+            "updatedAt"
+          ])
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.timestamp == resource.data.timestamp
+          && request.resource.data.fullName == resource.data.fullName
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.phone == resource.data.phone
+          && request.resource.data.ageRange == resource.data.ageRange
+          && request.resource.data.gender == resource.data.gender
+          && request.resource.data.weeksToCommit == resource.data.weeksToCommit
+          && request.resource.data.totalPrice == resource.data.totalPrice
+          && request.resource.data.path == resource.data.path
+          && (!("pendingPayment" in request.resource.data)
+            || validPendingPayment(request.resource.data.pendingPayment))
+        );
+
+      allow delete: if isAdmin();
+
+      match /payments/{paymentId} {
+        allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+        allow create, update, delete: if isAdmin();
+      }
+
+      match /notificationReads/{readId} {
+        allow read: if ownsUserDoc(userId) || isAdmin();
+        allow create, update: if ownsUserDoc(userId)
+          && validNotificationRead(request.resource.data, userId)
+          && (
+            !exists(/databases/$(database)/documents/users/$(userId)/notificationReads/$(readId))
+            || request.resource.data.uid == resource.data.uid
+          );
+        allow delete: if ownsUserDoc(userId) || isAdmin();
+      }
+    }
+
+    function validSession(s) {
+      return s is map
+        && s.keys().hasOnly([
+          "week", "path", "pathId",
+          "isPublished", "title", "startsAt", "endsAt",
+          "joinUrl", "recordingUrl", "durationMins", "notes", "createdAt", "updatedAt"
+        ])
+        && s.week is int && s.week >= 1 && s.week <= 52
+        && s.path is string && s.path.size() >= 2
+        && (!("pathId" in s) || s.pathId is string)
+        && s.isPublished is bool
+        && s.title is string && s.title.size() >= 3
+        && s.startsAt is timestamp
+        && (!("endsAt" in s) || s.endsAt is timestamp)
+        && (!("joinUrl" in s) || s.joinUrl is string)
+        && (!("recordingUrl" in s) || s.recordingUrl is string)
+        && (!("notes" in s) || s.notes is string)
+        && (!("durationMins" in s) || (s.durationMins is int && s.durationMins >= 15 && s.durationMins <= 600))
+        && isNumber(s.createdAt)
+        && isNumber(s.updatedAt);
+    }
+
+    function validCohortMessage(m, cohortId) {
+      return m is map
+        && m.keys().hasOnly([
+          "cohortId", "cohortLabel",
+          "title", "body",
+          "ctaLabel", "ctaUrl",
+          "sentBy", "sentAt", "createdAt", "status"
+        ])
+        && m.cohortId is string
+        && m.cohortId == cohortId
+        && m.cohortLabel is string && m.cohortLabel.size() >= 2
+        && m.title is string && m.title.size() >= 3
+        && m.body is string && m.body.size() >= 5
+        && (!("ctaLabel" in m) || m.ctaLabel is string)
+        && (!("ctaUrl" in m) || m.ctaUrl is string)
+        && (!("sentBy" in m) || m.sentBy is string)
+        && m.sentAt is timestamp
+        && isNumber(m.createdAt)
+        && m.status == "sent";
+    }
+
+    match /cohorts/{cohortId} {
+      allow read: if true;
+      allow write: if isAdmin();
+
+      match /sessions/{sessionId} {
+        allow read: if isAdmin()
+          || (
+            isCompleteStudent()
+            && ownsCohort(cohortId)
+            && resource.data.isPublished == true
+            && resource.data.week <= studentProfile().weeksToCommit
+            && studentMatchesSessionPath(resource.data)
+          );
+        allow create: if isAdmin() && validSession(request.resource.data);
+        allow update: if isAdmin()
+          && validSession(request.resource.data)
+          && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isAdmin();
+      }
+
+      match /messages/{messageId} {
+        allow read: if isAdmin()
+          || (signedIn() && ownsCohort(cohortId));
+        allow create: if isAdmin() && validCohortMessage(request.resource.data, cohortId);
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

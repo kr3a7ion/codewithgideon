@@ -24,6 +24,12 @@ interface AdminCommunitySpacesPanelProps {
   loading: boolean;
   error?: string;
   onRefresh: () => Promise<void>;
+  onConfirm: (options: {
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    tone?: "danger" | "warning" | "info";
+  }) => Promise<boolean>;
 }
 
 type SpaceForm = {
@@ -76,6 +82,7 @@ const AdminCommunitySpacesPanel: React.FC<AdminCommunitySpacesPanelProps> = ({
   loading,
   error: loadError = "",
   onRefresh,
+  onConfirm,
 }) => {
   const [form, setForm] = useState<SpaceForm>(emptyForm);
   const [editingSpace, setEditingSpace] = useState<CommunitySpaceDoc | null>(null);
@@ -165,7 +172,13 @@ const AdminCommunitySpacesPanel: React.FC<AdminCommunitySpacesPanelProps> = ({
   };
 
   const handleDelete = async (space: CommunitySpaceDoc) => {
-    if (!confirm(`Delete "${space.title}"? This cannot be undone.`)) return;
+    const ok = await onConfirm({
+      title: "Delete community space?",
+      message: `Delete "${space.title}" from the student community list?`,
+      confirmLabel: "Delete Space",
+      tone: "danger",
+    });
+    if (!ok) return;
 
     setBusyId(space.id);
     try {

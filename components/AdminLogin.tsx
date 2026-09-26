@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ShieldCheck,
@@ -27,7 +27,16 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onNavigate, onLogin }) => {
 
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const savedNotice = sessionStorage.getItem("cwg_admin_notice") || "";
+    if (savedNotice) {
+      setNotice(savedNotice);
+      sessionStorage.removeItem("cwg_admin_notice");
+    }
+  }, []);
 
   const InlineSpinner = useMemo(
     () =>
@@ -80,6 +89,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onNavigate, onLogin }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setNotice("");
 
     const cleanEmail = email.trim().toLowerCase();
 
@@ -198,6 +208,21 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onNavigate, onLogin }) => {
             </div>
 
             <AnimatePresence mode="wait">
+              {notice && !error && (
+                <motion.div
+                  key="admin-notice"
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/30 rounded-2xl flex items-start gap-3"
+                >
+                  <ShieldCheck className="text-blue-500 w-5 h-5 shrink-0 mt-0.5" />
+                  <p className="text-blue-700 dark:text-blue-300 text-sm font-medium leading-relaxed">
+                    {notice}
+                  </p>
+                </motion.div>
+              )}
+
               {error && (
                 <motion.div
                   key="admin-error"

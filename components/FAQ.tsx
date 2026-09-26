@@ -16,7 +16,7 @@ const faqData: FAQItem[] = [
   },
   {
     question: "How do payments work?",
-    answer: "We use a flexible weekly payment model. You pay ₦10,000 at the start of each week. There are no hidden charges and you can stop or resume your learning journey at any time."
+    answer: "We use a flexible weekly payment model. Choose the number of weeks you want to unlock, then pay the current weekly rate shown during registration. Paystack may add gateway charges at checkout."
   },
   {
     question: "What happens if I miss a class?",

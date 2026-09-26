@@ -24,6 +24,18 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       target: "es2022", // Supports top-level await (Chrome 89+)
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return undefined;
+            if (id.includes("firebase")) return "vendor-firebase";
+            if (id.includes("framer-motion")) return "vendor-motion";
+            if (id.includes("lucide-react")) return "vendor-icons";
+            if (id.includes("react")) return "vendor-react";
+            return "vendor";
+          },
+        },
+      },
     },
     esbuild: {
       target: "es2022",

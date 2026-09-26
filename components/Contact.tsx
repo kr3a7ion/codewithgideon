@@ -15,67 +15,9 @@ import {
   CheckCircle2,
   AlertCircle,
 } from "lucide-react";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { db, functions } from "../services/firebase";
+import { functions } from "../services/firebase";
 import { httpsCallable } from "firebase/functions";
-
-const CONTACT_CONFIG = {
-  heading: "Contact Us",
-  subheading: "We’d love to hear from you.",
-  introTitle: "Get in Touch",
-  introText:
-    "If you have questions about weekly billing, enrollment, or the CodeWithGideon app, feel free to reach out. We typically respond within 24 hours.",
-
-  email: "codewithgideon.learn@gmail.com",
-  instagramUrl: "https://www.instagram.com/c0dewithgideon",
-  instagramHandle: "@c0dewithgideon",
-  tiktokUrl: "https://www.tiktok.com/@codewithgideon",
-  tiktokHandle: "@codewithgideon",
-  whatsappUrl:
-    "https://api.whatsapp.com/message/NMQR2ZKNJTZBL1?autoload=1&app_absent=0",
-
-  responseTime: "Typically within 24 hours",
-  supportTopics: ["Enrollment", "Billing", "App Access"],
-};
-
-const contactCards = [
-  {
-    label: "Email",
-    value: CONTACT_CONFIG.email,
-    href: `mailto:${CONTACT_CONFIG.email}`,
-    icon: Mail,
-    accent:
-      "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border-blue-100 dark:border-blue-900/30",
-    hover: "hover:text-blue-600 dark:hover:text-blue-400",
-  },
-  {
-    label: "Instagram",
-    value: `Instagram: ${CONTACT_CONFIG.instagramHandle}`,
-    href: CONTACT_CONFIG.instagramUrl,
-    icon: Instagram,
-    accent:
-      "bg-pink-50 dark:bg-pink-900/20 text-pink-700 dark:text-pink-300 border-pink-100 dark:border-pink-900/30",
-    hover: "hover:text-pink-600 dark:hover:text-pink-400",
-  },
-  {
-    label: "TikTok",
-    value: `TikTok: ${CONTACT_CONFIG.tiktokHandle}`,
-    href: CONTACT_CONFIG.tiktokUrl,
-    icon: Smartphone,
-    accent:
-      "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700",
-    hover: "hover:text-slate-900 dark:hover:text-white",
-  },
-  {
-    label: "WhatsApp",
-    value: "Direct Chat",
-    href: CONTACT_CONFIG.whatsappUrl,
-    icon: MessageCircle,
-    accent:
-      "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border-green-100 dark:border-green-900/30",
-    hover: "hover:text-green-600 dark:hover:text-green-400",
-  },
-];
+import { useSiteConfig } from "../hooks/useSiteConfig";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 18 },
@@ -83,6 +25,7 @@ const fadeUp = {
 };
 
 const Contact: React.FC = () => {
+  const { config } = useSiteConfig();
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -98,6 +41,45 @@ const Contact: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [submitSuccess, setSubmitSuccess] = useState("");
+
+  const contactCards = [
+    {
+      label: "Email",
+      value: config.contactEmail,
+      href: `mailto:${config.contactEmail}`,
+      icon: Mail,
+      accent:
+        "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border-blue-100 dark:border-blue-900/30",
+      hover: "hover:text-blue-600 dark:hover:text-blue-400",
+    },
+    {
+      label: "Instagram",
+      value: `Instagram: ${config.instagramHandle}`,
+      href: config.instagramUrl,
+      icon: Instagram,
+      accent:
+        "bg-pink-50 dark:bg-pink-900/20 text-pink-700 dark:text-pink-300 border-pink-100 dark:border-pink-900/30",
+      hover: "hover:text-pink-600 dark:hover:text-pink-400",
+    },
+    {
+      label: "TikTok",
+      value: `TikTok: ${config.tiktokHandle}`,
+      href: config.tiktokUrl,
+      icon: Smartphone,
+      accent:
+        "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700",
+      hover: "hover:text-slate-900 dark:hover:text-white",
+    },
+    {
+      label: "WhatsApp",
+      value: "Direct Chat",
+      href: config.whatsappUrl,
+      icon: MessageCircle,
+      accent:
+        "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border-green-100 dark:border-green-900/30",
+      hover: "hover:text-green-600 dark:hover:text-green-400",
+    },
+  ];
 
   const validate = () => {
     const nextErrors: {
@@ -222,10 +204,10 @@ const Contact: React.FC = () => {
             </div>
 
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-slate-900 dark:text-white tracking-tight mb-4">
-              {CONTACT_CONFIG.heading}
+              {config.contactHeading}
             </h1>
             <p className="text-lg md:text-xl text-slate-500 dark:text-slate-400 max-w-2xl mx-auto">
-              {CONTACT_CONFIG.subheading}
+              {config.contactSubheading}
             </p>
           </motion.div>
 
@@ -236,11 +218,11 @@ const Contact: React.FC = () => {
               className="rounded-[2rem] md:rounded-[2.5rem] border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 md:p-8 shadow-xl"
             >
               <h2 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white mb-4">
-                {CONTACT_CONFIG.introTitle}
+                {config.contactIntroTitle}
               </h2>
 
               <p className="text-slate-600 dark:text-slate-400 leading-relaxed mb-8 text-base md:text-lg">
-                {CONTACT_CONFIG.introText}
+                {config.contactIntroText}
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
@@ -250,7 +232,7 @@ const Contact: React.FC = () => {
                     Response Time
                   </div>
                   <p className="text-sm font-bold text-slate-900 dark:text-white">
-                    {CONTACT_CONFIG.responseTime}
+                    {config.responseTime}
                   </p>
                 </div>
 
@@ -260,7 +242,7 @@ const Contact: React.FC = () => {
                     Common Topics
                   </div>
                   <p className="text-sm font-bold text-slate-900 dark:text-white">
-                    {CONTACT_CONFIG.supportTopics.join(" • ")}
+                    {config.supportTopics.join(" • ")}
                   </p>
                 </div>
               </div>
@@ -322,8 +304,8 @@ const Contact: React.FC = () => {
                   Quick Query
                 </h3>
                 <p className="text-slate-500 dark:text-slate-400">
-                  Fill this form and connect it to your preferred contact
-                  handler.
+                  Send a message to the support desk. We will reply through the
+                  email address you provide.
                 </p>
               </div>
 

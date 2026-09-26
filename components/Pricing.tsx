@@ -1,11 +1,57 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View } from '../src/App';
+import { CourseDoc, registrationStore } from '../services/registrationStore';
 
 interface PricingProps {
   onNavigate: (view: View) => void;
 }
 
 const Pricing: React.FC<PricingProps> = ({ onNavigate }) => {
+  const [courses, setCourses] = useState<CourseDoc[]>([]);
+  const [loadingCourses, setLoadingCourses] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      try {
+        const list = await registrationStore.getCourses();
+        if (mounted) setCourses(list || []);
+      } catch (error) {
+        console.error('Failed to load pricing courses:', error);
+        if (mounted) setCourses([]);
+      } finally {
+        if (mounted) setLoadingCourses(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const activeCourses = useMemo(
+    () =>
+      courses.filter(
+        (course) =>
+          course.isActive !== false && (course as any).showOnLanding !== false,
+      ),
+    [courses],
+  );
+
+  const startingWeeklyPrice = useMemo(() => {
+    const prices = activeCourses
+      .map((course) => Number((course as any).pricePerWeek || 0))
+      .filter((price) => Number.isFinite(price) && price > 0);
+
+    return prices.length ? Math.min(...prices) : null;
+  }, [activeCourses]);
+
+  const courseNames = activeCourses
+    .slice(0, 3)
+    .map((course) => course.title)
+    .filter(Boolean);
+
   return (
     <section id="pricing" className="py-24 bg-white dark:bg-slate-900 transition-colors scroll-mt-24">
       <div className="max-w-7xl mx-auto px-6">
@@ -26,14 +72,29 @@ const Pricing: React.FC<PricingProps> = ({ onNavigate }) => {
               <div className="md:w-2/5 p-10 bg-blue-900 dark:bg-slate-950 text-white flex flex-col justify-center text-center">
                 <h3 className="text-xl font-bold mb-4 opacity-80 uppercase tracking-widest">Weekly Access</h3>
                 <div className="mb-6">
-                  <span className="text-5xl font-black">₦10,000</span>
-                  <span className="text-blue-200 dark:text-teal-400 ml-2 font-medium">/ week</span>
+                  {startingWeeklyPrice ? (
+                    <>
+                      <span className="text-5xl font-black">₦{startingWeeklyPrice.toLocaleString()}</span>
+                      <span className="text-blue-200 dark:text-teal-400 ml-2 font-medium">/ week</span>
+                    </>
+                  ) : (
+                    <span className="text-3xl font-black leading-tight">
+                      Current course pricing
+                    </span>
+                  )}
                 </div>
                 <p className="text-sm text-blue-100/70 mb-8 leading-relaxed">
-                  Get hands-on training in: <br/>
-                  <span className="font-bold text-teal-400">Flutter & Mobile App Dev</span>, <br/>
-                  <span className="font-bold text-teal-400">Web Development & WordPress</span>, or <br/>
-                  <span className="font-bold text-teal-400">AI-Assisted Development</span>
+                  {loadingCourses
+                    ? 'Syncing current course pricing...'
+                    : activeCourses.length && startingWeeklyPrice
+                      ? 'Starting weekly access for active courses:'
+                      : 'Choose a course to see the latest weekly access:'}
+                  <br />
+                  <span className="font-bold text-teal-400">
+                    {courseNames.length
+                      ? courseNames.join(' · ')
+                      : 'Live course list syncing from the dashboard'}
+                  </span>
                 </p>
                 <button 
                   onClick={() => onNavigate('curriculums')}

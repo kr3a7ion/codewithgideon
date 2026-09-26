@@ -39,7 +39,7 @@ type CourseOption = {
   weeklyRate: number;
   pathId: string;
   courseId?: string;
-  source: "pinned" | "firestore";
+  source: "firestore";
 };
 
 interface ContinueRegistrationProps {
@@ -48,36 +48,12 @@ interface ContinueRegistrationProps {
   onGoogleAuth?: () => Promise<{ success: boolean; error?: string }>;
 }
 
-const PINNED_COURSES_RAW: Omit<CourseOption, "pathId">[] = [
-  {
-    id: "flutter",
-    title: "Flutter & Mobile App Development",
-    durationWeeks: 12,
-    weeklyRate: 10000,
-    source: "pinned",
-  },
-  {
-    id: "wordpress",
-    title: "Web Development & WordPress",
-    durationWeeks: 8,
-    weeklyRate: 10000,
-    source: "pinned",
-  },
-  {
-    id: "ai",
-    title: "AI-Assisted Development",
-    durationWeeks: 4,
-    weeklyRate: 10000,
-    source: "pinned",
-  },
-];
-
 const parseWeeksFromDuration = (duration: string, fallback = 4) => {
   const n = parseInt(String(duration || "").replace(/[^\d]/g, ""), 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 };
 
-const parsePricePerWeek = (label: string, fallback = 10000) => {
+const parsePricePerWeek = (label: string, fallback = 0) => {
   const s = String(label || "").toLowerCase();
   const hasK = s.includes("k");
   const num = parseInt(s.replace(/[^\d]/g, ""), 10);
@@ -104,6 +80,23 @@ const FieldError = ({ msg }: { msg?: string }) =>
       {msg}
     </p>
   ) : null;
+
+const friendlyRegistrationError = (err: any) => {
+  const raw = String(err?.message || err || "").trim();
+  const lower = raw.toLowerCase();
+
+  if (lower.includes("permission") || lower.includes("firestore")) {
+    return "We could not load that registration data right now. Please refresh and try again.";
+  }
+  if (lower.includes("network") || lower.includes("offline")) {
+    return "Network issue detected. Check your connection and try again.";
+  }
+  if (lower.includes("auth") || lower.includes("session")) {
+    return "Your login session needs a quick refresh. Please sign in again.";
+  }
+
+  return raw || "Could not save registration. Please try again.";
+};
 
 const fadeUp = {
   hidden: { opacity: 0, y: 18 },
@@ -190,11 +183,11 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
         if (!mounted) return;
         setPaths(list || []);
       } catch (e: any) {
+        console.error("load registration paths failed:", e);
         if (!mounted) return;
         setPaths([]);
         setPathsError(
-          e?.message ||
-            "Failed to load paths. Check Firestore read rules for /paths.",
+          friendlyRegistrationError(e),
         );
       } finally {
         if (mounted) setPathsLoading(false);
@@ -219,7 +212,6 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
         const active = (list || []).filter(
           (c: any) =>
             c.isActive !== false &&
-            (c as any).showOnLanding !== false &&
             String((c as any).pathId || "").trim().length > 0,
         );
 
@@ -235,20 +227,15 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
           weeklyRate:
             Number(c.pricePerWeek) > 0
               ? Number(c.pricePerWeek)
-              : parsePricePerWeek(c.priceLabel || "₦10k/wk", 10000),
-          source: "firestore",
-        }));
-
-        const pinnedOptions: CourseOption[] = PINNED_COURSES_RAW.map((p) => {
-          const match = pathsByTitle.get(p.title.trim().toLowerCase());
-          return match ? ({ ...p, pathId: match.id } as CourseOption) : null;
-        }).filter(Boolean) as CourseOption[];
+              : parsePricePerWeek(c.priceLabel || "", 0),
+          source: "firestore" as const,
+        })).filter((c) => c.durationWeeks > 0 && c.weeklyRate > 0);
 
         const key = (o: CourseOption) =>
           `${o.pathId}::${o.title.trim().toLowerCase()}`;
         const seen = new Set<string>();
         const merged: CourseOption[] = [];
-        [...pinnedOptions, ...firestoreOptions].forEach((o) => {
+        firestoreOptions.forEach((o) => {
           const k = key(o);
           if (seen.has(k)) return;
           seen.add(k);
@@ -257,6 +244,11 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
 
         if (!mounted) return;
         setCourseOptions(merged);
+        if (!firestoreOptions.length) {
+          setCoursesError(
+            "Registration courses are not available right now. Please contact support or try again shortly.",
+          );
+        }
 
         const parsed = parseSelectedPathInput(selectedPath);
         const pick = (opt: CourseOption) => {
@@ -288,22 +280,14 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
 
         if (merged[0]) pick(merged[0]);
       } catch (e: any) {
+        console.error("load registration courses failed:", e);
         if (!mounted) return;
         setCoursesError(
-          e?.message ||
-            "Failed to load courses. Check Firestore read rules for /courses.",
+          friendlyRegistrationError(e),
         );
-
-        const pinnedOptions: CourseOption[] = PINNED_COURSES_RAW.map((p) => {
-          const match = pathsByTitle.get(p.title.trim().toLowerCase());
-          return match ? ({ ...p, pathId: match.id } as CourseOption) : null;
-        }).filter(Boolean) as CourseOption[];
-
-        setCourseOptions(pinnedOptions);
-        if (pinnedOptions[0]) {
-          setSelectedCourseId(pinnedOptions[0].id);
-          setSelectedPathId(pinnedOptions[0].pathId);
-        }
+        setCourseOptions([]);
+        setSelectedCourseId("");
+        setSelectedPathId("");
       } finally {
         if (mounted) setCoursesLoading(false);
       }
@@ -346,21 +330,11 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
     const firstForPath = selectedPathId
       ? courseOptions.find((c) => c.pathId === selectedPathId)
       : null;
-    return (
-      firstForPath ||
-      courseOptions[0] || {
-        id: "fallback",
-        title: "Course",
-        durationWeeks: 4,
-        weeklyRate: 10000,
-        pathId: selectedPathId || "",
-        source: "pinned" as const,
-      }
-    );
+    return firstForPath || courseOptions[0] || null;
   }, [courseOptions, selectedCourseId, selectedPathId]);
 
-  const maxWeeks = selectedCourse.durationWeeks || 4;
-  const weeklyRate = selectedCourse.weeklyRate || 10000;
+  const maxWeeks = selectedCourse?.durationWeeks || 1;
+  const weeklyRate = selectedCourse?.weeklyRate || 0;
 
   useEffect(() => {
     const current = parseInt(formData.weeksToCommit || "1", 10) || 1;
@@ -386,7 +360,9 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
     !authReady ||
     !uid ||
     !email ||
+    !selectedCourse ||
     !selectedPathId ||
+    weeklyRate <= 0 ||
     !cohort?.cohortKey;
 
   const validateField = (name: FieldKey, value: string): string => {
@@ -451,23 +427,27 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
 
   const selectedPathTitle =
     (selectedPathId ? pathsById.get(selectedPathId)?.title : "") ||
-    selectedCourse.title ||
+    selectedCourse?.title ||
     "Path";
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveRegistrationProfile = async (
+    destination: "payment" | "dashboard",
+  ) => {
     setError("");
 
     const nextErrors = validateAll();
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
-    if (!authReady) return setError("Auth is still initializing. Try again.");
+    if (!authReady)
+      return setError("Your login session is still loading. Try again in a moment.");
     if (!uid || !email)
-      return setError("Auth session missing. Please login again.");
-    if (!selectedPathId) return setError("Please select a Path.");
+      return setError("Your login session needs a quick refresh. Please sign in again.");
+    if (!selectedCourse || weeklyRate <= 0)
+      return setError("Course pricing is not available right now. Please try again shortly or contact support.");
+    if (!selectedPathId) return setError("Please select a learning path.");
     if (cohortLoading || !cohort?.cohortKey)
-      return setError("Cohort is still loading. Please try again.");
+      return setError("Your cohort is still loading. Try again in a moment.");
 
     setIsSubmitting(true);
     try {
@@ -487,34 +467,44 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
         path: selectedPathTitle,
         pathId: selectedPathId,
         courseId: selectedCourse.courseId || undefined,
+        courseDurationWeeks: maxWeeks,
+        weeklyRate,
       });
 
       localStorage.removeItem("cwg_registration_handoff");
       localStorage.removeItem("cwg_account_created");
 
-      onNavigate("payment", {
-        userData: {
-          uid,
-          email,
-          path: selectedPathTitle,
-          pathId: selectedPathId,
-          courseId: selectedCourse.courseId || null,
-          weeksToCommit: weeks,
-          cohortId: cohort.cohortId,
-          cohortLabel: cohort.label,
-          cohortKey: cohort.cohortKey,
-          courseDurationWeeks: maxWeeks,
-          weeklyRate,
-        },
-        selectedPath: selectedPathTitle,
-      });
+      if (destination === "payment") {
+        onNavigate("payment", {
+          userData: {
+            uid,
+            email,
+            path: selectedPathTitle,
+            pathId: selectedPathId,
+            courseId: selectedCourse.courseId || null,
+            weeksToCommit: weeks,
+            cohortId: cohort.cohortId,
+            cohortLabel: cohort.label,
+            cohortKey: cohort.cohortKey,
+            courseDurationWeeks: maxWeeks,
+            weeklyRate,
+          },
+          selectedPath: selectedPathTitle,
+        });
+      } else {
+        onNavigate("student-dashboard");
+      }
     } catch (err: any) {
-      setError(
-        err?.message || "Could not save registration. Please try again.",
-      );
+      console.error("save registration profile failed:", err);
+      setError(friendlyRegistrationError(err));
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await saveRegistrationProfile("payment");
   };
 
   const weeksOptions = useMemo(
@@ -835,20 +825,20 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
                         const id = e.target.value;
                         setSelectedCourseId(id);
                         const found = courseOptions.find((c) => c.id === id);
-                        if (found) setSelectedPathId(found.pathId);
+            if (found) setSelectedPathId(found.pathId);
                       }}
                       className="block w-full pl-11 pr-4 py-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white font-bold outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
                       disabled={coursesLoading || pathsLoading}
                     >
+                      {courseOptions.length === 0 && (
+                        <option value="">No registration courses available</option>
+                      )}
                       {courseOptions.map((c) => {
                         const pTitle =
                           pathsById.get(c.pathId)?.title || c.title || "Path";
-                        const suffix =
-                          c.source === "firestore" ? "" : " (Pinned)";
                         return (
                           <option key={`${c.source}-${c.id}`} value={c.id}>
                             {pTitle} — {c.title}
-                            {suffix}
                           </option>
                         );
                       })}
@@ -928,17 +918,20 @@ const ContinueRegistration: React.FC<ContinueRegistrationProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => onNavigate("student-dashboard")}
-                  className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold py-4 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+                  disabled={disableSubmit}
+                  onClick={() => saveRegistrationProfile("dashboard")}
+                  className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold py-4 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Cancel & Return
+                  Save & Open Dashboard
                 </button>
               </div>
 
               <div className="pt-2 text-center">
                 <div className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 dark:text-slate-500">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Your details are saved before payment continues</span>
+                  <span>
+                    Your details are saved before payment or dashboard access
+                  </span>
                 </div>
               </div>
             </form>

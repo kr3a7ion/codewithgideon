@@ -44,18 +44,12 @@ interface PaymentProps {
   onPaymentSuccess?: (newTotalWeeks: number) => void;
 }
 
-const PINNED = [
-  { title: "Flutter & Mobile App Development", weeks: 12, rate: 10000 },
-  { title: "Web Development & WordPress", weeks: 8, rate: 10000 },
-  { title: "AI-Assisted Development", weeks: 4, rate: 10000 },
-];
-
 const parseWeeksFromDuration = (duration: string, fallback = 4) => {
   const n = parseInt(String(duration || "").replace(/[^\d]/g, ""), 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 };
 
-const parsePricePerWeek = (label: string, fallback = 10000) => {
+const parsePricePerWeek = (label: string, fallback = 0) => {
   const s = String(label || "").toLowerCase();
   const hasK = s.includes("k");
   const num = parseInt(s.replace(/[^\d]/g, ""), 10);
@@ -65,47 +59,6 @@ const parsePricePerWeek = (label: string, fallback = 10000) => {
 
 const clamp = (n: number, min: number, max: number) =>
   Math.max(min, Math.min(max, n));
-
-const PAYSTACK_RATE = 0.015;
-const PAYSTACK_FLAT = 100;
-const PAYSTACK_CAP = 2000;
-const FLAT_THRESHOLD = 2500;
-
-const getPaystackFee = (amount: number) => {
-  const flat = amount >= FLAT_THRESHOLD ? PAYSTACK_FLAT : 0;
-  const fee = Math.round(amount * PAYSTACK_RATE) + flat;
-  return Math.min(fee, PAYSTACK_CAP);
-};
-
-const calculateSplitFee = (
-  weeklyFee: number,
-  weeks: number,
-  mode: "upfront" | "weekly",
-) => {
-  const amountPerTxn = mode === "upfront" ? weeklyFee * weeks : weeklyFee;
-  const transactions = mode === "upfront" ? 1 : weeks;
-  const totalFeePerTxn = getPaystackFee(amountPerTxn);
-  const yourFeeSharePerTxn = Math.floor(totalFeePerTxn / 2);
-  const studentFeeSharePerTxn = totalFeePerTxn - yourFeeSharePerTxn;
-  const chargeStudentPerTxn = amountPerTxn + studentFeeSharePerTxn;
-  const youReceivePerTxn = chargeStudentPerTxn - totalFeePerTxn;
-
-  return {
-    amountPerTxn,
-    totalFeePerTxn,
-    yourFeeSharePerTxn,
-    studentFeeSharePerTxn,
-    chargeStudentPerTxn,
-    youReceivePerTxn,
-    transactions,
-    totalCharged: chargeStudentPerTxn * transactions,
-    totalFees: totalFeePerTxn * transactions,
-    yourTotalCost: yourFeeSharePerTxn * transactions,
-    studentTotalExtra: studentFeeSharePerTxn * transactions,
-    yourTotalRevenue: youReceivePerTxn * transactions,
-    targetRevenue: weeklyFee * weeks,
-  };
-};
 
 const Badge = ({
   tone = "blue",
@@ -170,7 +123,6 @@ const Payment: React.FC<PaymentProps> = ({
   >("idle");
 
   const [errorMsg, setErrorMsg] = useState<string>("");
-  const [debugMsg, setDebugMsg] = useState<string>("");
 
   // ✅ per-path cohort fallback (NOT /config/app global)
   const [fallbackCohort, setFallbackCohort] = useState<{
@@ -181,11 +133,15 @@ const Payment: React.FC<PaymentProps> = ({
 
   // ✅ course config in Payment too
   const [courseMaxWeeks, setCourseMaxWeeks] = useState<number>(
-    u?.courseDurationWeeks || 4,
+    u?.courseDurationWeeks || 0,
   );
   const [courseWeeklyRate, setCourseWeeklyRate] = useState<number>(
-    u?.weeklyRate || 10000,
+    u?.weeklyRate || 0,
   );
+  const [courseConfigLoading, setCourseConfigLoading] = useState(
+    !(u?.courseDurationWeeks && u?.weeklyRate),
+  );
+  const [courseConfigError, setCourseConfigError] = useState("");
 
   // prevent double init
   const inFlightRef = useRef(false);
@@ -230,7 +186,7 @@ const Payment: React.FC<PaymentProps> = ({
     return () => {
       mounted = false;
     };
-  }, [u.cohortId, u.cohortLabel, u.cohortKey, u.pathId, safePath]);
+  }, [u?.cohortId, u?.cohortLabel, u?.cohortKey, u?.pathId, safePath]);
 
   const cohortLabel =
     u.cohortLabel || fallbackCohort?.cohortLabel || "Current Cohort";
@@ -244,22 +200,21 @@ const Payment: React.FC<PaymentProps> = ({
     let mounted = true;
 
     const loadCourseConfig = async () => {
-      // if dashboard already passed weeklyRate & duration, use them
-      if (!u?.uid) return;
-      if (u.courseDurationWeeks && u.weeklyRate) return;
-
-      const pinned = PINNED.find(
-        (p) =>
-          p.title.trim().toLowerCase() ===
-          String(safePath).trim().toLowerCase(),
-      );
-      if (pinned) {
-        if (!mounted) return;
-        setCourseMaxWeeks(pinned.weeks);
-        setCourseWeeklyRate(pinned.rate);
+      setCourseConfigError("");
+      if (!u?.uid) {
+        setCourseConfigLoading(false);
         return;
       }
 
+      if (u.courseDurationWeeks && u.weeklyRate) {
+        if (!mounted) return;
+        setCourseMaxWeeks(Number(u.courseDurationWeeks));
+        setCourseWeeklyRate(Number(u.weeklyRate));
+        setCourseConfigLoading(false);
+        return;
+      }
+
+      setCourseConfigLoading(true);
       try {
         const list: CourseDoc[] = await registrationStore.getCourses();
         const active = (list || []).filter(
@@ -292,19 +247,29 @@ const Payment: React.FC<PaymentProps> = ({
           const rate =
             Number.isFinite(p) && p > 0
               ? Math.floor(p)
-              : parsePricePerWeek(found.priceLabel || "₦10k/wk", 10000);
+              : parsePricePerWeek(found.priceLabel || "", 0);
 
-          setCourseMaxWeeks(weeks);
-          setCourseWeeklyRate(rate);
+          if (rate > 0 && weeks > 0) {
+            setCourseMaxWeeks(weeks);
+            setCourseWeeklyRate(rate);
+          } else {
+            setCourseConfigError(
+              "Course pricing is not available right now. Please contact support before paying.",
+            );
+          }
         } else {
-          setCourseMaxWeeks(4);
-          setCourseWeeklyRate(10000);
+          setCourseConfigError(
+            "We could not match this payment to an active course. Please contact support before paying.",
+          );
         }
       } catch (e) {
         console.error("Failed to load course config:", e);
         if (!mounted) return;
-        setCourseMaxWeeks(4);
-        setCourseWeeklyRate(10000);
+        setCourseConfigError(
+          "We could not sync current course pricing. Please refresh or contact support.",
+        );
+      } finally {
+        if (mounted) setCourseConfigLoading(false);
       }
     };
 
@@ -327,7 +292,7 @@ const Payment: React.FC<PaymentProps> = ({
 
   // ✅ correct cap logic
   const maxAllowedWeeks = useMemo(() => {
-    if (!u.isTopUp) return Math.max(1, courseMaxWeeks);
+    if (!u.isTopUp) return Math.max(0, courseMaxWeeks);
     const remaining = Math.max(0, courseMaxWeeks - originalWeeks);
     return remaining;
   }, [u.isTopUp, courseMaxWeeks, originalWeeks]);
@@ -341,24 +306,15 @@ const Payment: React.FC<PaymentProps> = ({
   // PRICE CALCULATION
   // -----------------------------
 
-  const weeklyRate = courseWeeklyRate || 10000;
+  const weeklyRate = courseWeeklyRate;
 
-  // Split the Paystack fee so the student covers half and the business absorbs half.
-  const splitFee = calculateSplitFee(weeklyRate, topUpWeeks, "upfront");
-  const basePrice = splitFee.targetRevenue;
-  const totalFee = splitFee.totalFees;
-  const yourFeeShare = splitFee.yourTotalCost;
-  const studentFeeShare = splitFee.studentTotalExtra;
-  const totalPrice = splitFee.totalCharged;
-  const yourRevenue = splitFee.yourTotalRevenue;
+  const basePrice = weeklyRate * topUpWeeks;
+  const totalPrice = basePrice;
 
-  // Send all critical amounts in kobo to keep verification exact.
+  // Paystack pass-fees is handled from the Paystack dashboard, so the app only
+  // sends the base course amount. Gateway fees may be added at checkout.
   const totalPriceKobo = totalPrice * 100;
   const basePriceKobo = basePrice * 100;
-  const totalFeeKobo = totalFee * 100;
-  const yourFeeShareKobo = yourFeeShare * 100;
-  const studentFeeShareKobo = studentFeeShare * 100;
-  const yourRevenueKobo = yourRevenue * 100;
 
   const newTotalWeeks = u.isTopUp ? originalWeeks + topUpWeeks : topUpWeeks;
 
@@ -419,10 +375,6 @@ const Payment: React.FC<PaymentProps> = ({
       cohortKey,
       expectedAmountKobo: totalPriceKobo,
       baseAmountKobo: basePriceKobo,
-      totalFeeKobo,
-      yourFeeShareKobo,
-      studentFeeShareKobo,
-      yourRevenueKobo,
       app: "codewithgideon-web",
       ts: Date.now(),
     }),
@@ -437,10 +389,6 @@ const Payment: React.FC<PaymentProps> = ({
       cohortLabel,
       cohortKey,
       totalPriceKobo,
-      totalFeeKobo,
-      yourFeeShareKobo,
-      studentFeeShareKobo,
-      yourRevenueKobo,
     ],
   );
 
@@ -464,6 +412,10 @@ const Payment: React.FC<PaymentProps> = ({
   const disablePay =
     paymentState === "processing" ||
     paymentState === "verifying" ||
+    courseConfigLoading ||
+    !!courseConfigError ||
+    courseMaxWeeks <= 0 ||
+    courseWeeklyRate <= 0 ||
     totalPrice <= 0 ||
     topUpWeeks <= 0 ||
     !publicKey ||
@@ -480,7 +432,6 @@ const Payment: React.FC<PaymentProps> = ({
 
       setPaymentState("verifying");
       setErrorMsg("");
-      setDebugMsg("");
 
       // Prevent duplicate verification
       const alreadyVerified = sessionStorage.getItem(`pay_${paystackRef}`);
@@ -524,11 +475,13 @@ const Payment: React.FC<PaymentProps> = ({
       try {
         json = raw ? JSON.parse(raw) : null;
       } catch (err) {
+        console.error("Payment verification returned non-JSON:", {
+          status: resp.status,
+          body: raw.slice(0, 250),
+          reference: paystackRef,
+        });
         throw new Error(
-          `Verify returned non-JSON. Status ${resp.status}. Body: ${raw.slice(
-            0,
-            250,
-          )}`,
+          "Payment verification is temporarily unavailable. Please try again.",
         );
       }
 
@@ -548,14 +501,36 @@ const Payment: React.FC<PaymentProps> = ({
       console.error("Verification failed:", err);
       setPaymentState("failed");
       setErrorMsg(
-        err?.message || "Transaction could not be verified. Please try again.",
-      );
-      setDebugMsg(
-        `ref=${paystackRef} | weeks=${topUpWeeks} | amount=${totalPrice} | uid=${u.uid}`,
+        "We could not confirm this payment yet. Please retry, or contact support with your payment reference.",
       );
     } finally {
       inFlightRef.current = false;
     }
+  };
+
+  const friendlyPaymentStartError = (err: any) => {
+    const raw = String(err?.message || err || "").trim();
+    const lower = raw.toLowerCase();
+
+    if (
+      lower.includes("vite_") ||
+      lower.includes("public_key") ||
+      lower.includes("verify_paystack") ||
+      lower.includes("missing")
+    ) {
+      return "Checkout is not available right now. Please try again shortly or contact support.";
+    }
+    if (lower.includes("signed-in user") || lower.includes("login session")) {
+      return "Your login session needs a quick refresh. Please sign in again before paying.";
+    }
+    if (lower.includes("student profile")) {
+      return "Please complete your registration details before starting payment.";
+    }
+    if (lower.includes("network") || lower.includes("offline")) {
+      return "Network issue detected. Check your connection and try again.";
+    }
+
+    return raw || "Could not start checkout. Please try again or contact support.";
   };
 
   const handlePayment = async () => {
@@ -566,7 +541,6 @@ const Payment: React.FC<PaymentProps> = ({
 
       setPaymentState("processing");
       setErrorMsg("");
-      setDebugMsg("");
 
       const currentAuthUid = auth.currentUser?.uid || "";
 
@@ -612,10 +586,7 @@ const Payment: React.FC<PaymentProps> = ({
     } catch (e: any) {
       console.error("Payment init failed:", e);
       setPaymentState("failed");
-      setErrorMsg(e?.message || "Could not start payment. Please try again.");
-      setDebugMsg(
-        `authUid=${auth.currentUser?.uid || "none"} | sessionUid=${u?.uid || "none"} | ref=${reference}`,
-      );
+      setErrorMsg(friendlyPaymentStartError(e));
       inFlightRef.current = false;
     }
   };
@@ -824,11 +795,6 @@ const Payment: React.FC<PaymentProps> = ({
             <p className="font-black text-red-700 dark:text-red-200">
               {errorMsg || "Verification failed."}
             </p>
-            {debugMsg ? (
-              <p className="mt-2 text-[11px] font-mono text-red-700/80 dark:text-red-200/80 break-all">
-                {debugMsg}
-              </p>
-            ) : null}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -863,8 +829,12 @@ const Payment: React.FC<PaymentProps> = ({
 
   const envWarning =
     !FUNCTION_URL || !publicKey
-      ? "Payment environment variables are missing. Check VITE_VERIFY_PAYSTACK_URL and VITE_PAYSTACK_PUBLIC_KEY."
+      ? "Checkout is temporarily unavailable. Please contact support so we can help you complete payment."
       : "";
+  const courseWarning =
+    courseConfigLoading
+      ? "Syncing the current course price before checkout..."
+      : courseConfigError;
 
   return (
     <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen px-6">
@@ -874,7 +844,7 @@ const Payment: React.FC<PaymentProps> = ({
             Secure Checkout
           </h1>
           <p className="text-slate-500 dark:text-slate-300 mt-2">
-            Complete your payment to unlock your learning access 🚀
+            Complete your payment to unlock your learning access
           </p>
 
           <div className="mt-5 flex items-center justify-center gap-2 flex-wrap">
@@ -888,6 +858,11 @@ const Payment: React.FC<PaymentProps> = ({
             Max allowed: <span className="font-bold">{maxAllowedWeeks}</span> •
             ₦{weeklyRate.toLocaleString()}/wk
           </p>
+          {courseWarning ? (
+            <div className="mx-auto mt-5 max-w-2xl rounded-2xl border border-orange-200 bg-orange-50 px-5 py-4 text-sm font-bold text-orange-800 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-100">
+              {courseWarning}
+            </div>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
@@ -942,10 +917,8 @@ const Payment: React.FC<PaymentProps> = ({
                           Course ({topUpWeeks} × ₦{weeklyRate.toLocaleString()})
                         </p>
 
-                        <p>Course Cost: ₦{basePrice.toLocaleString()}</p>
-                        <p>Total Fee: ₦{totalFee.toLocaleString()}</p>
-                        <p>Student Share: ₦{studentFeeShare.toLocaleString()}</p>
-                        <p>You Cover: ₦{yourFeeShare.toLocaleString()}</p>
+                        <p>Course amount: ₦{basePrice.toLocaleString()}</p>
+                        <p>Paystack may add gateway charges at checkout.</p>
                       </div>
                     </div>
                   </div>
@@ -955,8 +928,8 @@ const Payment: React.FC<PaymentProps> = ({
                     <SummaryRow label="Cohort Key" value={cohortKey} mono />
                     <SummaryRow label="Reference" value={reference} mono />
                     <SummaryRow
-                      label="You Receive"
-                      value={`₦${yourRevenue.toLocaleString()}`}
+                      label="Course Amount"
+                      value={`₦${basePrice.toLocaleString()}`}
                     />
                     {u.isTopUp ? (
                       <>
@@ -1004,9 +977,8 @@ const Payment: React.FC<PaymentProps> = ({
                     </span>
 
                     <div className="mt-1 space-y-1 text-[11px] text-slate-400">
-                      <p>Target revenue: ₦{basePrice.toLocaleString()}</p>
-                      <p>Student fee share: ₦{studentFeeShare.toLocaleString()}</p>
-                      <p>You cover: ₦{yourFeeShare.toLocaleString()}</p>
+                      <p>Course amount: ₦{basePrice.toLocaleString()}</p>
+                      <p>Gateway charges may be added by Paystack.</p>
                     </div>
                   </div>
                 </div>
@@ -1051,9 +1023,9 @@ const Payment: React.FC<PaymentProps> = ({
               </button>
 
               {!publicKey || !FUNCTION_URL ? (
-                <div className="mt-6 text-[11px] font-mono text-slate-400 break-all">
-                  Missing env: {!publicKey ? "VITE_PAYSTACK_PUBLIC_KEY " : ""}
-                  {!FUNCTION_URL ? "VITE_VERIFY_PAYSTACK_URL" : ""}
+                <div className="mt-6 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-xs font-bold text-orange-800 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-200">
+                  Checkout needs a quick setup check. Please contact support if
+                  you need to pay now.
                 </div>
               ) : null}
             </div>

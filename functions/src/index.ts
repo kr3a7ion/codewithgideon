@@ -26,6 +26,7 @@ type MentorRequestPayload = {
   name?: unknown;
   email?: unknown;
   message?: unknown;
+  clientMessageId?: unknown;
   contextType?: unknown;
   sessionId?: unknown;
   sessionTitle?: unknown;
@@ -36,12 +37,65 @@ type MentorRequestPayload = {
   studentPhone?: unknown;
 };
 
+type MentorThreadStatus = "new" | "read" | "resolved";
+
 const isValidEmail = (value: string): boolean => {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 };
 
 const normalizeSpaces = (value: string): string => {
   return value.replace(/\s+/g, " ").trim();
+};
+
+const buildMentorThreadId = (studentUid: string): string => {
+  const sanitize = (value: string) =>
+    value.trim().replace(/[^a-zA-Z0-9._-]+/g, "_");
+  return `mentor_${sanitize(studentUid)}`;
+};
+
+const hashRateLimitKey = (value: string): string =>
+  crypto.createHash("sha256").update(value).digest("hex").slice(0, 48);
+
+const enforceRateLimit = async (
+  scope: string,
+  rawKey: string,
+  maxRequests: number,
+  windowMs: number,
+): Promise<void> => {
+  const cleanKey = normalizeSpaces(rawKey).toLowerCase();
+  if (!cleanKey) return;
+
+  const nowMs = Date.now();
+  const keyHash = hashRateLimitKey(`${scope}:${cleanKey}`);
+  const ref = db.collection("functionRateLimits").doc(`${scope}_${keyHash}`);
+
+  await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(ref);
+    const data = snap.exists ? snap.data() || {} : {};
+    const previousWindowStart = Number(data.windowStartMs || 0);
+    const previousCount = Number(data.count || 0);
+    const resetWindow =
+      !previousWindowStart || nowMs - previousWindowStart >= windowMs;
+    const windowStartMs = resetWindow ? nowMs : previousWindowStart;
+    const nextCount = resetWindow ? 1 : previousCount + 1;
+
+    if (nextCount > maxRequests) {
+      throw new HttpsError(
+        "resource-exhausted",
+        "Too many requests. Please wait a bit and try again.",
+      );
+    }
+
+    transaction.set(ref, {
+      scope,
+      keyHash,
+      count: nextCount,
+      maxRequests,
+      windowMs,
+      windowStartMs,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+  });
 };
 
 export const sendContactMessage = onCall(
@@ -86,6 +140,8 @@ export const sendContactMessage = onCall(
     if (message.length > 3000) {
       throw new HttpsError("invalid-argument", "Message is too long.");
     }
+
+    await enforceRateLimit("contact", email, 5, 60 * 60 * 1000);
 
     try {
       const docRef = await db.collection("contactMessages").add({
@@ -143,6 +199,7 @@ export const sendMentorRequest = onCall(
     const name = normalizeSpaces(String(data.name ?? ""));
     const email = normalizeSpaces(String(data.email ?? "")).toLowerCase();
     const message = normalizeSpaces(String(data.message ?? ""));
+    const clientMessageId = normalizeSpaces(String(data.clientMessageId ?? ""));
     const contextType = normalizeSpaces(String(data.contextType ?? "")).toLowerCase();
     const sessionId = normalizeSpaces(String(data.sessionId ?? ""));
     const sessionTitle = normalizeSpaces(String(data.sessionTitle ?? ""));
@@ -174,40 +231,37 @@ export const sendMentorRequest = onCall(
       throw new HttpsError("invalid-argument", "Session ID is required.");
     }
 
-    const sourceSuffix = contextType === "recorded" ? "recorded" : "live";
+    await enforceRateLimit("mentor", request.auth.uid, 20, 10 * 60 * 1000);
+
+    const sourceSuffix =
+      contextType === "recorded" ?
+        "recorded" :
+        contextType === "web" || contextType === "general" ?
+          "web" :
+          "live";
+    const sourceLabel =
+      sourceSuffix === "web" ?
+        "web-student-chat" :
+        `mobile-ask-mentor:${sourceSuffix}`;
+    const channelLabel = sourceSuffix === "web" ? "web_chat" : "mobile_chat";
 
     try {
-      // Reuse a single mentor thread per student + class context so mobile can
-      // render one continuous chat timeline instead of stitching many roots.
-      const existingThreads = await db
-        .collection("contactMessages")
-        .where("studentUid", "==", request.auth.uid)
-        .get();
-
-      const matchingThread = existingThreads.docs
-        .filter((doc) => {
-          const data = doc.data() || {};
-          return (
-            String(data.category || "") === "ask-mentor" &&
-            String(data.sessionId || "") === sessionId
-          );
-        })
-        .sort((a, b) => {
-          const aMs = a.updateTime?.toMillis() || a.createTime?.toMillis() || 0;
-          const bMs = b.updateTime?.toMillis() || b.createTime?.toMillis() || 0;
-          return bMs - aMs;
-        })[0];
-
       const now = FieldValue.serverTimestamp();
-      const basePayload = {
-        name,
-        email,
-        lastMessage: message,
-        lastMessageAt: now,
-        updatedAt: now,
-        status: "new",
-        source: `mobile-ask-mentor:${sourceSuffix}`,
-        category: "ask-mentor",
+      const threadId = buildMentorThreadId(request.auth.uid);
+      const threadRef = db.collection("mentorThreads").doc(threadId);
+      const messageRef = clientMessageId ?
+        threadRef.collection("messages").doc(clientMessageId) :
+        threadRef.collection("messages").doc();
+
+      const basePayload: Record<string, unknown> = {
+        studentUid: request.auth.uid,
+        studentName: name,
+        studentEmail: email,
+        studentPhone,
+        status: "new" satisfies MentorThreadStatus,
+        channel: channelLabel,
+        threadType: "student_mentor_chat",
+        source: sourceLabel,
         contextType: sourceSuffix,
         sessionId,
         sessionTitle,
@@ -215,8 +269,23 @@ export const sendMentorRequest = onCall(
         cohortKey,
         cohortId,
         cohortLabel,
-        studentUid: request.auth.uid,
-        studentPhone,
+        lastContext: {
+          contextType: sourceSuffix,
+          sessionId,
+          sessionTitle,
+          pathTitle,
+          cohortKey,
+          cohortId,
+          cohortLabel,
+        },
+        lastMessage: message,
+        lastMessagePreview: message,
+        lastMessageAt: now,
+        lastMessageId: messageRef.id,
+        lastMessageSenderType: "user",
+        lastMessageSenderName: name,
+        lastMessageSenderEmail: email,
+        updatedAt: now,
         auth: {
           uid: request.auth.uid,
         },
@@ -225,30 +294,32 @@ export const sendMentorRequest = onCall(
         },
       };
 
-      let threadRef;
-
-      if (matchingThread) {
-        threadRef = matchingThread.ref;
-        await threadRef.set(basePayload, {merge: true});
-        await threadRef.collection("messages").add({
+      await db.runTransaction(async (transaction) => {
+        const existing = await transaction.get(threadRef);
+        transaction.set(threadRef, {
+          ...basePayload,
+          ...(existing.exists ? {} : {createdAt: now}),
+        }, {merge: true});
+        transaction.set(messageRef, {
           body: message,
           message,
           senderType: "user",
           senderRole: "user",
           senderName: name,
           senderEmail: email,
-          source: `mobile-ask-mentor:${sourceSuffix}`,
+          source: sourceLabel,
+          channel: channelLabel,
+          contextType: sourceSuffix,
           sessionId,
+          sessionTitle,
+          pathTitle,
+          cohortKey,
+          cohortId,
+          cohortLabel,
           createdAt: now,
+          ...(clientMessageId ? {clientMessageId} : {}),
         });
-      } else {
-        threadRef = await db.collection("contactMessages").add({
-          ...basePayload,
-          body: message,
-          message,
-          createdAt: now,
-        });
-      }
+      });
 
       logger.info("Mentor request saved", {
         docId: threadRef.id,
@@ -261,6 +332,7 @@ export const sendMentorRequest = onCall(
       return {
         success: true,
         conversationId: threadRef.id,
+        messageId: messageRef.id,
       };
     } catch (error) {
       logger.error("Failed to save mentor request", error);
@@ -580,16 +652,23 @@ export const verifyPaystackPayment = onRequest(
         if (
           expectedAmountKobo !== null &&
           Number.isFinite(expectedAmountKobo) &&
-          amountKobo !== expectedAmountKobo
+          amountKobo < expectedAmountKobo
         ) {
           res.status(400).json({
             ok: false,
-            error: "Amount mismatch",
+            error: "Amount below expected course amount",
             expected: expectedAmountKobo,
             got: amountKobo,
           });
           return;
         }
+
+        const paystackFeeKobo = Number(data.fees);
+        const gatewayFeeKobo = Number.isFinite(paystackFeeKobo) ?
+          paystackFeeKobo :
+          expectedAmountKobo !== null && Number.isFinite(expectedAmountKobo) ?
+            Math.max(0, amountKobo - expectedAmountKobo) :
+            null;
 
         // ✅ SECURITY (backward compatible):
         // If Paystack metadata includes uid, enforce it.
@@ -752,6 +831,9 @@ export const verifyPaystackPayment = onRequest(
             reference,
             uid,
             amountKobo,
+            chargedAmountKobo: amountKobo,
+            baseAmountKobo: expectedAmountKobo,
+            gatewayFeeKobo,
             email: data?.customer?.email || null,
             weeks: safeWeeks,
             kind,

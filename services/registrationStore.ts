@@ -870,6 +870,8 @@ export const registrationStore = {
       path: string;
       pathId?: string;
       courseId?: string;
+      courseDurationWeeks?: number;
+      weeklyRate?: number;
     },
   ): Promise<void> {
     const user = auth.currentUser;
@@ -898,6 +900,10 @@ export const registrationStore = {
     }
 
     const finalPathId = pathIdRaw || undefined;
+    const courseDurationWeeks = Math.floor(
+      Number(input.courseDurationWeeks || 0),
+    );
+    const weeklyRate = Math.floor(Number(input.weeklyRate || 0));
 
     const activeCohort = finalPathId
       ? await this.getActiveCohortForPathId(finalPathId)
@@ -924,6 +930,8 @@ export const registrationStore = {
       path: resolvedPathTitle,
       ...(finalPathId ? { pathId: finalPathId } : {}),
       ...(input.courseId ? { courseId: String(input.courseId).trim() } : {}),
+      ...(courseDurationWeeks > 0 ? { courseDurationWeeks } : {}),
+      ...(weeklyRate > 0 ? { weeklyRate } : {}),
 
       ...(activeCohort?.cohortId ? { cohortId: activeCohort.cohortId } : {}),
       ...(activeCohort?.label ? { cohortLabel: activeCohort.label } : {}),
@@ -971,6 +979,10 @@ export const registrationStore = {
     if (!resolvedPathTitle) throw new Error("Path resolution failed.");
 
     const finalPathId = pathIdRaw;
+    const courseDurationWeeks = Math.floor(
+      Number((entry as any).courseDurationWeeks || 0),
+    );
+    const weeklyRate = Math.floor(Number((entry as any).weeklyRate || 0));
     const activeCohort = finalPathId
       ? await this.getActiveCohortForPathId(finalPathId)
       : await this.getActiveCohortForPath(resolvedPathTitle);
@@ -1003,6 +1015,8 @@ export const registrationStore = {
       ...((entry as any).courseId
         ? { courseId: String((entry as any).courseId).trim() }
         : {}),
+      ...(courseDurationWeeks > 0 ? { courseDurationWeeks } : {}),
+      ...(weeklyRate > 0 ? { weeklyRate } : {}),
 
       ...(activeCohort?.cohortId ? { cohortId: activeCohort.cohortId } : {}),
       ...(activeCohort?.label ? { cohortLabel: activeCohort.label } : {}),
@@ -1659,6 +1673,18 @@ export const registrationStore = {
     })) as ResourceDoc[];
   },
 
+  async getPublishedResources(): Promise<ResourceDoc[]> {
+    const snap = await getDocs(
+      query(resourcesColRef, where("isPublished", "==", true)),
+    );
+    return snap.docs
+      .map((d) => ({
+        id: d.id,
+        ...(d.data() as any),
+      }))
+      .sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0)) as ResourceDoc[];
+  },
+
   async addResource(input: ResourceInput): Promise<string> {
     const payload = stripUndefined({
       name: String(input.name || "").trim(),
@@ -1740,6 +1766,22 @@ export const registrationStore = {
   // =========================
   async getCommunitySpaces(): Promise<CommunitySpaceDoc[]> {
     const snap = await getDocs(query(communitySpacesColRef, orderBy("sortOrder", "asc")));
+    return snap.docs
+      .map((d) => ({
+        id: d.id,
+        ...(d.data() as any),
+      }))
+      .sort((a: any, b: any) => {
+        const sortOrder = Number(a.sortOrder || 0) - Number(b.sortOrder || 0);
+        if (sortOrder !== 0) return sortOrder;
+        return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+      }) as CommunitySpaceDoc[];
+  },
+
+  async getPublishedCommunitySpaces(): Promise<CommunitySpaceDoc[]> {
+    const snap = await getDocs(
+      query(communitySpacesColRef, where("isPublished", "==", true)),
+    );
     return snap.docs
       .map((d) => ({
         id: d.id,

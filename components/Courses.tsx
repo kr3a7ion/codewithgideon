@@ -11,7 +11,7 @@ import {
 
 interface CoursesProps {
   // ✅ keep legacy signature so the whole app doesn’t break
-  onNavigate: (view: View, path?: string) => void;
+  onNavigate: (view: View, path?: any) => void;
 }
 
 const sampleCourses: Course[] = [
@@ -79,9 +79,11 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
   const [courses, setCourses] = useState<CourseDoc[] | null>(null);
   const [paths, setPaths] = useState<PathDoc[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const loadCourses = async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
       const [courseList, pathList] = await Promise.all([
         registrationStore.getCourses(),
@@ -98,6 +100,7 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
       console.error("Failed to load courses/paths:", e);
       setCourses(null);
       setPaths(null);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -117,7 +120,7 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
     const base: DisplayCourse[] = sampleCourses.map((c, idx) => ({
       id: `sample-${idx}`,
       ...c,
-      priceLabel: "₦10k/wk",
+      priceLabel: "Pricing at enrollment",
       imageUrl: fallbackImageByIndex(idx),
       syllabusView: defaultSyllabusViewByTitle(c.title),
       source: "sample",
@@ -125,19 +128,8 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
       courseId: undefined,
     }));
 
-    if (!courses || courses.length === 0) return base;
-
-    const sampleTitles = new Set(
-      sampleCourses.map((s) => s.title.trim().toLowerCase()),
-    );
-
-    const firebaseCourses: DisplayCourse[] = courses
-      .filter((c) => {
-        const t = String(c.title || "")
-          .trim()
-          .toLowerCase();
-        return t && !sampleTitles.has(t);
-      })
+    const firebaseCourses: DisplayCourse[] = (courses || [])
+      .filter((c: any) => String(c.title || "").trim().length > 0)
       .map((c, idx) => {
         const cid = String(c.id || "").trim();
         const pid = c.pathId ? String(c.pathId).trim() : undefined;
@@ -151,7 +143,8 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
           sessions: String(c.sessions || "").trim(),
           level: String(c.level || "").trim() || "Beginner",
           description: String(c.description || "").trim(),
-          priceLabel: String(c.priceLabel || "").trim() || "₦10k/wk",
+          priceLabel:
+            String(c.priceLabel || "").trim() || "Pricing at enrollment",
           imageUrl:
             String(c.imageUrl || "").trim() || fallbackImageByIndex(idx + 3),
           syllabusView: ((c.syllabusView as View) ||
@@ -162,8 +155,9 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
         };
       });
 
-    return [...base, ...firebaseCourses];
-  }, [courses]);
+    if (firebaseCourses.length > 0) return firebaseCourses;
+    return loadFailed ? base : [];
+  }, [courses, loadFailed]);
 
   // ✅ keep App routing unchanged: pass ONE string
   // Registration can parse it:
@@ -172,7 +166,12 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
   const toRegistrationParam = (
     course: DisplayCourse,
     resolvedPathTitle: string,
-  ) => (course.pathId ? `pid:${course.pathId}` : resolvedPathTitle);
+  ) =>
+    course.courseId
+      ? `cid:${course.courseId}`
+      : course.pathId
+        ? `pid:${course.pathId}`
+        : resolvedPathTitle;
 
   return (
     <section
@@ -236,6 +235,22 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
               </div>
             ))}
           </div>
+        ) : displayCourses.length === 0 ? (
+          <div className="rounded-[2rem] border border-slate-200 bg-white px-8 py-12 text-center shadow-xl dark:border-slate-800 dark:bg-slate-800">
+            <h3 className="text-2xl font-black text-blue-900 dark:text-white">
+              Courses are being prepared
+            </h3>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-600 dark:text-slate-300">
+              No courses are currently set to show on the homepage. Explore all
+              paths or check back soon for the next cohort opening.
+            </p>
+            <button
+              onClick={() => onNavigate("curriculums")}
+              className="mt-6 rounded-2xl bg-blue-900 px-6 py-3 text-sm font-black uppercase tracking-widest text-white transition hover:bg-blue-800 dark:bg-teal-600 dark:hover:bg-teal-500"
+            >
+              Explore Paths
+            </button>
+          </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
             {displayCourses.map((course, idx) => {
@@ -291,7 +306,14 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
 
                     <div className="flex flex-col gap-3">
                       <button
-                        onClick={() => onNavigate(course.syllabusView)}
+                        onClick={() =>
+                          course.courseId
+                            ? onNavigate("course-detail", {
+                                courseId: course.courseId,
+                                title: course.title,
+                              })
+                            : onNavigate(course.syllabusView)
+                        }
                         className="w-full py-4 bg-blue-900 dark:bg-slate-700 text-white font-black rounded-2xl shadow-lg hover:bg-blue-800 dark:hover:bg-slate-600 transition-all text-sm"
                       >
                         View Syllabus

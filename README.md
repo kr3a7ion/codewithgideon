@@ -9,7 +9,7 @@
 
 CodeWithGideon is a full-stack learning platform that allows students to register, pay for courses, join instructor-led cohorts, and access their classes through a structured dashboard.
 
-Administrators can manage courses, sessions, students, payments, and contact messages through a powerful admin dashboard.
+Administrators can manage courses, sessions, students, payments, mobile mentor chats, support messages, resources, community spaces, and public site settings through a routed admin dashboard.
 
 ---
 
@@ -29,6 +29,8 @@ This platform provides:
 - **Session scheduling**
 - **Payment verification**
 - **Admin student management**
+- **Mentor chat and student community access**
+- **Admin-managed public course and contact content**
 
 ---
 
@@ -46,6 +48,9 @@ Students can:
 - Access unlocked classes
 - Join live sessions
 - View class schedule
+- Open resources and community spaces
+- Chat with a mentor from the student dashboard
+- Earn weekly progress badges
 - Track progress
 - Contact the platform via a contact form
 
@@ -56,8 +61,9 @@ Students can:
 - Live session indicator
 - Payment continuation
 - Unlocked sessions preview
-- Premium modal to view all classes
-- Direct join buttons for live classes
+- Classes, resources, community, mentor chat, badges, and notifications
+- Clear locked states while payment is pending
+- Direct join buttons for live and recorded classes
 
 ---
 
@@ -73,8 +79,12 @@ Admins have access to a powerful control dashboard.
 - Publish **sessions**
 - Manage **student registrations**
 - Approve or verify **pending payments**
+- Review verified Paystack records and gateway fields
 - Export student data
 - Sync student data with **Google Sheets**
+- Manage **mobile mentor chat** separately from website support mail
+- Manage **resources** and **community spaces**
+- Manage **site settings** such as contact links, socials, APK link, and homepage CTA
 - Manage **contact inbox**
 - View platform activity
 
@@ -108,13 +118,13 @@ Workflow:
 4. Student access is unlocked
 5. Sessions become visible
 
-Pending payments can also be manually approved by the admin.
+Pending payments can also be manually reconciled by an admin override after confirming the Paystack reference in the gateway dashboard.
 
 ---
 
-# Contact System
+# Contact And Mentor Chat
 
-The platform includes a secure contact system.
+The platform includes a secure website contact system and a separate in-app mentor chat flow.
 
 Features:
 
@@ -122,6 +132,8 @@ Features:
 - Server side validation via Firebase Cloud Function
 - Messages stored in Firestore
 - Admin inbox modal for reading messages
+- Student mentor chat stored in `mentorThreads/{threadId}/messages`
+- Admin mobile chat panel kept separate from website support mail
 
 
 Responsibilities:
@@ -130,6 +142,7 @@ Responsibilities:
 - prevent empty messages
 - store message in Firestore
 - timestamp messages
+- keep mentor chat unread/read state clear for admin and students
 
 ---
 
@@ -155,20 +168,24 @@ Backend / Infrastructure:
 ---
 
 # Project Structure
-src/
-├── components/
-│ ├── AdminDashboard.tsx
-│ ├── StudentDashboard.tsx
-│ ├── Courses.tsx
-│ ├── Registration.tsx
-│ └── Contact.tsx
-│
-├── services/
-│ ├── firebase.ts
-│ └── registrationStore.ts
-│
-├── assets/
-│
+components/
+├── AdminDashboard.tsx
+├── StudentDashboard.tsx
+├── Courses.tsx
+├── ContinueRegistration.tsx
+└── Contact.tsx
+
+services/
+├── firebase.ts
+├── registrationStore.ts
+└── siteConfig.ts
+
+hooks/
+└── useSiteConfig.ts
+
+firestore.rules
+firebase.json
+
 functions/
 └── src/
 └── index.ts
@@ -218,34 +235,43 @@ Email / Password
 
 Typical collections used by the platform:
 admins
+config
 paths
 courses
+activeCohorts
 cohorts
-sessions
-registrations
+users
+users/{uid}/payments
+cohorts/{cohortId}/sessions
+cohorts/{cohortId}/messages
+resources
+communitySpaces
 contactMessages
-payments
+mentorThreads
+mentorThreads/{threadId}/messages
 
 
 ---
 
 # Firestore Rules
 
-Contact messages should **not be directly written from the client**.
+Firestore security rules are tracked locally in `firestore.rules` and referenced from `firebase.json`.
 
-Firestore security rules for this project are managed in the Firebase Console,
-not from a local `firestore.rules` file in this repo.
+Treat `firestore.rules` as the source of truth. If rules are edited in the Firebase Console during an emergency, copy those changes back into this file before the next deployment.
 
-Example:
+Validate rules without deploying:
 
+```bash
+firebase deploy --only firestore:rules --dry-run
+```
 
-match /contactMessages/{messageId} {
-allow create: if false;
-allow read, update, delete: if isAdmin();
-}
+Important rule decisions:
 
-
-All contact submissions should go through a Cloud Function.
+- Contact messages should **not be directly written from the client**.
+- Mentor chat student sends go through the callable `sendMentorRequest` function.
+- Students can read their own mentor thread and mark it read.
+- Payment crediting is handled by Cloud Functions or admin reconciliation only.
+- Admin writes require an `admins/{uid}` document.
 
 ---
 
@@ -276,6 +302,19 @@ Firestore Storage
 
 ---
 
+## sendMentorRequest
+
+Callable function used by student mentor chat.
+
+Responsibilities:
+
+- require authentication
+- write to deterministic `mentorThreads/{threadId}`
+- append text-only messages
+- keep dashboard counts and unread state aligned
+
+---
+
 ## verifyPaystackPayment
 
 HTTP function responsible for verifying payments.
@@ -283,7 +322,8 @@ HTTP function responsible for verifying payments.
 Responsibilities:
 
 - verify Paystack transaction
-- confirm payment amount
+- confirm charged amount safely against the intended base amount
+- store base amount, charged amount, gateway fee, channel, status, metadata, and reference
 - update student record
 - unlock course access
 
@@ -337,8 +377,11 @@ Deploy hosting and functions from this repo:
 firebase deploy
 
 
-This repo does not deploy Firestore rules. Update and publish Firestore rules
-directly in the Firebase Console for the connected project.
+Deploy only Firestore rules from the local `firestore.rules` file:
+
+```bash
+firebase deploy --only firestore:rules
+```
 
 
 Deploy only functions:
@@ -401,4 +444,3 @@ https://tiktok.com/@codewithgideon
 # License
 
 This project is intended for educational and commercial use under the author's terms
-

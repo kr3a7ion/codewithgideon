@@ -32,6 +32,12 @@ interface AdminResourcesPanelProps {
   selectedCohortId: string;
   onSelectCohort: (cohortId: string) => void;
   onRefresh: () => Promise<void>;
+  onConfirm: (options: {
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    tone?: "danger" | "warning" | "info";
+  }) => Promise<boolean>;
 }
 
 type ResourceForm = {
@@ -88,6 +94,7 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
   selectedCohortId,
   onSelectCohort,
   onRefresh,
+  onConfirm,
 }) => {
   const [form, setForm] = useState<ResourceForm>(emptyForm);
   const [editingResource, setEditingResource] = useState<ResourceDoc | null>(null);
@@ -192,7 +199,13 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
   };
 
   const handleDelete = async (resource: ResourceDoc) => {
-    if (!confirm(`Delete "${resource.name}"? This cannot be undone.`)) return;
+    const ok = await onConfirm({
+      title: "Delete resource?",
+      message: `Delete "${resource.name}" from the student resource library?`,
+      confirmLabel: "Delete Resource",
+      tone: "danger",
+    });
+    if (!ok) return;
 
     setBusyId(resource.id);
     try {

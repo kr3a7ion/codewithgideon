@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import Header from '../components/Header';
 import Hero from '../components/Hero';
 import HowItWorks from '../components/HowItWorks';
@@ -10,23 +10,22 @@ import InstructorBio from '../components/InstructorBio';
 import AppPreview from '../components/AppPreview';
 import FAQ from '../components/FAQ';
 import Footer from '../components/Footer';
-import Contact from '../components/Contact';
-import PrivacyPolicy from '../components/PrivacyPolicy';
-import TermsOfService from '../components/TermsOfService';
-import RefundPolicy from '../components/RefundPolicy';
-import Curriculums from '../components/Curriculums';
-import PathFlutter from '../components/PathFlutter';
-import PathWeb from '../components/PathWeb';
-import PathAI from '../components/PathAI';
-import Payment from '../components/Payment';
-import AdminLogin from '../components/AdminLogin';
-import AdminDashboard from '../components/AdminDashboard';
-import StudentLogin from '../components/StudentLogin';
-import StudentDashboard from '../components/StudentDashboard';
 import { useAppLogic } from '../hooks/useAppLogic';
-import CreateAccount from '@/components/CreateAccount';
-import ContinueRegistration from '@/components/ContinueRegistration';
-import VerifyEmail from '../components/VerifyEmail';
+
+const Contact = lazy(() => import('../components/Contact'));
+const PrivacyPolicy = lazy(() => import('../components/PrivacyPolicy'));
+const TermsOfService = lazy(() => import('../components/TermsOfService'));
+const RefundPolicy = lazy(() => import('../components/RefundPolicy'));
+const Curriculums = lazy(() => import('../components/Curriculums'));
+const CourseDetail = lazy(() => import('../components/CourseDetail'));
+const Payment = lazy(() => import('../components/Payment'));
+const AdminLogin = lazy(() => import('../components/AdminLogin'));
+const AdminDashboard = lazy(() => import('../components/AdminDashboard'));
+const StudentLogin = lazy(() => import('../components/StudentLogin'));
+const StudentDashboard = lazy(() => import('../components/StudentDashboard'));
+const CreateAccount = lazy(() => import('@/components/CreateAccount'));
+const ContinueRegistration = lazy(() => import('@/components/ContinueRegistration'));
+const VerifyEmail = lazy(() => import('../components/VerifyEmail'));
 
 export type View =
   | "home"
@@ -35,6 +34,7 @@ export type View =
   | "terms"
   | "refund"
   | "curriculums"
+  | "course-detail"
   | "path-flutter"
   | "path-web"
   | "path-ai"
@@ -78,6 +78,20 @@ const App: React.FC = () => {
     logoutPendingVerification,
   } = useAppLogic();
 
+  const routeFallback = (
+    <div className="min-h-[55vh] px-6 py-20">
+      <div className="mx-auto max-w-md rounded-[2rem] border border-slate-200 bg-white p-8 text-center shadow-xl dark:border-slate-800 dark:bg-slate-900">
+        <div className="mx-auto mb-5 h-12 w-12 rounded-2xl border-4 border-slate-200 border-t-blue-900 dark:border-slate-700 dark:border-t-teal-400 animate-spin" />
+        <p className="text-xs font-black uppercase tracking-[0.24em] text-blue-900 dark:text-teal-300">
+          Loading workspace
+        </p>
+        <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">
+          Preparing this section for you.
+        </p>
+      </div>
+    </div>
+  );
+
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-slate-900 transition-colors">
       <Header
@@ -89,6 +103,7 @@ const App: React.FC = () => {
       />
 
       <main className="flex-grow pt-20">
+        <Suspense fallback={routeFallback}>
         {/* HOME */}
         {currentView === "home" && (
           <>
@@ -132,11 +147,10 @@ const App: React.FC = () => {
         {currentView === "curriculums" && (
           <Curriculums onNavigate={navigateTo} />
         )}
-        {currentView === "path-flutter" && (
-          <PathFlutter onNavigate={navigateTo} />
-        )}
-        {currentView === "path-web" && <PathWeb onNavigate={navigateTo} />}
-        {currentView === "path-ai" && <PathAI onNavigate={navigateTo} />}
+        {(currentView === "course-detail" ||
+          currentView === "path-flutter" ||
+          currentView === "path-web" ||
+          currentView === "path-ai") && <CourseDetail onNavigate={navigateTo} />}
 
         {/* REGISTRATION */}
         {currentView === "create-account" && (
@@ -218,6 +232,7 @@ const App: React.FC = () => {
           ) : (
             <AdminLogin onNavigate={navigateTo} onLogin={loginAdmin} />
           ))}
+        </Suspense>
       </main>
 
       <Footer onNavigate={navigateTo} isAdminLoggedIn={isAdminLoggedIn} />

@@ -10,8 +10,18 @@ import {
   Zap,
 } from "lucide-react";
 import { IMAGES } from "../assets/images";
+import { useSiteConfig } from "../hooks/useSiteConfig";
 
 const Hero: React.FC = () => {
+  const { config } = useSiteConfig();
+  const homepageCtaHref = config.homepageCtaHref || "#courses";
+  const homepageCtaSectionId = homepageCtaHref.startsWith("#")
+    ? homepageCtaHref.slice(1)
+    : "";
+  const homepageCtaExternal = /^https?:\/\//i.test(homepageCtaHref);
+  const apkHref = config.apkDownloadUrl || "/contact";
+  const opensExternally = /^https?:\/\//i.test(apkHref);
+
   const scrollToId = (
     e: React.MouseEvent<HTMLAnchorElement | HTMLButtonElement>,
     id: string,
@@ -88,18 +98,23 @@ const Hero: React.FC = () => {
             </p>
 
             <div className="flex flex-col sm:flex-row items-center gap-5 mb-12 justify-center lg:justify-start">
-              <motion.button
+              <motion.a
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={(e) => scrollToId(e, "courses")}
+                href={homepageCtaHref}
+                target={homepageCtaExternal ? "_blank" : undefined}
+                rel={homepageCtaExternal ? "noopener noreferrer" : undefined}
+                onClick={(e) => {
+                  if (homepageCtaSectionId) scrollToId(e, homepageCtaSectionId);
+                }}
                 className="w-full sm:w-auto bg-slate-900 dark:bg-blue-600 hover:bg-slate-800 dark:hover:bg-blue-500 text-white px-10 py-5 rounded-2xl font-black text-lg transition-all shadow-2xl shadow-blue-500/20 flex items-center justify-center gap-3 group"
               >
-                <span>Start Your Journey</span>
+                <span>{config.homepageCtaLabel}</span>
                 <ArrowRight
                   size={20}
                   className="group-hover:translate-x-1 transition-transform"
                 />
-              </motion.button>
+              </motion.a>
 
               <motion.button
                 whileHover={{ scale: 1.02 }}
@@ -169,7 +184,9 @@ const Hero: React.FC = () => {
 
                 <motion.a
                   whileHover={{ y: -2 }}
-                  href="#"
+                  href={apkHref}
+                  target={opensExternally ? "_blank" : undefined}
+                  rel={opensExternally ? "noopener noreferrer" : undefined}
                   className="flex items-center gap-3 px-5 py-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-600 dark:text-blue-400 transition-all group"
                 >
                   <Smartphone
@@ -178,10 +195,10 @@ const Hero: React.FC = () => {
                   />
                   <div className="text-left">
                     <p className="text-[10px] font-black uppercase leading-none mb-1">
-                      Download APK
+                      {config.apkDownloadLabel || config.homepageCtaLabel}
                     </p>
                     <p className="text-[10px] font-bold opacity-70">
-                      Direct Install
+                      {config.apkDownloadSubLabel}
                     </p>
                   </div>
                 </motion.a>

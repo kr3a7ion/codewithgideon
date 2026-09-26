@@ -8,7 +8,7 @@ import {
 } from "../services/registrationStore";
 
 interface CurriculumsProps {
-  onNavigate: (view: View, path?: string) => void;
+  onNavigate: (view: View, path?: any) => void;
 }
 
 type DisplayPath = {
@@ -23,7 +23,7 @@ type DisplayPath = {
   accent: string;
   priceLabel?: string;
   syllabusView?: View;
-  source: "pinned" | "firestore";
+  source: "emergency" | "firestore";
 };
 
 const fallbackImageByIndex = (idx: number) => {
@@ -55,7 +55,7 @@ const safeView = (v: any): View => {
 };
 
 const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
-  const pinned: DisplayPath[] = [
+  const emergencyPaths: DisplayPath[] = [
     {
       title: "Flutter & Mobile App Development",
       duration: "12 Weeks",
@@ -64,9 +64,9 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
       description:
         "The complete journey from Dart basics to publishing real-world iOS and Android applications with professional state management.",
       accent: "border-teal-500",
-      priceLabel: "₦10k/wk",
+      priceLabel: "Pricing at enrollment",
       syllabusView: "path-flutter",
-      source: "pinned",
+      source: "emergency",
     },
     {
       title: "Web Development & WordPress",
@@ -76,9 +76,9 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
       description:
         "A practical track designed to help you build and sell client-ready websites. Master themes, plugins, and professional deployment.",
       accent: "border-blue-500",
-      priceLabel: "₦10k/wk",
+      priceLabel: "Pricing at enrollment",
       syllabusView: "path-web",
-      source: "pinned",
+      source: "emergency",
     },
     {
       title: "AI-Assisted Development",
@@ -88,15 +88,16 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
       description:
         "Learn to use AI tools like a senior developer. Optimize your workflow, debug faster, and build better products with AI as your co-pilot.",
       accent: "border-orange-500",
-      priceLabel: "₦10k/wk",
+      priceLabel: "Pricing at enrollment",
       syllabusView: "path-ai",
-      source: "pinned",
+      source: "emergency",
     },
   ];
 
   const [paths, setPaths] = useState<PathDoc[]>([]);
   const [dbCourses, setDbCourses] = useState<CourseDoc[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const pathsByTitle = useMemo(() => {
     const m = new Map<string, PathDoc>();
@@ -114,6 +115,7 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
 
     const load = async () => {
       setLoading(true);
+      setLoadFailed(false);
       try {
         const [p, list] = await Promise.all([
           registrationStore.getPaths(false), // active only
@@ -124,19 +126,10 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
 
         setPaths(p || []);
 
-        // ✅ show flags compatibility:
-        // - showInExplore (your current)
-        // - showOnLanding (your Registration uses this)
-        // Default = show it, unless explicitly false
         const activeExplore = (list || []).filter((c: any) => {
           const isActive = c.isActive !== false;
           const showInExplore = (c as any).showInExplore !== false;
-          const showOnLanding = (c as any).showOnLanding !== false;
-
-          // If either is explicitly false, it should hide for that page,
-          // but if admin only uses one flag, we still show.
-          const shouldShow = showInExplore && showOnLanding;
-          return isActive && shouldShow;
+          return isActive && showInExplore;
         });
 
         setDbCourses(activeExplore);
@@ -145,6 +138,7 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
         if (!mounted) return;
         setPaths([]);
         setDbCourses([]);
+        setLoadFailed(true);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -157,8 +151,8 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
   }, []);
 
   const merged: DisplayPath[] = useMemo(() => {
-    // ✅ hydrate pinned with pathId if path exists
-    const pinnedHydrated: DisplayPath[] = pinned.map((p) => {
+    // Emergency cards are only used if Firestore cannot load at all.
+    const emergencyHydrated: DisplayPath[] = emergencyPaths.map((p) => {
       const match = pathsByTitle.get(p.title.trim().toLowerCase());
       return { ...p, pathId: match?.id };
     });
@@ -182,38 +176,20 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
           (c as any).description || "Course description coming soon.",
         ),
         accent: "border-slate-200 dark:border-slate-700",
-        priceLabel: (c as any).priceLabel || "₦10k/wk",
+        priceLabel: (c as any).priceLabel || "Pricing at enrollment",
         syllabusView,
         source: "firestore",
       };
     });
 
-    // ✅ de-dupe:
-    // - Firestore: use courseId as primary uniqueness
-    // - Pinned: use title+pathId
-    const seen = new Set<string>();
-    const out: DisplayPath[] = [];
-
-    [...pinnedHydrated, ...extras].forEach((x) => {
-      const key =
-        x.source === "firestore" && x.courseId
-          ? `firestore:${x.courseId}`
-          : `pinned:${String(x.pathId || "").trim()}::${x.title.trim().toLowerCase()}`;
-
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push(x);
-    });
-
-    return out;
-  }, [dbCourses, pinned, pathsByTitle]);
+    if (extras.length > 0) return extras;
+    return loadFailed ? emergencyHydrated : [];
+  }, [dbCourses, emergencyPaths, loadFailed, pathsByTitle]);
 
   const toRegistrationParam = (p: DisplayPath) => {
-    // ✅ prefer pathId truth (your Registration supports pid:)
+    // ✅ prefer courseId/pathId truth (Registration supports cid:/pid:)
+    if (p.courseId) return `cid:${p.courseId}`;
     if (p.pathId) return `pid:${p.pathId}`;
-
-    // Optional: if you later want course-specific enrollment
-    // if (p.courseId) return `cid:${p.courseId}`;
 
     return p.title; // legacy fallback
   };
@@ -271,6 +247,17 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
               </div>
             ))}
           </div>
+        ) : merged.length === 0 ? (
+          <div className="mx-auto max-w-2xl rounded-[2rem] border border-slate-200 bg-white px-8 py-12 text-center shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <h2 className="text-2xl font-black text-blue-900 dark:text-white">
+              Courses are being prepared
+            </h2>
+            <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-slate-300">
+              The admin dashboard has no active explore courses available right
+              now. Please check back soon or contact support for enrollment
+              guidance.
+            </p>
+          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
             {merged.map((path) => (
@@ -306,7 +293,12 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
                   <div className="flex flex-col gap-3">
                     <button
                       onClick={() =>
-                        onNavigate(path.syllabusView || "curriculums")
+                        path.courseId
+                          ? onNavigate("course-detail", {
+                              courseId: path.courseId,
+                              title: path.title,
+                            })
+                          : onNavigate(path.syllabusView || "curriculums")
                       }
                       className="w-full py-4 bg-blue-900 dark:bg-slate-800 text-white font-black rounded-2xl shadow-lg hover:bg-blue-800 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-2"
                     >
@@ -315,11 +307,11 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
 
                     <button
                       onClick={() =>
-                        onNavigate("registration", toRegistrationParam(path))
+                        onNavigate("create-account", toRegistrationParam(path))
                       }
                       className="w-full py-4 bg-teal-600 hover:bg-teal-500 text-white font-black rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2"
                     >
-                      Enroll Now — {path.priceLabel || "₦10k/wk"}
+                      Enroll Now — {path.priceLabel || "Pricing at enrollment"}
                     </button>
                   </div>
                 </div>
@@ -328,10 +320,11 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
           </div>
         )}
 
-        {!loading && dbCourses.length === 0 && (
-          <p className="text-center text-xs text-slate-400 mt-10">
-            Courses will appear here once available.
-          </p>
+        {!loading && loadFailed && merged.length > 0 && (
+          <div className="mx-auto mt-10 max-w-2xl rounded-3xl border border-teal-200 bg-teal-50 px-6 py-5 text-center text-sm font-semibold text-teal-900 dark:border-teal-500/30 dark:bg-teal-500/10 dark:text-teal-100">
+            Live course data could not be reached, so a temporary course list is
+            being shown.
+          </div>
         )}
       </div>
     </div>
