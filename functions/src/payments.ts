@@ -432,6 +432,27 @@ const fulfilPayment = async (params: {
   }
   const user = userSnap.data() || {};
 
+  // Older admin approvals stored payments under random ids. Treat any record
+  // that already carries this reference as processed, so it can't be
+  // credited a second time.
+  const legacy = await userRef
+    .collection("payments")
+    .where("reference", "==", reference)
+    .limit(1)
+    .get();
+  if (!legacy.empty && legacy.docs[0].id !== reference) {
+    const prev = legacy.docs[0].data() || {};
+    return {
+      alreadyProcessed: true,
+      status: "success",
+      safeWeeks: Number(prev.weeks || 0) || 0,
+      maxWeeks: Number(prev.maxWeeks || 0) || 0,
+      kind: prev.kind === "topup" ? "topup" : "initial",
+      reviewReason: "",
+      uid,
+    };
+  }
+
   const course = await resolveCourseTruth({
     courseId: safeString(user.courseId) || safeString(meta.courseId),
     pathId: safeString(user.pathId) || safeString(meta.pathId),
