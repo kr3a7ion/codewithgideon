@@ -1,4 +1,33 @@
-/** @type {import('tailwindcss').Config} */
+/**
+ * Code with Gideon design tokens (shared with the Flutter app).
+ *
+ * Brand colours come from the mobile AppTheme so web and app look like one
+ * product:
+ *   deepBlue #0F2B5B  -> blue-900  (primary: buttons, headings)
+ *   teal     #1698A0  -> teal-500  (accent; teal-600 for text on white)
+ *   orange   #FF7A45  -> orange-500 (highlight; orange-600 for filled CTAs)
+ * The existing components already use blue/teal/orange/slate utility
+ * classes, so remapping the palettes restyles the whole site in one place.
+ * Every scale was contrast-checked against white and the dark surface.
+ *
+ * Fonts: Sora for headings (font-display), Manrope for body (font-sans).
+ *
+ * @type {import('tailwindcss').Config}
+ */
+const slate = {
+  50: "#F4F7FB",
+  100: "#EAF0F6",
+  200: "#DBE3EE",
+  300: "#C2CDDC",
+  400: "#95A3BC",
+  500: "#61708A",
+  600: "#4A5870",
+  700: "#334158",
+  800: "#1B2940",
+  900: "#111B2D",
+  950: "#09111F",
+};
+
 export default {
   darkMode: "class",
   content: [
@@ -14,16 +43,61 @@ export default {
   theme: {
     extend: {
       colors: {
+        blue: {
+          50: "#EEF3FA",
+          100: "#DCE6F4",
+          200: "#B9CCE8",
+          300: "#8AA8D6",
+          400: "#5A82BF",
+          500: "#3764A6",
+          600: "#2A5494",
+          700: "#224A88",
+          800: "#1A3A70",
+          900: "#0F2B5B",
+          950: "#08152E",
+        },
         teal: {
-          50: "#f0fdfa",
-          100: "#ccfbf1",
-          500: "#14b8a6",
-          600: "#0d9488",
-          700: "#0f766e",
+          50: "#EDFAFA",
+          100: "#D2F2F1",
+          200: "#A6E5E3",
+          300: "#73D5D2",
+          400: "#3FBCBE",
+          500: "#1698A0",
+          600: "#12808A",
+          700: "#136B72",
+          800: "#10555B",
+          900: "#0D4449",
+          950: "#062A2E",
+        },
+        orange: {
+          50: "#FFF6F1",
+          100: "#FFEDE4",
+          200: "#FFDCCB",
+          300: "#FFC4A8",
+          400: "#FFA37A",
+          500: "#FF7A45",
+          600: "#D9561F",
+          700: "#B8471A",
+          800: "#933A17",
+          900: "#763115",
+          950: "#40170A",
+        },
+        // Neutrals tuned to the app's navy-tinted greys. `gray` is an alias
+        // so older gray-* classes match.
+        slate,
+        gray: slate,
+        brand: {
+          navy: "#0F2B5B",
+          teal: "#1698A0",
+          orange: "#FF7A45",
         },
       },
       fontFamily: {
-        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ["Manrope", "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["Sora", "Manrope", "ui-sans-serif", "system-ui", "sans-serif"],
+      },
+      boxShadow: {
+        card: "0 1px 2px rgba(15, 43, 91, 0.04), 0 8px 24px rgba(15, 43, 91, 0.06)",
       },
     },
   },

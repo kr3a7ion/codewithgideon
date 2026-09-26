@@ -2,13 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: "Inter", sans-serif;
-  scroll-behavior: smooth;
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply font-sans antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display tracking-tight;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-teal-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-900;
+  }
 }
 
 .text-gradient {
-  background: linear-gradient(to right, #1e3a8a, #0d9488);
+  background: linear-gradient(to right, #0f2b5b, #1698a0);
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -19,10 +36,10 @@ body {
 }
 
 .dark ::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: #09111f;
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #334158;
   border-radius: 4px;
 }
