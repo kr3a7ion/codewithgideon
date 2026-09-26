@@ -58,6 +58,7 @@ npm run test:rules            # Firestore rules against every web/mobile query
 ```
 
 All three must pass. `test:rules` starts the Firestore emulator by itself.
+GitHub Actions runs the same checks on every push (`.github/workflows/ci.yml`).
 
 ---
 
@@ -173,9 +174,10 @@ flutter build apk --release
 Then upload the APK and update the APK link in **Admin → Settings**
 (`config/app`).
 
-These changes couldn't be compiled where they were written (no Flutter SDK),
-so `flutter analyze` is the first real check. Fix anything it reports before
-building.
+CI on the mobile PR runs `flutter analyze` and `flutter test` on Flutter
+**3.38.7**, and both pass. Build with Flutter 3.38–3.41: `phosphor_flutter`
+2.1.0 doesn't compile on Flutter 3.44 or newer (`IconData` became a final
+class). Don't upgrade Flutter until that package is replaced.
 
 ---
 
