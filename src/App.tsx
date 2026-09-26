@@ -60,6 +60,7 @@ const App: React.FC = () => {
 
     // 🔐 Auth
     isAdminLoggedIn,
+    adminSessionRemainingMs,
     isStudentLoggedIn,
     studentProfile,
     verificationState,
@@ -228,7 +229,11 @@ const App: React.FC = () => {
 
         {currentView === "admin-dashboard" &&
           (isAdminLoggedIn ? (
-            <AdminDashboard onNavigate={navigateTo} onLogout={logoutAdmin} />
+            <AdminDashboard
+              onNavigate={navigateTo}
+              onLogout={logoutAdmin}
+              sessionRemainingMs={adminSessionRemainingMs}
+            />
           ) : (
             <AdminLogin onNavigate={navigateTo} onLogin={loginAdmin} />
           ))}

@@ -166,6 +166,7 @@ export const useAppLogic = () => {
   const [verificationState, setVerificationState] =
     useState<VerificationState>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+  const [adminSessionRemainingMs, setAdminSessionRemainingMs] = useState(0);
 
   const adminLogoutTimerRef = useRef<number | null>(null);
 
@@ -350,13 +351,20 @@ export const useAppLogic = () => {
         window.clearTimeout(adminLogoutTimerRef.current);
       }
       adminLogoutTimerRef.current = null;
+      setAdminSessionRemainingMs(0);
       return;
     }
+
+    let idleDeadline = Date.now() + ADMIN_IDLE_TIMEOUT_MS;
+    const syncRemaining = () => {
+      setAdminSessionRemainingMs(Math.max(0, idleDeadline - Date.now()));
+    };
 
     const resetIdleTimeout = () => {
       if (adminLogoutTimerRef.current) {
         window.clearTimeout(adminLogoutTimerRef.current);
       }
+      idleDeadline = Date.now() + ADMIN_IDLE_TIMEOUT_MS;
 
       adminLogoutTimerRef.current = window.setTimeout(async () => {
         sessionStorage.removeItem(ADMIN_SESSION_KEY);
@@ -383,8 +391,11 @@ export const useAppLogic = () => {
       window.addEventListener(eventName, resetIdleTimeout, { passive: true });
     });
     resetIdleTimeout();
+    syncRemaining();
+    const countdownInterval = window.setInterval(syncRemaining, 1000);
 
     return () => {
+      window.clearInterval(countdownInterval);
       events.forEach((eventName) => {
         window.removeEventListener(eventName, resetIdleTimeout);
       });
@@ -583,6 +594,7 @@ export const useAppLogic = () => {
     toggleTheme,
 
     isAdminLoggedIn: !!adminUser,
+    adminSessionRemainingMs,
     isStudentLoggedIn: !!studentUser,
     isLoadingAuth,
     studentProfile,
