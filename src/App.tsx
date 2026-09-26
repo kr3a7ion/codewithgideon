@@ -19,7 +19,7 @@ const Curriculums = lazy(() => import("../components/Curriculums"));
 const CourseDetail = lazy(() => import("../components/CourseDetail"));
 const Payment = lazy(() => import("../components/Payment"));
 const AdminLogin = lazy(() => import("../components/AdminLogin"));
-const AdminDashboard = lazy(() => import("../components/AdminDashboard"));
+const AdminDashboard = lazy(() => import("./features/admin/AdminArea"));
 const StudentLogin = lazy(() => import("../components/StudentLogin"));
 const StudentDashboard = lazy(() => import("./features/learn/StudentArea"));
 const CreateAccount = lazy(() => import("../components/CreateAccount"));

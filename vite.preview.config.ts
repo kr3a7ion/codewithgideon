@@ -19,6 +19,7 @@ export default defineConfig({
       { find: /^firebase\/firestore$/, replacement: mock("firestore.ts") },
       { find: /^firebase\/functions$/, replacement: mock("functions.ts") },
       { find: /.*\/services\/firebase$/, replacement: mock("firebase.ts") },
+      { find: /^\.\/firebase$/, replacement: mock("firebase.ts") },
       { find: /.*\/services\/registrationStore$/, replacement: mock("registrationStore.ts") },
       { find: "@", replacement: root },
     ],

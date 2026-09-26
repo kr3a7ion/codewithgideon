@@ -68,6 +68,16 @@ export const previewSpaces = empty
     ];
 
 export const previewDb: Record<string, any> = {
+  "config/app": null,
+  mentorThreads: [
+    { id: "mentor_u1", studentUid: "u1", studentName: "Ada Okafor", studentEmail: "ada@example.com", status: "new", channel: "web_chat", threadType: "student_mentor_chat", lastMessage: "My ListView throws an unbounded height error.", lastMessageAt: Timestamp.fromMillis(now - 3600_000), lastMessageSenderType: "user", updatedAt: Timestamp.fromMillis(now - 3600_000), createdAt: Timestamp.fromMillis(now - 7200_000) },
+  ],
+  contactMessages: [
+    { id: "c1", name: "Chioma", email: "chioma@example.com", message: "Do you have a weekend class?", status: "new", source: "web-contact-form", createdAt: Timestamp.fromMillis(now - 5 * 3600_000) },
+  ],
+  "**/payments": [
+    { id: "CWG_PAID_1", reference: "CWG_PAID_1", uid: "u1", status: "success", kind: "initial", weeks: 5, amountKobo: 5000000, baseAmount: 50000, weeklyRate: 10000, email: "ada@example.com", verifiedAt: Timestamp.fromMillis(now - 20 * day), source: "verify" },
+  ],
   "users/student_1/notificationReads": [{ id: "FLUTTER-2026-09_m2", readAt: new Date() }],
   "cohorts/FLUTTER-2026-09/messages": empty
     ? []

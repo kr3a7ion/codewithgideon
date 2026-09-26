@@ -5,6 +5,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import "../src/index.css";
 import StudentArea from "../src/features/learn/StudentArea";
+import AdminArea from "../src/features/admin/AdminArea";
 import { previewProfile } from "./mocks/data";
 
 const Student = () => (
@@ -20,6 +21,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <Routes>
         <Route path="/student/*" element={<Student />} />
+        <Route
+          path="/admin/*"
+          element={<AdminArea onNavigate={() => undefined} onLogout={() => undefined} sessionRemainingMs={25 * 60_000} />}
+        />
         <Route
           path="*"
           element={

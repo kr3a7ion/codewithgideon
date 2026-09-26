@@ -18,8 +18,14 @@ export const increment = (n: number) => n;
 
 const snapFor = (path: string) => {
   const value = previewDb[path];
+  // Collections have an odd number of path segments (users, users/x/payments).
+  const isCollection = path.startsWith("**/") || path.split("/").length % 2 === 1;
+  if (isCollection && !Array.isArray(value)) {
+    return { docs: [], empty: true, size: 0, forEach() {} };
+  }
   if (Array.isArray(value)) {
-    return { docs: value.map((d: any) => ({ id: d.id, data: () => d })), empty: !value.length };
+    const docs = value.map((d: any) => ({ id: d.id, data: () => d, ref: { path: `${path}/${d.id}` } }));
+    return { docs, empty: !docs.length, size: docs.length, forEach: (fn: any) => docs.forEach(fn) };
   }
   return { exists: () => value != null, data: () => value ?? null, id: path.split("/").pop() };
 };
