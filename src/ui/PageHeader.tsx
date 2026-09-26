@@ -7,7 +7,11 @@ export const PageHeader: React.FC<{
   description?: React.ReactNode;
   actions?: React.ReactNode;
   className?: string;
-}> = ({ eyebrow, title, description, actions, className }) => (
+  /** Heading level; use 2 inside a page that already has an h1. */
+  level?: 1 | 2;
+}> = ({ eyebrow, title, description, actions, className, level = 1 }) => {
+  const Heading = level === 1 ? "h1" : "h2";
+  return (
   <div
     className={cn(
       "flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between",
@@ -20,9 +24,15 @@ export const PageHeader: React.FC<{
           {eyebrow}
         </p>
       ) : null}
-      <h1 className="mt-2 text-3xl font-bold text-blue-900 dark:text-white sm:text-4xl">
+      <Heading
+        className={
+          level === 1
+            ? "mt-2 text-3xl font-bold text-blue-900 dark:text-white sm:text-4xl"
+            : "mt-2 text-2xl font-bold text-blue-900 dark:text-white sm:text-3xl"
+        }
+      >
         {title}
-      </h1>
+      </Heading>
       {description ? (
         <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600 dark:text-slate-300">
           {description}
@@ -31,4 +41,5 @@ export const PageHeader: React.FC<{
     </div>
     {actions ? <div className="flex shrink-0 flex-wrap gap-3">{actions}</div> : null}
   </div>
-);
+  );
+};

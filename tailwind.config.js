@@ -39,6 +39,7 @@ export default {
     "./services/**/*.{ts,tsx}",
     "./utils/**/*.{ts,tsx}",
     "./assets/**/*.{ts,tsx}",
+    "./dev/**/*.{ts,tsx,html}",
   ],
   theme: {
     extend: {

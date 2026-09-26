@@ -33,6 +33,8 @@
     "node_modules",
     "dist",
     "functions",
-    "tests"
+    "tests",
+    "dev",
+    "vite.preview.config.ts"
   ]
 }

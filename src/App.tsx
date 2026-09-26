@@ -21,7 +21,7 @@ const Payment = lazy(() => import("../components/Payment"));
 const AdminLogin = lazy(() => import("../components/AdminLogin"));
 const AdminDashboard = lazy(() => import("../components/AdminDashboard"));
 const StudentLogin = lazy(() => import("../components/StudentLogin"));
-const StudentDashboard = lazy(() => import("../components/StudentDashboard"));
+const StudentDashboard = lazy(() => import("./features/learn/StudentArea"));
 const CreateAccount = lazy(() => import("../components/CreateAccount"));
 const ContinueRegistration = lazy(() => import("../components/ContinueRegistration"));
 const VerifyEmail = lazy(() => import("../components/VerifyEmail"));
