@@ -60,6 +60,15 @@ const parsePricePerWeek = (label: string, fallback = 0) => {
 const clamp = (n: number, min: number, max: number) =>
   Math.max(min, Math.min(max, n));
 
+// Every checkout attempt gets a fresh Paystack reference. Re-using one after
+// the popup was closed makes Paystack reject it as a duplicate.
+const newReference = () =>
+  `CWG_${Date.now().toString(36).toUpperCase()}_${Math.floor(
+    Math.random() * 1_000_000,
+  )
+    .toString(36)
+    .toUpperCase()}`;
+
 const Badge = ({
   tone = "blue",
   children,
@@ -115,12 +124,19 @@ const Payment: React.FC<PaymentProps> = ({
   }, [userData, selectedPath]);
 
   const safePath = normalized.selectedPath || selectedPath;
-  const u = normalized.userData as UserData | null;
+  // Never null: an empty object renders the "missing details" state below
+  // instead of crashing when the page is opened directly.
+  const u = (normalized.userData || {}) as UserData;
   const authUid = auth.currentUser?.uid || "";
 
   const [paymentState, setPaymentState] = useState<
-    "idle" | "processing" | "verifying" | "success" | "failed"
+    "idle" | "processing" | "verifying" | "success" | "failed" | "review"
   >("idle");
+  // "start": checkout never opened, safe to try again.
+  // "verify": the student may already have paid, so we re-check instead of
+  // letting them pay twice.
+  const [failedStage, setFailedStage] = useState<"start" | "verify">("start");
+  const [lastReference, setLastReference] = useState<string>("");
 
   const [errorMsg, setErrorMsg] = useState<string>("");
 
@@ -318,14 +334,13 @@ const Payment: React.FC<PaymentProps> = ({
 
   const newTotalWeeks = u.isTopUp ? originalWeeks + topUpWeeks : topUpWeeks;
 
-  // ✅ stable reference
-  const referenceRef = useRef(
-    u.reference ||
-      `CWG_${Date.now().toString(36).toUpperCase()}_${Math.floor(
-        Math.random() * 1000,
-      )}`,
-  );
+  // Reference for the next checkout attempt (replaced on every attempt).
+  const referenceRef = useRef(newReference());
   const reference = referenceRef.current;
+  // A reference from an earlier, unfinished checkout (passed by the
+  // dashboard). We check it once in case the student paid but the browser
+  // closed before we could confirm it.
+  const resumeReference = String(u.reference || "").trim();
 
   // ✅ Paystack metadata (shows on Paystack transaction + helps debugging)
   const paystackMetadata = useMemo(
@@ -425,56 +440,41 @@ const Payment: React.FC<PaymentProps> = ({
     authUid !== u.uid ||
     (u.isTopUp && maxAllowedWeeks <= 0);
 
-  const verifyAndFinalize = async (paystackRef: string) => {
+  const verifyAndFinalize = async (
+    paystackRef: string,
+    options: { quiet?: boolean } = {},
+  ) => {
+    const quiet = !!options.quiet;
     try {
       if (!FUNCTION_URL) throw new Error("Missing VITE_VERIFY_PAYSTACK_URL");
-      if (!publicKey) throw new Error("Missing VITE_PAYSTACK_PUBLIC_KEY");
 
-      setPaymentState("verifying");
-      setErrorMsg("");
-
-      // Prevent duplicate verification
-      const alreadyVerified = sessionStorage.getItem(`pay_${paystackRef}`);
-
-      if (alreadyVerified) {
-        console.warn("Duplicate verification prevented");
-        return;
+      setLastReference(paystackRef);
+      if (!quiet) {
+        setPaymentState("verifying");
+        setErrorMsg("");
       }
 
-      sessionStorage.setItem(`pay_${paystackRef}`, "1");
-
+      // The server is idempotent per reference, so re-checking is always safe.
+      const idToken = await auth.currentUser?.getIdToken().catch(() => "");
       const resp = await fetch(FUNCTION_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
         body: JSON.stringify({
           reference: paystackRef,
           uid: u.uid,
-          expectedAmount: totalPriceKobo,
+          // Hint only; the server credits what was actually paid.
           weeks: topUpWeeks,
-          kind: u.isTopUp ? "topup" : "initial",
-
-          // ✅ cohort (IMPORTANT)
-          cohortId,
-          cohortLabel,
-          cohortKey,
-
-          // ✅ path metadata
-          path: safePath,
-          pathId: u.pathId,
-          courseId: u.courseId,
-
-          // helpful metadata
-          courseMaxWeeks,
-          weeklyRate,
         }),
       });
 
       const raw = await resp.text();
-
       let json: any = null;
       try {
         json = raw ? JSON.parse(raw) : null;
-      } catch (err) {
+      } catch {
         console.error("Payment verification returned non-JSON:", {
           status: resp.status,
           body: raw.slice(0, 250),
@@ -485,12 +485,20 @@ const Payment: React.FC<PaymentProps> = ({
         );
       }
 
+      if (json?.needsReview) {
+        setPaymentState("review");
+        setErrorMsg(
+          json?.error ||
+            "Your payment was received and is being reviewed. Your classes will unlock once it's confirmed.",
+        );
+        return;
+      }
+
       if (!resp.ok || !json?.ok) {
-        const detail = json?.details
-          ? ` | details: ${JSON.stringify(json.details)}`
-          : "";
+        if (quiet) return;
         throw new Error(
-          (json?.error || `Verify failed (${resp.status})`) + detail,
+          json?.error ||
+            "We could not confirm this payment yet. Please check again in a moment.",
         );
       }
 
@@ -499,14 +507,25 @@ const Payment: React.FC<PaymentProps> = ({
       localStorage.removeItem("cwg_registration_handoff"); // ✅ important
     } catch (err: any) {
       console.error("Verification failed:", err);
+      if (quiet) return;
+      setFailedStage("verify");
       setPaymentState("failed");
       setErrorMsg(
-        "We could not confirm this payment yet. Please retry, or contact support with your payment reference.",
+        String(err?.message || "").trim() ||
+          "We could not confirm this payment yet. Please check again in a moment.",
       );
     } finally {
-      inFlightRef.current = false;
+      if (!quiet) inFlightRef.current = false;
     }
   };
+
+  // Recover payments where the student paid but the page closed before we
+  // confirmed it. Quiet: an unpaid reference just leaves the page as it is.
+  useEffect(() => {
+    if (!resumeReference || !u?.uid || !FUNCTION_URL) return;
+    verifyAndFinalize(resumeReference, { quiet: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeReference, u?.uid]);
 
   const friendlyPaymentStartError = (err: any) => {
     const raw = String(err?.message || err || "").trim();
@@ -562,31 +581,51 @@ const Payment: React.FC<PaymentProps> = ({
       }
 
 
-      // ✅ store pending payment first (so Admin can see it)
+      const attemptReference = newReference();
+      referenceRef.current = attemptReference;
+      setLastReference(attemptReference);
+
+      // Informational only, so the admin can see checkouts in progress.
+      // Access is granted by the payment function, never by this field.
       await registrationStore.setPendingPayment(currentAuthUid, {
         kind: u.isTopUp ? "topup" : "initial",
         weeks: topUpWeeks,
         amount: totalPrice,
         baseAmount: basePrice,
         weeklyRate,
-        reference,
+        reference: attemptReference,
       });
 
-      // ✅ Do NOT update cohort fields here anymore.
-      // ContinueRegistration already saved them.
-
       initializePayment({
+        config: {
+          email: u.email,
+          amount: totalPriceKobo,
+          reference: attemptReference,
+          metadata: paystackMetadata as any,
+        },
         onSuccess: async (res: any) => {
-          const r = String(res?.reference || "").trim() || reference;
+          const r = String(res?.reference || "").trim() || attemptReference;
           await verifyAndFinalize(r);
         },
-        onClose: () => {
+        onClose: async () => {
           setPaymentState("idle");
           inFlightRef.current = false;
+          // Closed without paying: remove the notice so it doesn't linger.
+          // If a bank transfer completes later, the Paystack webhook still
+          // credits the student.
+          try {
+            const latest = await registrationStore.getUserProfile(currentAuthUid);
+            if (latest?.pendingPayment?.reference === attemptReference) {
+              await registrationStore.clearPendingPayment(currentAuthUid);
+            }
+          } catch (clearErr) {
+            console.warn("Could not clear pending payment:", clearErr);
+          }
         },
       });
     } catch (e: any) {
       console.error("Payment init failed:", e);
+      setFailedStage("start");
       setPaymentState("failed");
       setErrorMsg(friendlyPaymentStartError(e));
       inFlightRef.current = false;
@@ -772,44 +811,111 @@ const Payment: React.FC<PaymentProps> = ({
   // -----------------------------
   // FAILED
   // -----------------------------
-  if (paymentState === "failed") {
+  if (paymentState === "failed" || paymentState === "review") {
+    const isReview = paymentState === "review";
+    const mayHavePaid = isReview || failedStage === "verify";
+    const title = isReview
+      ? "Payment received"
+      : mayHavePaid
+        ? "We couldn't confirm your payment yet"
+        : "Checkout didn't start";
+    const subtitle = isReview
+      ? "It's being reviewed before your classes unlock."
+      : mayHavePaid
+        ? "If you were charged, please don't pay again."
+        : "Nothing was charged. You can try again.";
     return (
       <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-6">
-        <div className="bg-white dark:bg-slate-900 max-w-lg w-full p-8 rounded-[2.5rem] shadow-2xl border border-red-200 dark:border-red-500/30">
+        <div
+          className={`bg-white dark:bg-slate-900 max-w-lg w-full p-8 rounded-[2.5rem] shadow-2xl border ${
+            mayHavePaid
+              ? "border-amber-200 dark:border-amber-500/30"
+              : "border-red-200 dark:border-red-500/30"
+          }`}
+        >
           <div className="flex items-center gap-4 mb-6">
-            <div className="h-12 w-12 flex items-center justify-center rounded-2xl bg-red-100 dark:bg-red-500/20">
-              <span className="text-red-600 dark:text-red-400 text-2xl font-black">
-                ✕
+            <div
+              className={`h-12 w-12 flex items-center justify-center rounded-2xl ${
+                mayHavePaid
+                  ? "bg-amber-100 dark:bg-amber-500/20"
+                  : "bg-red-100 dark:bg-red-500/20"
+              }`}
+            >
+              <span
+                className={`text-2xl font-black ${
+                  mayHavePaid
+                    ? "text-amber-600 dark:text-amber-300"
+                    : "text-red-600 dark:text-red-400"
+                }`}
+              >
+                {mayHavePaid ? "!" : "✕"}
               </span>
             </div>
 
             <div>
-              <h1 className="text-2xl font-black text-red-600 dark:text-red-400">
-                Payment Failed
+              <h1
+                className={`text-2xl font-black ${
+                  mayHavePaid
+                    ? "text-amber-700 dark:text-amber-200"
+                    : "text-red-600 dark:text-red-400"
+                }`}
+              >
+                {title}
               </h1>
               <p className="text-sm text-slate-500 dark:text-slate-300">
-                Transaction could not be verified. Please try again.
+                {subtitle}
               </p>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 p-4 text-sm mb-6">
-            <p className="font-black text-red-700 dark:text-red-200">
-              {errorMsg || "Verification failed."}
+          <div
+            className={`rounded-2xl border p-4 text-sm mb-6 ${
+              mayHavePaid
+                ? "border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10"
+                : "border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10"
+            }`}
+          >
+            <p
+              className={`font-black ${
+                mayHavePaid
+                  ? "text-amber-800 dark:text-amber-100"
+                  : "text-red-700 dark:text-red-200"
+              }`}
+            >
+              {errorMsg || "Something went wrong."}
             </p>
+            {mayHavePaid && (
+              <p className="mt-3 text-slate-600 dark:text-slate-300">
+                Paid successfully? Your classes unlock automatically as soon as
+                Paystack confirms it. Keep this reference for support:{" "}
+                <span className="font-mono font-bold">{lastReference}</span>
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <button
-              onClick={() => setPaymentState("idle")}
-              className="w-full bg-blue-900 hover:bg-blue-800 text-white font-black py-4 rounded-2xl shadow-lg"
-            >
-              Retry Payment
-            </button>
+            {isReview ? null : mayHavePaid ? (
+              <button
+                onClick={() => verifyAndFinalize(lastReference)}
+                disabled={!lastReference}
+                className="w-full bg-blue-900 hover:bg-blue-800 disabled:opacity-60 text-white font-black py-4 rounded-2xl shadow-lg"
+              >
+                Check payment again
+              </button>
+            ) : (
+              <button
+                onClick={() => setPaymentState("idle")}
+                className="w-full bg-blue-900 hover:bg-blue-800 text-white font-black py-4 rounded-2xl shadow-lg"
+              >
+                Try again
+              </button>
+            )}
 
             <button
               onClick={() => onNavigate("student-dashboard")}
-              className="w-full bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-blue-900 dark:text-white font-black py-4 rounded-2xl"
+              className={`w-full bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-blue-900 dark:text-white font-black py-4 rounded-2xl ${
+                isReview ? "sm:col-span-2" : ""
+              }`}
             >
               Back to Dashboard
             </button>

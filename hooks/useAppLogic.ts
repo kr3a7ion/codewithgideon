@@ -13,7 +13,7 @@ import {
   signOut,
   User,
 } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
 
 const HANDOFF_KEY = "cwg_registration_handoff";
 const ADMIN_SESSION_KEY = "cwg_admin_session_active";
@@ -322,6 +322,25 @@ export const useAppLogic = () => {
     return unsub;
   }, []);
 
+  // Keep the student's profile live, so a confirmed payment (from verify or
+  // the Paystack webhook) or a finished registration shows up immediately.
+  useEffect(() => {
+    const uid = studentUser?.uid;
+    if (!uid) return;
+    const unsubscribe = onSnapshot(
+      doc(db, "users", uid),
+      (snap) => {
+        setStudentProfile(
+          snap.exists()
+            ? ({ uid: snap.id, ...(snap.data() as any) } as RegistrationEntry)
+            : null,
+        );
+      },
+      (err) => console.warn("Student profile listener failed:", err),
+    );
+    return unsubscribe;
+  }, [studentUser?.uid]);
+
   useEffect(() => {
     setCurrentView(viewFromPathname(location.pathname));
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -422,15 +441,20 @@ export const useAppLogic = () => {
   };
 
   const completePayment = async () => {
-    if (!activeRegistration) return;
-
-    if (studentUser?.uid === activeRegistration.uid) {
-      const userDoc = await getDoc(doc(db, "users", activeRegistration.uid));
+    // Reload the profile the payment function just updated (weeks, status,
+    // cohort). Works even when the payment page was opened after a refresh.
+    const uid = studentUser?.uid || auth.currentUser?.uid || "";
+    if (uid) {
+      const userDoc = await getDoc(doc(db, "users", uid));
       if (userDoc.exists()) {
-        setStudentProfile(userDoc.data() as RegistrationEntry);
+        setStudentProfile({
+          uid: userDoc.id,
+          ...(userDoc.data() as RegistrationEntry),
+        });
       }
     }
 
+    setActiveRegistration(null);
     localStorage.removeItem(HANDOFF_KEY);
   };
 

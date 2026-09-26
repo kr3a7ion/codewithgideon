@@ -16,6 +16,7 @@ import {
   limit,
   Timestamp,
   serverTimestamp,
+  runTransaction,
 } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword,
@@ -1043,21 +1044,6 @@ export const registrationStore = {
     return cred.user.uid;
   },
 
-  // ✅ Student-safe: only fields your rules allow a student to change
-  async updateStudentEnrollmentFields(
-    uid: string,
-    patch: Partial<
-      Pick<RegistrationEntry, "cohortId" | "cohortLabel" | "cohortKey">
-    >,
-  ): Promise<void> {
-    const clean = stripUndefined({
-      ...patch,
-      updatedAt: Date.now(),
-    });
-
-    await updateDoc(doc(db, "users", uid), clean);
-  },
-
   // ✅ Admin-only helper (keep if you need it in admin dashboard)
   async adminUpdateUserEnrollmentMeta(
     uid: string,
@@ -1166,6 +1152,10 @@ export const registrationStore = {
     await updateDoc(doc(db, "users", uid), { status });
   },
 
+  // Admin override: credit a top-up after confirming it in Paystack.
+  // The payment record uses the Paystack reference as its id, so the same
+  // reference can never be credited twice (the payment function checks the
+  // same document).
   async recordTopUp(
     uid: string,
     additionalWeeks: number,
@@ -1174,41 +1164,56 @@ export const registrationStore = {
     options?: { baseAmount?: number; weeklyRate?: number },
   ): Promise<void> {
     const safeWeeks = Math.max(1, Math.floor(Number(additionalWeeks || 1)));
+    const ref = String(reference || "").trim();
+    if (!ref) throw new Error("Payment reference is required.");
+
     const userRef = doc(db, "users", uid);
-    const userSnap = await getDoc(userRef);
-    const userData = (userSnap.data() as any) || {};
+    const paymentRef = doc(db, "users", uid, "payments", ref);
 
-    const currentWeeks = Math.max(0, Number(userData.weeksToCommit || 0));
-    const currentTotalPrice = Math.max(0, Number(userData.totalPrice || 0));
-    const explicitWeeklyRate = Math.max(0, Number(options?.weeklyRate || 0));
-    const inferredWeeklyRate =
-      explicitWeeklyRate > 0
-        ? explicitWeeklyRate
-        : currentWeeks > 0 && currentTotalPrice > 0
+    await runTransaction(db, async (tx) => {
+      const [userSnap, paymentSnap] = await Promise.all([
+        tx.get(userRef),
+        tx.get(paymentRef),
+      ]);
+      if (paymentSnap.exists()) {
+        throw new Error("This payment reference has already been credited.");
+      }
+      const userData = (userSnap.data() as any) || {};
+      const currentWeeks = Math.max(0, Number(userData.weeksToCommit || 0));
+      const currentTotalPrice = Math.max(0, Number(userData.totalPrice || 0));
+      const weeklyRate =
+        Math.max(0, Number(options?.weeklyRate || 0)) ||
+        Math.max(0, Number(userData.weeklyRate || 0)) ||
+        (currentWeeks > 0 && currentTotalPrice > 0
           ? Math.round(currentTotalPrice / currentWeeks)
-          : 0;
+          : 0);
+      const baseAmount = Math.max(
+        0,
+        Number(options?.baseAmount || 0) ||
+          (weeklyRate > 0 ? safeWeeks * weeklyRate : 0) ||
+          Number(amount || 0),
+      );
 
-    const priceIncrement = Math.max(
-      0,
-      Number(options?.baseAmount || 0) ||
-        (inferredWeeklyRate > 0 ? safeWeeks * inferredWeeklyRate : 0) ||
-        Number(amount || 0),
-    );
-
-    await updateDoc(doc(db, "users", uid), {
-      weeksToCommit: increment(safeWeeks),
-      totalPrice: increment(priceIncrement),
-      status: "Complete",
-      pendingPayment: deleteField(),
-    });
-
-    await addDoc(collection(db, "users", uid, "payments"), {
-      amount,
-      baseAmount: priceIncrement,
-      weeklyRate: inferredWeeklyRate || undefined,
-      weeks: safeWeeks,
-      reference,
-      timestamp: Date.now(),
+      tx.update(userRef, {
+        weeksToCommit: increment(safeWeeks),
+        totalPrice: increment(baseAmount),
+        status: "Complete",
+        pendingPayment: deleteField(),
+        updatedAt: Date.now(),
+      });
+      tx.set(paymentRef, {
+        reference: ref,
+        uid,
+        kind: "topup",
+        status: "success",
+        source: "admin_override",
+        amount: Number(amount || 0),
+        baseAmount,
+        ...(weeklyRate > 0 ? { weeklyRate } : {}),
+        weeks: safeWeeks,
+        verifiedAt: serverTimestamp(),
+        timestamp: Date.now(),
+      });
     });
   },
 
@@ -1920,12 +1925,9 @@ export const registrationStore = {
   async getUnlockedSessionsForStudent(
     profile: RegistrationEntry,
   ): Promise<SessionDoc[]> {
-    // 🔒 Gate access: if payment is pending or not enrolled, no sessions
-    const hasAnyPending =
-      profile?.status === "Pending" ||
-      profile?.pendingPayment?.status === "Pending";
-
-    if (hasAnyPending) return [];
+    // 🔒 Gate access until the first payment is confirmed. A pending top-up
+    // must not hide weeks the student has already paid for.
+    if (profile?.status !== "Complete") return [];
 
     let cohortDocId = profile.cohortKey || profile.cohortId;
 
@@ -2072,25 +2074,79 @@ export const registrationStore = {
   // =========================
   // PENDING PAYMENTS (Admin actions)
   // =========================
+  // Admin override: confirm a first payment after checking it in Paystack.
+  // Sets the paid weeks from the pending payment and places the student in
+  // the path's active cohort, the same way the payment function does.
   async approveInitialPayment(
     uid: string,
     amount: number,
     weeks: number,
     reference: string,
   ): Promise<void> {
+    const ref = String(reference || "").trim();
+    if (!ref) throw new Error("Payment reference is required.");
+    const safeWeeks = Math.max(1, Math.floor(Number(weeks || 1)));
+
     const userRef = doc(db, "users", uid);
+    const paymentRef = doc(db, "users", uid, "payments", ref);
 
-    await updateDoc(userRef, {
-      status: "Complete",
-      pendingPayment: deleteField(),
-    });
+    const current = await getDoc(userRef);
+    const currentData = (current.data() as any) || {};
+    let cohort: { cohortId: string; cohortKey: string; label: string } | null =
+      null;
+    try {
+      const active = currentData.pathId
+        ? await this.getActiveCohortForPathId(String(currentData.pathId))
+        : currentData.path
+          ? await this.getActiveCohortForPath(String(currentData.path))
+          : null;
+      if (active?.cohortKey) {
+        cohort = {
+          cohortId: active.cohortId,
+          cohortKey: active.cohortKey,
+          label: active.label,
+        };
+      }
+    } catch {
+      cohort = null;
+    }
 
-    await addDoc(collection(db, "users", uid, "payments"), {
-      kind: "initial",
-      amount,
-      weeks,
-      reference,
-      timestamp: Date.now(),
+    await runTransaction(db, async (tx) => {
+      const paymentSnap = await tx.get(paymentRef);
+      if (paymentSnap.exists()) {
+        throw new Error("This payment reference has already been credited.");
+      }
+      const weeklyRate = Math.max(0, Number(currentData.weeklyRate || 0));
+      const baseAmount =
+        weeklyRate > 0 ? safeWeeks * weeklyRate : Number(amount || 0);
+
+      tx.update(userRef, {
+        status: "Complete",
+        weeksToCommit: safeWeeks,
+        totalPrice: baseAmount,
+        pendingPayment: deleteField(),
+        updatedAt: Date.now(),
+        ...(cohort
+          ? {
+              cohortId: cohort.cohortId,
+              cohortKey: cohort.cohortKey,
+              cohortLabel: cohort.label,
+            }
+          : {}),
+      });
+      tx.set(paymentRef, {
+        reference: ref,
+        uid,
+        kind: "initial",
+        status: "success",
+        source: "admin_override",
+        amount: Number(amount || 0),
+        baseAmount,
+        weeks: safeWeeks,
+        ...(cohort ? { cohortKey: cohort.cohortKey } : {}),
+        verifiedAt: serverTimestamp(),
+        timestamp: Date.now(),
+      });
     });
   },
 

@@ -27,37 +27,16 @@
       content="Learn Flutter app development, Web development and AI-assisted coding with CodeWithGideon. Practical coding classes for beginners and developers in Nigeria."
     />
 
-    <!-- Tailwind CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-
-    <!-- Tailwind config + theme preload -->
+    <!-- Theme preload (avoids a light flash for dark-mode users) -->
     <script>
-      tailwind.config = {
-        darkMode: "class",
-        theme: {
-          extend: {
-            colors: {
-              teal: {
-                50: "#f0fdfa",
-                100: "#ccfbf1",
-                500: "#14b8a6",
-                600: "#0d9488",
-                700: "#0f766e",
-              },
-            },
-          },
-        },
-      };
-
-      const theme =
-        localStorage.getItem("theme") ||
-        (window.matchMedia("(prefers-color-scheme: dark)").matches
-          ? "dark"
-          : "light");
-
-      if (theme === "dark") {
-        document.documentElement.classList.add("dark");
-      }
+      try {
+        const theme =
+          localStorage.getItem("theme") ||
+          (window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light");
+        if (theme === "dark") document.documentElement.classList.add("dark");
+      } catch (e) {}
     </script>
 
     <!-- Fonts -->
@@ -67,44 +46,6 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
     />
-
-    <!-- Styles -->
-    <style>
-      body {
-        font-family: "Inter", sans-serif;
-        scroll-behavior: smooth;
-      }
-
-      .text-gradient {
-        background: linear-gradient(to right, #1e3a8a, #0d9488);
-        background-clip: text;
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-      }
-
-      .dark ::-webkit-scrollbar {
-        width: 8px;
-      }
-
-      .dark ::-webkit-scrollbar-track {
-        background: #0f172a;
-      }
-
-      .dark ::-webkit-scrollbar-thumb {
-        background: #334155;
-        border-radius: 4px;
-      }
-    </style>
-
-    <!-- ✅ IMPORT MAP (THIS WAS BROKEN BEFORE) -->
-    <script type="importmap">
-      {
-        "imports": {
-          "react": "https://esm.sh/react@19.2.4",
-          "react-dom": "https://esm.sh/react-dom@19.2.4"
-        }
-      }
-    </script>
 
     <!-- App entry -->
     <script type="module" src="/index.tsx"></script>
