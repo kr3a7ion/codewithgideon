@@ -23,7 +23,7 @@ import cors from "cors";
 import * as crypto from "crypto";
 import {adminAuth, db} from "./admin.js";
 
-const PAYSTACK_SECRET_KEY = defineSecret("PAYSTACK_SECRET_KEY");
+export const PAYSTACK_SECRET_KEY = defineSecret("PAYSTACK_SECRET_KEY");
 
 // ---------------------------------------------------------------------------
 // CORS: browsers may only call these endpoints from the site itself.
@@ -64,7 +64,7 @@ type CohortRef = {
   cohortLabel: string;
 };
 
-type FulfilResult = {
+export type FulfilResult = {
   alreadyProcessed: boolean;
   status: "success" | "needs_review";
   safeWeeks: number;
@@ -75,7 +75,7 @@ type FulfilResult = {
 };
 
 /** Error whose message is safe to show to students. */
-class PaymentError extends Error {
+export class PaymentError extends Error {
   httpStatus: number;
   code: string;
 
@@ -101,7 +101,8 @@ const PINNED_COURSES: Record<string, {weeks: number; rate: number}> = {
   "ai-assisted development": {weeks: 4, rate: 10000},
 };
 
-const safeString = (value: unknown): string => String(value ?? "").trim();
+export const safeString = (value: unknown): string =>
+  String(value ?? "").trim();
 
 const toPositiveInt = (value: unknown): number => {
   const n = Math.floor(Number(value));
@@ -111,7 +112,7 @@ const toPositiveInt = (value: unknown): number => {
 const isValidEmail = (value: string): boolean =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
-const isValidReference = (value: string): boolean =>
+export const isValidReference = (value: string): boolean =>
   /^[A-Za-z0-9_.=-]{6,100}$/.test(value);
 
 const pathKey = (title: string): string =>
@@ -288,7 +289,7 @@ const resolveActiveCohort = async (
 // ---------------------------------------------------------------------------
 // Paystack API
 // ---------------------------------------------------------------------------
-const fetchPaystackTransaction = async (
+export const fetchPaystackTransaction = async (
   reference: string,
   secret: string,
 ): Promise<any> => {
@@ -366,10 +367,10 @@ export const computeCredit = (input: {
 // ---------------------------------------------------------------------------
 // Fulfilment (shared by verify + webhook). Idempotent per reference.
 // ---------------------------------------------------------------------------
-const fulfilPayment = async (params: {
+export const fulfilPayment = async (params: {
   reference: string;
   secret: string;
-  source: "verify" | "webhook";
+  source: "verify" | "webhook" | "admin" | "reconcile";
   requestedUid?: string;
   authUid?: string;
   hintWeeks?: unknown;
