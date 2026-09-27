@@ -40,6 +40,7 @@ const PaymentsPage: React.FC = () => {
     clearPending,
     busy,
     automationStatus,
+    markPaymentReviewed,
   } = useAdmin();
   const i = useAdminInsights();
   const [search, setSearch] = useState("");
@@ -165,7 +166,7 @@ const PaymentsPage: React.FC = () => {
       {i.needsReview.length ? (
         <Panel
           title="Needs review"
-          description="Paystack took the money but it couldn't be matched to weeks automatically. Credit the student manually or refund in Paystack."
+          description="Paystack took the money but it couldn't be matched to weeks automatically. Credit the student yourself (Students → Mark as paid) or refund in Paystack, then mark it as handled."
           padded={false}
         >
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -183,12 +184,17 @@ const PaymentsPage: React.FC = () => {
                     </p>
                     <p className="mt-0.5 text-xs text-slate-400">Ref {p.reference || p.id}</p>
                   </div>
-                  <Link
-                    to={`/admin/students?student=${encodeURIComponent(p.userId)}`}
-                    className="text-sm font-semibold text-teal-700 hover:underline dark:text-teal-400"
-                  >
-                    Open student
-                  </Link>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Link
+                      to={`/admin/students?student=${encodeURIComponent(p.userId)}`}
+                      className="text-sm font-semibold text-teal-700 hover:underline dark:text-teal-400"
+                    >
+                      Open student
+                    </Link>
+                    <Button size="sm" variant="secondary" onClick={() => markPaymentReviewed(p)}>
+                      Mark as handled
+                    </Button>
+                  </div>
                 </li>
               );
             })}

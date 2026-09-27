@@ -16,7 +16,7 @@ import {
 import { Button, cn } from "../../../ui";
 import { useAdmin } from "../AdminWorkspaceContext";
 import { sessionTimeToMs, toLocalDateInput } from "../lib";
-import { AdminPage, EmptyHint, OverflowMenu, Panel, Pill, Segmented, Spinner } from "../ui";
+import { AdminPage, EmptyHint, OverflowMenu, Panel, Pill, Segmented, Spinner, useNow } from "../ui";
 import { ClassFormDialog } from "../parts/ClassFormDialog";
 import { CopyScheduleDialog, GenerateScheduleDialog } from "../parts/ScheduleDialogs";
 import { RecordingLinkDialog } from "../parts/RecordingLinkDialog";
@@ -73,7 +73,7 @@ const ClassesPage: React.FC = () => {
     [activeByPath],
   );
 
-  const now = Date.now();
+  const now = useNow();
   const rows = useMemo(() => {
     const withTime = sessions.map((s) => {
       const start = sessionTimeToMs((s as any).startsAt);
@@ -86,8 +86,7 @@ const ClassesPage: React.FC = () => {
       past: published.filter((r) => r.end <= now).sort((a, b) => b.start - a.start),
       drafts: withTime.filter((r) => (r.s as any).isPublished === false).sort((a, b) => a.start - b.start),
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions]);
+  }, [sessions, now]);
 
   const selectCohort = (id: string) => {
     setSelectedCohortId(id);
@@ -112,8 +111,12 @@ const ClassesPage: React.FC = () => {
   };
 
   const togglePublish = async (s: any) => {
-    await patchSession(selectedCohortId, s.id, { isPublished: s.isPublished === false });
-    notify("success", s.isPublished === false ? "Class is now visible to students." : "Class hidden (draft).");
+    try {
+      await patchSession(selectedCohortId, s.id, { isPublished: s.isPublished === false });
+      notify("success", s.isPublished === false ? "Class is now visible to students." : "Class hidden (draft).");
+    } catch (e: any) {
+      notify("error", e?.message || "Couldn't update this class. Open it and save it once, then try again.");
+    }
   };
 
   const list = rows[view];

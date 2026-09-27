@@ -10,7 +10,7 @@ import { currentSeasonKey, nextSeasonKey, seasonLabel } from "../automation";
 import { AdminPage, Dialog, EmptyHint, OverflowMenu, Panel, Pill, relativeTime } from "../ui";
 
 const StartIntakeDialog: React.FC<{ path: PathDoc | null; onClose: () => void }> = ({ path, onClose }) => {
-  const { activeByPath, startIntake, notify } = useAdmin();
+  const { activeByPath, startIntake, notify, cohorts, intakeCohortId, registrations } = useAdmin();
   const navigate = useNavigate();
   const current = path ? activeByPath[path.id] : undefined;
   const [month, setMonth] = useState("");
@@ -53,6 +53,12 @@ const StartIntakeDialog: React.FC<{ path: PathDoc | null; onClose: () => void }>
   };
 
   const same = current?.seasonKey === month;
+  const earlier = !!current?.seasonKey && /^\d{4}-\d{2}$/.test(month) && month < current.seasonKey;
+  const targetKey = path && month ? `${intakeCohortId(path.id)}-${month}` : "";
+  const reopening = !same && cohorts.find((c) => c.id === targetKey);
+  const reopeningStudents = reopening
+    ? registrations.filter((r: any) => r.cohortKey === targetKey && r.status === "Complete").length
+    : 0;
 
   return (
     <Dialog
@@ -97,6 +103,15 @@ const StartIntakeDialog: React.FC<{ path: PathDoc | null; onClose: () => void }>
             </>
           )}
         </div>
+        {reopening ? (
+          <p className="rounded-xl bg-orange-50 p-3 text-sm text-orange-800 dark:bg-orange-500/10 dark:text-orange-200">
+            {reopening.label} already exists ({reopeningStudents} paid student{reopeningStudents === 1 ? "" : "s"}). Starting it again reopens that cohort.
+          </p>
+        ) : earlier ? (
+          <p className="rounded-xl bg-orange-50 p-3 text-sm text-orange-800 dark:bg-orange-500/10 dark:text-orange-200">
+            This month is earlier than the open intake ({current?.label}). Double-check the month.
+          </p>
+        ) : null}
         {error ? <p className="text-sm font-semibold text-red-600">{error}</p> : null}
       </form>
     </Dialog>
@@ -201,7 +216,7 @@ const CohortsPage: React.FC = () => {
                         label: "Delete cohort",
                         icon: <Trash2 className="h-4 w-4" />,
                         danger: true,
-                        disabled: students > 0,
+                        disabled: students > 0 || currentKeys.has(c.id),
                         onSelect: () => deleteCohort(c),
                       },
                     ]}

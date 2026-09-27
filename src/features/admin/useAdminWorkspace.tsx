@@ -5,7 +5,7 @@ import { defaultSiteConfig, getSiteConfig, saveSiteConfig, SiteConfig } from "..
 import { collection, collectionGroup, getDoc, getDocs, limit, query, doc, updateDoc, deleteDoc, addDoc, serverTimestamp, orderBy, onSnapshot } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../../../services/firebase";
-import type { SessionDraft } from "./automation";
+import { sessionDocId, type SessionDraft } from "./automation";
 import {
   getCohortDocId,
   findCohortDocIdByKey,
@@ -796,7 +796,7 @@ export const useAdminWorkspace = ({
         query(
           collectionGroup(db, "payments"),
           orderBy("verifiedAt", "desc"),
-          limit(40),
+          limit(150),
         ),
       );
 
@@ -999,10 +999,11 @@ export const useAdminWorkspace = ({
       confirmLabel: "Delete Registration",
       tone: "danger",
     });
-    if (!ok) return;
+    if (!ok) return false;
 
     await registrationStore.delete(uid);
     await Promise.all([fetchRegistrations(), fetchPaymentRecords()]);
+    return true;
   };
 
   const handleClearAll = async () => {
@@ -2328,20 +2329,25 @@ export const useAdminWorkspace = ({
       throw new Error("Pick a cohort whose course path still exists.");
     }
     const existing = await registrationStore.getCohortSessions(cohortId);
-    const taken = new Set(
-      (existing || []).map(
-        (s) => `${s.week}|${Math.round(sessionTimeToMs((s as any).startsAt) / 60000)}`,
-      ),
-    );
+    // Skip anything that exists: same week + start time, or the same id
+    // (a class keeps its id even after it's moved).
+    const taken = new Set<string>();
+    (existing || []).forEach((s) => {
+      taken.add(`${s.week}|${Math.round(sessionTimeToMs((s as any).startsAt) / 60000)}`);
+      taken.add(`id:${s.id}`);
+    });
 
     let created = 0;
     let skipped = 0;
+    let failed = 0;
     for (const d of drafts) {
       const key = `${d.week}|${Math.round(d.startsAtMs / 60000)}`;
-      if (taken.has(key)) {
+      const idKey = `id:${sessionDocId(d.week, d.startsAtMs, pathId)}`;
+      if (taken.has(key) || taken.has(idKey)) {
         skipped += 1;
         continue;
       }
+      try {
       await registrationStore.addCohortSession(cohortId, {
         title: d.title,
         week: d.week,
@@ -2355,12 +2361,41 @@ export const useAdminWorkspace = ({
         notes: d.notes,
       } as any);
       taken.add(key);
+      taken.add(idKey);
       created += 1;
+      } catch (e) {
+        console.error("createSessionsBatch: one class failed", d, e);
+        failed += 1;
+      }
     }
 
     if (selectedCohortId === cohortId) await fetchSessions(cohortId);
     await fetchOverviewSessions();
-    return { created, skipped };
+    return { created, skipped, failed };
+  };
+
+  /** Clear a "needs review" payment after crediting or refunding it by hand. */
+  const markPaymentReviewed = async (payment: PaymentRecordDoc) => {
+    if (!payment?.userId || !payment?.id) return;
+    const ok = await confirmAction({
+      title: "Mark as handled?",
+      message:
+        "Use this after you've credited the student yourself or refunded them in Paystack. It removes the payment from the review list.",
+      confirmLabel: "Mark as handled",
+      tone: "info",
+    });
+    if (!ok) return;
+    try {
+      await updateDoc(doc(db, "users", payment.userId, "payments", payment.id), {
+        status: "reviewed",
+        reviewedAt: serverTimestamp(),
+        reviewedBy: auth.currentUser?.email || "admin",
+      });
+      await fetchPaymentRecords();
+      notify("success", "Payment marked as handled.");
+    } catch (e: any) {
+      notify("error", e?.message || "Couldn't update the payment.");
+    }
   };
 
   /** Quick edits from lists (no modal): recording link, publish toggle. */
@@ -2375,10 +2410,42 @@ export const useAdminWorkspace = ({
   };
 
   /** Start a new intake for a path; new paying students join it. */
+  const intakeCohortId = (pathId: string) => {
+    const path = pathsById.get(pathId);
+    const own = String(activeByPath[pathId]?.cohortId || "").toUpperCase();
+    const guess = String(
+      own || registrationStore.computeCohortIdFromPath(path?.title || pathId),
+    ).toUpperCase();
+    // Another path already uses this code (e.g. two titles containing "web")?
+    const clash =
+      Object.entries(activeByPath).some(
+        ([pid, a]) =>
+          pid !== pathId &&
+          paths.some((p) => p.id === pid) &&
+          String(a?.cohortId || "").toUpperCase() === guess,
+      ) ||
+      cohorts.some(
+        (c: any) =>
+          String(c.cohortId || "").toUpperCase() === guess &&
+          c.pathId &&
+          c.pathId !== pathId,
+      );
+    return clash ? pathId.replace(/[^A-Za-z0-9]/g, "_").toUpperCase() : guess;
+  };
+
   const startIntake = async (pathId: string, seasonKey: string, label: string) => {
+    const cohortId = intakeCohortId(pathId);
+    const key = registrationStore.computeCohortKey(cohortId, seasonKey);
+    const existing: any = cohorts.find((c) => c.id === key);
+    if (existing?.pathId && existing.pathId !== pathId) {
+      throw new Error(
+        `${existing.label || key} belongs to another path. Pick a different month.`,
+      );
+    }
     const res = await registrationStore.setActiveCohortForPathId(pathId, {
       seasonKey,
       seasonLabel: label,
+      cohortId,
     } as any);
     const list = await fetchCohorts();
     await Promise.all([fetchActiveCohorts(), fetchOverviewSessions(list)]);
@@ -2668,6 +2735,8 @@ export const useAdminWorkspace = ({
     createSessionsBatch,
     patchSession,
     startIntake,
+    intakeCohortId,
+    markPaymentReviewed,
     clearAllRegistrationsConfirmed,
     cohortStudentCounts,
   };

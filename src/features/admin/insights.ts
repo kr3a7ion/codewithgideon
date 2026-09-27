@@ -7,6 +7,7 @@ import type { RegistrationEntry } from "../../../services/registrationStore";
 import { useAdmin } from "./AdminWorkspaceContext";
 import { paymentRecordAmount, sessionTimeToMs, toDateMs, type PaymentRecordDoc } from "./lib";
 import type { OverviewSession } from "./useAdminWorkspace";
+import { useNow } from "./ui";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -37,9 +38,9 @@ export const useAdminInsights = () => {
     unreadSupportCount,
     stats,
   } = useAdmin();
+  const now = useNow();
 
   return useMemo(() => {
-    const now = Date.now();
 
     const pendingCheckouts: PendingCheckout[] = pendingPayments.map((reg: any) => {
       const p = reg.pendingPayment || {};
@@ -51,7 +52,8 @@ export const useAdminInsights = () => {
         amount: Number(p.amount || 0),
         kind: p.kind === "topup" ? "topup" : "initial",
         createdAt,
-        ageMs: createdAt ? now - createdAt : 0,
+        // No timestamp: treat as old enough to check (the server does too).
+        ageMs: createdAt ? Math.max(0, now - createdAt) : 24 * HOUR,
       };
     });
     // Checkouts younger than 10 minutes are probably still being paid.
@@ -162,6 +164,7 @@ export const useAdminInsights = () => {
       todayAttention,
     };
   }, [
+    now,
     registrations,
     pendingPayments,
     paymentRecords,

@@ -135,8 +135,7 @@ const StudentPanel: React.FC<{ reg: RegistrationEntry | null; onClose: () => voi
                   icon: <Trash2 className="h-4 w-4" />,
                   danger: true,
                   onSelect: async () => {
-                    await handleDelete(reg.uid);
-                    onClose();
+                    if (await handleDelete(reg.uid)) onClose();
                   },
                 },
               ]}

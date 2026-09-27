@@ -117,6 +117,37 @@ export const reminderId = (
 ): string =>
   `${cohortId}__${sessionId}__${startMs}`.replace(/[^\w-]/g, "_").slice(0, 400);
 
+/**
+ * Fulfilment errors that retrying won't fix (bad metadata, someone else's
+ * reference, missing profile...). Such checkouts are cleared after 24 h.
+ */
+export const PERMANENT_ERROR_CODES = new Set([
+  "missing_uid",
+  "uid_mismatch",
+  "auth_mismatch",
+  "reference_used",
+  "user_not_found",
+  "bad_currency",
+  "bad_amount",
+  "paystack_invalid",
+]);
+
+/**
+ * How old a checkout is. createdAt comes from the student's device, so it
+ * is only trusted when it isn't in the future; otherwise the time the server
+ * first saw the checkout is used.
+ */
+export const checkoutAgeMs = (
+  createdAt: unknown,
+  firstSeenAt: number,
+  nowMs: number,
+): number => {
+  const created = toMillis(createdAt);
+  const start =
+    created > 0 && created <= nowMs ? Math.min(created, firstSeenAt) : firstSeenAt;
+  return Math.max(0, nowMs - start);
+};
+
 // ---------------------------------------------------------------------------
 // Shared: check one reference with Paystack and credit it if paid
 // ---------------------------------------------------------------------------
@@ -140,8 +171,8 @@ const clearPendingIfMatches = async (uid: string, reference: string) => {
   const userRef = db.collection("users").doc(uid);
   await db.runTransaction(async (t) => {
     const snap = await t.get(userRef);
-    const pendingRef = safeString(snap.data()?.pendingPayment?.reference);
-    if (snap.exists && pendingRef && pendingRef === reference) {
+    const pending = snap.data()?.pendingPayment;
+    if (snap.exists && pending && safeString(pending.reference) === reference) {
       t.update(userRef, {
         pendingPayment: FieldValue.delete(),
         updatedAt: Date.now(),
@@ -275,6 +306,7 @@ export const reconcilePendingPayments = onSchedule(
     timeZone: TIME_ZONE,
     secrets: [PAYSTACK_SECRET_KEY],
     retryCount: 0,
+    timeoutSeconds: 300,
   },
   async () => {
     const secret = PAYSTACK_SECRET_KEY.value();
@@ -283,7 +315,8 @@ export const reconcilePendingPayments = onSchedule(
       return;
     }
 
-    const now = Date.now();
+    const startedAt = Date.now();
+    const budgetMs = 240 * 1000; // stop well before the 300 s timeout
     const counts = {
       checked: 0,
       credited: 0,
@@ -291,63 +324,95 @@ export const reconcilePendingPayments = onSchedule(
       cleared: 0,
       waiting: 0,
       errors: 0,
+      unfinished: 0,
     };
 
-    const snap = await db
-      .collection("users")
-      .where("pendingPayment.status", "==", "Pending")
-      .limit(200)
-      .get();
+    try {
+      const snap = await db
+        .collection("users")
+        .where("pendingPayment.status", "==", "Pending")
+        .limit(500)
+        .get();
 
-    for (const userDoc of snap.docs) {
-      const pending = userDoc.data()?.pendingPayment || {};
-      const reference = safeString(pending.reference);
-      const ageMs = now - toMillis(pending.createdAt);
-      // Give students time to finish paying; the webhook usually wins.
-      if (!isValidReference(reference) || ageMs < 10 * MINUTE) {
-        counts.waiting += 1;
-        continue;
-      }
+      for (const userDoc of snap.docs) {
+        if (Date.now() - startedAt > budgetMs) {
+          counts.unfinished += 1;
+          continue;
+        }
+        const now = Date.now();
+        const pending = userDoc.data()?.pendingPayment || {};
+        const reference = safeString(pending.reference);
 
-      counts.checked += 1;
-      try {
-        const result = await checkAndCredit({
-          reference,
-          uid: userDoc.id,
-          secret,
-          source: "reconcile",
-        });
+        // First time the server saw this checkout (per student + reference).
+        const seenRef = db.collection("automationCheckouts").doc(userDoc.id);
+        const seenSnap = await seenRef.get();
+        let firstSeenAt = now;
+        if (seenSnap.exists && safeString(seenSnap.data()?.reference) === reference) {
+          firstSeenAt = toMillis(seenSnap.data()?.firstSeenAt) || now;
+        } else {
+          await seenRef.set({reference, firstSeenAt: now});
+        }
+        const ageMs = checkoutAgeMs(pending.createdAt, firstSeenAt, now);
 
-        if (result.outcome === "credited") counts.credited += 1;
-        else if (result.outcome === "needs_review") counts.needsReview += 1;
-        else if (result.outcome === "already_credited") counts.cleared += 1;
-        else {
-          const decision = decidePending({
-            ageMs,
-            paystackStatus: result.paystackStatus,
-          });
-          if (decision === "clear") {
+        if (!isValidReference(reference)) {
+          if (ageMs >= DAY) {
             await clearPendingIfMatches(userDoc.id, reference);
             counts.cleared += 1;
           } else {
             counts.waiting += 1;
           }
+          continue;
         }
-      } catch (err) {
-        counts.errors += 1;
-        logger.warn("Reconcile failed for a checkout", {
-          uid: userDoc.id,
-          reference,
-          message: (err as any)?.message,
-        });
-      }
-    }
+        // Give students time to finish paying; the webhook usually wins.
+        if (ageMs < 10 * MINUTE) {
+          counts.waiting += 1;
+          continue;
+        }
 
-    await db.collection("automation").doc("payments").set({
-      lastRunAt: FieldValue.serverTimestamp(),
-      ...counts,
-    }, {merge: true});
-    logger.info("Pending payments reconciled", counts);
+        counts.checked += 1;
+        try {
+          const result = await checkAndCredit({
+            reference,
+            uid: userDoc.id,
+            secret,
+            source: "reconcile",
+          });
+
+          if (result.outcome === "credited") counts.credited += 1;
+          else if (result.outcome === "needs_review") counts.needsReview += 1;
+          else if (result.outcome === "already_credited") counts.cleared += 1;
+          else if (
+            decidePending({ageMs, paystackStatus: result.paystackStatus}) ===
+            "clear"
+          ) {
+            await clearPendingIfMatches(userDoc.id, reference);
+            counts.cleared += 1;
+          } else {
+            counts.waiting += 1;
+          }
+        } catch (err) {
+          const code = err instanceof PaymentError ? err.code : "";
+          if (PERMANENT_ERROR_CODES.has(code) && ageMs >= DAY) {
+            await clearPendingIfMatches(userDoc.id, reference);
+            counts.cleared += 1;
+          } else {
+            counts.errors += 1;
+          }
+          logger.warn("Reconcile couldn't process a checkout", {
+            uid: userDoc.id,
+            reference,
+            code,
+            message: (err as any)?.message,
+          });
+        }
+      }
+    } finally {
+      await db.collection("automation").doc("payments").set({
+        lastRunAt: FieldValue.serverTimestamp(),
+        ...counts,
+      }, {merge: true});
+      logger.info("Pending payments reconciled", counts);
+    }
   },
 );
 
@@ -356,74 +421,99 @@ export const reconcilePendingPayments = onSchedule(
 // ---------------------------------------------------------------------------
 
 export const sendClassReminders = onSchedule(
-  {schedule: "every 15 minutes", timeZone: TIME_ZONE, retryCount: 0},
+  {
+    schedule: "every 15 minutes",
+    timeZone: TIME_ZONE,
+    retryCount: 0,
+    timeoutSeconds: 120,
+  },
   async () => {
     const now = Date.now();
     let sent = 0;
+    let failed = 0;
 
-    // Recent cohorts only: classes for a cohort run for weeks after it
-    // stops taking new students, so this doesn't filter on "active".
-    const cohortsSnap = await db
-      .collection("cohorts")
-      .where("createdAt", ">", now - 400 * DAY)
-      .get();
+    try {
+      // Every cohort (the collection is small). Classes run for weeks after
+      // an intake closes, so this doesn't filter on "active". Very old
+      // cohorts are skipped.
+      const cohortsSnap = await db.collection("cohorts").get();
 
-    for (const cohortDoc of cohortsSnap.docs) {
-      const cohortId = cohortDoc.id;
-      const cohortLabel =
-        safeString(cohortDoc.data()?.label) || cohortId;
+      for (const cohortDoc of cohortsSnap.docs) {
+        const cohort = cohortDoc.data() || {};
+        const created = toMillis(cohort.createdAt);
+        if (created && created < now - 400 * DAY) continue;
+        const cohortId = cohortDoc.id;
+        const cohortLabel = safeString(cohort.label) || cohortId;
 
-      const sessionsSnap = await cohortDoc.ref
-        .collection("sessions")
-        .where("startsAt", ">", Timestamp.fromMillis(now))
-        .where("startsAt", "<=", Timestamp.fromMillis(now + REMINDER_LEAD_MS))
-        .get();
+        let sessionsSnap;
+        try {
+          sessionsSnap = await cohortDoc.ref
+            .collection("sessions")
+            .where("startsAt", ">", Timestamp.fromMillis(now))
+            .where("startsAt", "<=", Timestamp.fromMillis(now + REMINDER_LEAD_MS))
+            .get();
+        } catch (err) {
+          failed += 1;
+          logger.warn("Reminder query failed", {cohortId, message: (err as any)?.message});
+          continue;
+        }
 
-      for (const sessionDoc of sessionsSnap.docs) {
-        const session = sessionDoc.data() || {};
-        if (!isReminderDue(session, now)) continue;
+        for (const sessionDoc of sessionsSnap.docs) {
+          const session = sessionDoc.data() || {};
+          if (!isReminderDue(session, now)) continue;
 
-        const startMs = toMillis(session.startsAt);
-        const markerRef = db
-          .collection("automationReminders")
-          .doc(reminderId(cohortId, sessionDoc.id, startMs));
-        const messageRef = cohortDoc.ref.collection("messages").doc();
-        const {title, body} = reminderMessage(session);
+          try {
+            const startMs = toMillis(session.startsAt);
+            const markerRef = db
+              .collection("automationReminders")
+              .doc(reminderId(cohortId, sessionDoc.id, startMs));
+            const messageRef = cohortDoc.ref.collection("messages").doc();
+            const {title, body} = reminderMessage(session);
 
-        const created = await db.runTransaction(async (t) => {
-          const marker = await t.get(markerRef);
-          if (marker.exists) return false;
-          t.set(markerRef, {
-            cohortId,
-            sessionId: sessionDoc.id,
-            startsAt: session.startsAt,
-            messageId: messageRef.id,
-            sentAt: FieldValue.serverTimestamp(),
-          });
-          // Same shape as admin announcements (validCohortMessage).
-          t.set(messageRef, {
-            cohortId,
-            cohortLabel,
-            title,
-            body,
-            ctaLabel: "",
-            ctaUrl: "",
-            sentBy: "automation",
-            sentAt: FieldValue.serverTimestamp(),
-            createdAt: Date.now(),
-            status: "sent",
-          });
-          return true;
-        });
-        if (created) sent += 1;
+            const created = await db.runTransaction(async (t) => {
+              const marker = await t.get(markerRef);
+              if (marker.exists) return false;
+              t.set(markerRef, {
+                cohortId,
+                sessionId: sessionDoc.id,
+                startsAt: session.startsAt,
+                messageId: messageRef.id,
+                sentAt: FieldValue.serverTimestamp(),
+              });
+              // Same shape as admin announcements (validCohortMessage).
+              t.set(messageRef, {
+                cohortId,
+                cohortLabel,
+                title,
+                body,
+                ctaLabel: "",
+                ctaUrl: "",
+                sentBy: "automation",
+                sentAt: FieldValue.serverTimestamp(),
+                createdAt: Date.now(),
+                status: "sent",
+              });
+              return true;
+            });
+            if (created) sent += 1;
+          } catch (err) {
+            failed += 1;
+            logger.warn("Reminder failed for a class", {
+              cohortId,
+              sessionId: sessionDoc.id,
+              message: (err as any)?.message,
+            });
+          }
+        }
       }
+    } finally {
+      await db.collection("automation").doc("classReminders").set({
+        lastRunAt: FieldValue.serverTimestamp(),
+        lastSent: sent,
+        lastFailed: failed,
+        ...(sent > 0 ? {totalSent: FieldValue.increment(sent)} : {}),
+      }, {merge: true});
+      if (sent || failed) logger.info("Class reminders", {sent, failed});
     }
-
-    await db.collection("automation").doc("classReminders").set({
-      lastRunAt: FieldValue.serverTimestamp(),
-      lastSent: sent,
-      ...(sent > 0 ? {totalSent: FieldValue.increment(sent)} : {}),
-    }, {merge: true});
-    if (sent) logger.info("Class reminders sent", {sent});
   },
 );

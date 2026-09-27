@@ -81,6 +81,7 @@ export const registrationStore: any = {
   getResources: async () => wait(previewResources),
   getCommunitySpaces: async () => wait(previewSpaces),
   computeCohortKey: (id: string, season: string) => `${id}-${season}`,
+  computeCohortIdFromPath: (title: string) => cohortIdFromPath(title),
   pathKey: (t: string) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, "-"),
   resolvePathId: async () => "path_flutter",
   getActiveCohortForPathId: async (pathId: string) => wait(activeCohorts[pathId] || { cohortId: "FLUTTER", cohortKey: "FLUTTER-2026-09", label: "Current Cohort" }),
@@ -113,7 +114,7 @@ export const registrationStore: any = {
   },
   setActiveCohortForPathId: async (pathId: string, input: any) => {
     const p = paths.find((x) => x.id === pathId)!;
-    const cohortId = cohortIdFromPath(p.title);
+    const cohortId = String(input.cohortId || cohortIdFromPath(p.title)).toUpperCase();
     const cohortKey = `${cohortId}-${input.seasonKey}`;
     activeCohorts[pathId] = { pathId, path: p.title, cohortId, seasonKey: input.seasonKey, cohortKey, label: input.seasonLabel };
     previewDb.activeCohorts = Object.entries(activeCohorts).map(([id, v]) => ({ id, ...v }));

@@ -56,3 +56,22 @@ test("rescheduling a class gives it a new reminder id", () => {
   assert.notEqual(a, b);
   assert.match(a, /^[\w-]+$/);
 });
+
+test("checkout age ignores device times in the future and uses first-seen", async () => {
+  const {checkoutAgeMs} = await import("../lib/automation.js");
+  const now = Date.UTC(2026, 8, 27, 12, 0);
+  // Honest device time earlier than first-seen: use it.
+  assert.equal(checkoutAgeMs(now - 5 * HOUR, now - HOUR, now), 5 * HOUR);
+  // Device time in the future: fall back to first-seen.
+  assert.equal(checkoutAgeMs(now + 10 * 24 * HOUR, now - 2 * HOUR, now), 2 * HOUR);
+  // Missing: first-seen.
+  assert.equal(checkoutAgeMs(undefined, now - 30 * MIN, now), 30 * MIN);
+});
+
+test("permanent fulfilment errors are recognised", async () => {
+  const {PERMANENT_ERROR_CODES} = await import("../lib/automation.js");
+  for (const c of ["missing_uid", "uid_mismatch", "reference_used", "user_not_found"]) {
+    assert.ok(PERMANENT_ERROR_CODES.has(c), c);
+  }
+  assert.ok(!PERMANENT_ERROR_CODES.has("paystack_unreachable"));
+});

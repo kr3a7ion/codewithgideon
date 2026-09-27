@@ -88,10 +88,12 @@ export const GenerateScheduleDialog: React.FC<{
     setSaving(true);
     setError("");
     try {
-      const { created, skipped } = await createSessionsBatch(cohort.id, pathId, drafts);
+      const { created, skipped, failed } = await createSessionsBatch(cohort.id, pathId, drafts);
       notify(
-        "success",
-        `Created ${created} class${created === 1 ? "" : "es"} for ${cohort.label}${skipped ? ` (${skipped} already existed)` : ""}.`,
+        failed ? "error" : "success",
+        `Created ${created} class${created === 1 ? "" : "es"} for ${cohort.label}` +
+          `${skipped ? `, ${skipped} already existed` : ""}` +
+          `${failed ? `, ${failed} couldn't be saved (check them and add them by hand)` : ""}.`,
       );
       onClose();
     } catch (e: any) {
@@ -217,8 +219,13 @@ export const CopyScheduleDialog: React.FC<{
     setSaving(true);
     setError("");
     try {
-      const { created, skipped } = await createSessionsBatch(cohort.id, pathId, drafts);
-      notify("success", `Copied ${created} class${created === 1 ? "" : "es"} to ${cohort.label}${skipped ? ` (${skipped} already existed)` : ""}.`);
+      const { created, skipped, failed } = await createSessionsBatch(cohort.id, pathId, drafts);
+      notify(
+        failed ? "error" : "success",
+        `Copied ${created} class${created === 1 ? "" : "es"} to ${cohort.label}` +
+          `${skipped ? `, ${skipped} already existed` : ""}` +
+          `${failed ? `, ${failed} couldn't be saved` : ""}.`,
+      );
       onClose();
     } catch (e: any) {
       setError(e?.message || "Couldn't copy the schedule.");

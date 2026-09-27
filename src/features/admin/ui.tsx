@@ -516,6 +516,17 @@ export const InfoRow: React.FC<{ label: string; children: React.ReactNode }> = (
 // Formatting
 // ---------------------------------------------------------------------------
 
+/** Current time that refreshes on an interval, so "live", "soon" and
+ *  "past" labels stay right while a page is left open. */
+export const useNow = (intervalMs = 60_000) => {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), intervalMs);
+    return () => window.clearInterval(t);
+  }, [intervalMs]);
+  return now;
+};
+
 export const naira = (n: number) => `₦${Math.round(Number(n) || 0).toLocaleString()}`;
 
 export const relativeTime = (ms: number, now = Date.now()) => {

@@ -54,6 +54,24 @@ const withTime = (day: Date, time: string): number => {
   return d.getTime();
 };
 
+/** Class titles must be at least 3 characters (Firestore rules). */
+export const safeTitle = (title: string, week: number) => {
+  const t = String(title || "").trim();
+  if (!t) return `Week ${week} class`;
+  return t.length < 3 ? `Week ${week}: ${t}` : t.slice(0, 140);
+};
+
+/**
+ * The id registrationStore.addCohortSession gives a class, so a batch can
+ * skip classes that already exist even if they were edited since.
+ */
+export const sessionDocId = (week: number, startsAtMs: number, pathId: string) => {
+  const d = new Date(startsAtMs);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const safePathId = String(pathId || "nopid").trim().replace(/[^\w-]/g, "_");
+  return `W${p(week || 1)}_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}_${safePathId}`;
+};
+
 const addDays = (d: Date, days: number): Date => {
   const next = new Date(d);
   next.setDate(next.getDate() + days);
@@ -87,7 +105,7 @@ export const buildSchedule = (
     days.forEach((day, i) => {
       drafts.push({
         week: w + 1,
-        title: days.length > 1 ? `${baseTitle} (part ${i + 1})` : baseTitle,
+        title: safeTitle(days.length > 1 ? `${baseTitle} (part ${i + 1})` : baseTitle, w + 1),
         startsAtMs: withTime(day, options.time),
         durationMins: Math.max(15, Math.min(600, Math.floor(options.durationMins || 60))),
         joinUrl: options.joinUrl.trim(),
@@ -123,7 +141,7 @@ export const shiftSchedule = (
     const day = addDays(parseLocalDate(toLocalDateInput(ms))!, shiftDays);
     return {
       week: Number(s.week || 1),
-      title: String(s.title || "").trim() || `Week ${s.week} class`,
+      title: safeTitle(String(s.title || ""), Number(s.week || 1)),
       startsAtMs: withTime(day, toLocalTimeInput(ms)),
       durationMins: Number((s as any).durationMins || 60),
       joinUrl: String((s as any).joinUrl || ""),
@@ -155,7 +173,7 @@ export const seasonLabel = (seasonKey: string) => {
   return `${MONTHS[m - 1]} ${y} Cohort`;
 };
 
-/** The next Monday on or after a date, as YYYY-MM-DD. */
+/** The first Monday after today (next week's Monday on a Monday), as YYYY-MM-DD. */
 export const nextMonday = (from = new Date()) => {
   const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
   const offset = (8 - d.getDay()) % 7 || 7;
