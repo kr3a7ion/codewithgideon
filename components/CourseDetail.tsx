@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { usePageMeta } from "../src/app/usePageMeta";
 import { View } from "../src/App";
 import { IMAGES } from "../assets/images";
 import {
@@ -248,6 +249,13 @@ const CourseDetail: React.FC<CourseDetailProps> = ({ onNavigate }) => {
     [courses, token],
   );
 
+  usePageMeta({
+    title: course?.title || "Course",
+    description: course?.description
+      ? String(course.description).slice(0, 160)
+      : undefined,
+  });
+
   const syllabus = useMemo<SyllabusWeek[]>(() => {
     const list = Array.isArray(course?.syllabus) ? course?.syllabus : [];
     return list
@@ -403,8 +411,8 @@ const CourseDetail: React.FC<CourseDetailProps> = ({ onNavigate }) => {
             </div>
             <p className="max-w-xl text-sm leading-7 text-slate-600 dark:text-slate-300">
               Each week is designed to unlock a practical milestone, not just
-              another lecture. The admin dashboard can update this outline as
-              the cohort evolves.
+              another lecture. The outline may be adjusted as the cohort
+              progresses.
             </p>
           </div>
 

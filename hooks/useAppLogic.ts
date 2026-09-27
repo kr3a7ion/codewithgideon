@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { View } from "../src/App";
+import type { View } from "../src/app/views";
 import { coursePathFromValue } from "../utils/courseRoutes";
 import {
   RegistrationEntry,

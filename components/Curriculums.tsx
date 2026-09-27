@@ -253,10 +253,16 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
               Courses are being prepared
             </h2>
             <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-slate-300">
-              The admin dashboard has no active explore courses available right
-              now. Please check back soon or contact support for enrollment
-              guidance.
+              No courses are open for enrollment right now. Check back soon, or
+              send us a message and we'll tell you when the next cohort starts.
             </p>
+            <button
+              type="button"
+              onClick={() => onNavigate("contact")}
+              className="mt-6 inline-flex items-center justify-center rounded-xl bg-blue-900 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-800 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
+            >
+              Contact us
+            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-10">

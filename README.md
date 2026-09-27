@@ -168,36 +168,53 @@ Backend / Infrastructure:
 ---
 
 # Project Structure
-components/
-├── AdminDashboard.tsx
-├── StudentDashboard.tsx
-├── Courses.tsx
-├── ContinueRegistration.tsx
-└── Contact.tsx
 
-services/
-├── firebase.ts
-├── registrationStore.ts
-└── siteConfig.ts
+```
+src/
+├── App.tsx                 routes, guards (RequireStudent, RequireAdmin), 404
+├── app/                    AppProvider, usePageMeta (title/SEO), view names
+├── ui/                     shared UI kit: Button, ButtonLink, Card, Badge, Field,
+│                           PageHeader, EmptyState, Skeleton, LoadingPanel
+├── pages/                  HomePage, NotFound
+└── features/
+    ├── learn/              student area (/student/*)
+    │   ├── useStudentData.ts   all student data + listeners
+    │   ├── StudentArea.tsx     header, section nav, top-up dialog
+    │   └── sections/           Overview, Classes, Resources, Community,
+    │                           MentorChat, Notifications, Badges
+    └── admin/              admin area (/admin/*)
+        ├── useAdminWorkspace.tsx  all admin data + actions
+        ├── AdminArea.tsx          layout
+        ├── shell/                 header, notices, stats, section nav
+        ├── sections/              one file per admin section
+        └── modals/                course, session, inbox, chat, sheets
 
-hooks/
-└── useSiteConfig.ts
+components/                 public pages, auth, registration, payment
+hooks/useAppLogic.ts        auth state, live profile, navigation bridge
+services/                   firebase, registrationStore (Firestore access), siteConfig
+utils/courseRoutes.ts       course slugs and URLs
 
-firestore.rules
-firebase.json
+functions/src/
+├── index.ts                contact, mentor chat, Sheets sync
+└── payments.ts             Paystack initialize, verify, webhook (server-side crediting)
 
-functions/
-└── src/
-└── index.ts
+firestore.rules             security rules (source of truth)
+firestore.indexes.json      composite indexes
+tests/                      rules tests (run in the Firestore emulator)
+dev/                        UI preview harness with mock data (no Firebase needed)
+```
 
+Design tokens live in `tailwind.config.js` and match the mobile app: deep blue
+`#0F2B5B` (`blue-900`), teal `#1698A0` (`teal-500`), orange `#FF7A45`
+(`orange-500`), Sora for headings (`font-display`) and Manrope for body text.
 
 ---
 
 # Environment Variables
 
-Create a `.env` file in the project root.
+Create a `.env` file in the project root:
 
-Example:
+```
 VITE_FIREBASE_API_KEY=
 VITE_FIREBASE_AUTH_DOMAIN=
 VITE_FIREBASE_PROJECT_ID=
@@ -205,9 +222,11 @@ VITE_FIREBASE_STORAGE_BUCKET=
 VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
 VITE_FIREBASE_MEASUREMENT_ID=
+VITE_PAYSTACK_PUBLIC_KEY=
+VITE_VERIFY_PAYSTACK_URL=
+```
 
-
-These values come from your Firebase project settings.
+These values come from your Firebase project settings and the Paystack dashboard.
 
 ---
 
@@ -225,8 +244,7 @@ These values come from your Firebase project settings.
 
 ## Authentication
 
-Enable:
-Email / Password
+Enable **Email/Password** and **Google**.
 
 
 ---
@@ -234,6 +252,8 @@ Email / Password
 ## Firestore Collections
 
 Typical collections used by the platform:
+
+```
 admins
 config
 paths
@@ -249,7 +269,8 @@ communitySpaces
 contactMessages
 mentorThreads
 mentorThreads/{threadId}/messages
-
+paymentReferences
+```
 
 ---
 
@@ -315,86 +336,58 @@ Responsibilities:
 
 ---
 
-## verifyPaystackPayment
+## Paystack payments (`functions/src/payments.ts`)
 
-HTTP function responsible for verifying payments.
+- `initializePaystackPayment`: used by the mobile app. Sets the amount on the server.
+- `verifyPaystackPayment`: called after checkout on web and mobile.
+- `paystackWebhook`: Paystack calls this directly, so access is granted even if the student closes the page.
 
-Responsibilities:
-
-- verify Paystack transaction
-- confirm charged amount safely against the intended base amount
-- store base amount, charged amount, gateway fee, channel, status, metadata, and reference
-- update student record
-- unlock course access
+Verify and webhook share one fulfilment path. The server reads the course price
+from Firestore, credits only the weeks the amount actually covers, and records
+each reference once, so a payment can never be credited twice. Anything it
+can't match is stored with `status: needs_review` for the admin.
 
 ---
 
 # Installation
 
-Clone the repository:
-
-
+```bash
 git clone https://github.com/kr3a7ion/codewithgideon.git
-
-
-Install dependencies:
-
-
-npm install
-
-
-Install functions dependencies:
-
-
-cd functions
-npm install
-cd ..
-
+cd codewithgideon
+npm ci
+npm --prefix functions ci
+```
 
 ---
 
-# Run Development Server
+# Development
 
+```bash
+npm run dev           # the site, against your Firebase project
+npm run preview:ui    # student + admin areas with mock data, no Firebase (port 5174)
+```
 
-npm run dev
+The preview harness is useful for UI work. Open
+`http://localhost:5174/student/dashboard?state=active` (or `state=locked`,
+`state=empty`) and `http://localhost:5174/admin/registrations`.
 
+# Checks
 
----
+```bash
+npm run build                 # type check + production build
+npm --prefix functions test   # payment crediting tests
+npm run test:rules            # Firestore rules in the emulator (needs Java 11+)
+```
 
-# Build Project
-
-
-npm run build
-
+GitHub Actions runs all three on every push.
 
 ---
 
 # Deploy
 
-Deploy hosting and functions from this repo:
-
-
-firebase deploy
-
-
-Deploy only Firestore rules from the local `firestore.rules` file:
-
-```bash
-firebase deploy --only firestore:rules
-```
-
-
-Deploy only functions:
-
-
-firebase deploy --only functions
-
-
-Deploy a specific function:
-
-
-firebase deploy --only functions:sendContactMessage
-
+Follow `DEPLOY_RUNBOOK.md`. It covers the order (functions → indexes → rules →
+hosting), the Paystack webhook URL, a preview channel before going live, and
+rollback.
 
 ---
 
