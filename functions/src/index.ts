@@ -13,6 +13,14 @@ export {
   paystackWebhook,
 } from "./payments.js";
 
+// Admin automations: one-click payment check, background reconcile of
+// unfinished checkouts, and class reminders.
+export {
+  adminCheckPayment,
+  reconcilePendingPayments,
+  sendClassReminders,
+} from "./automation.js";
+
 type ContactPayload = {
   name?: unknown;
   email?: unknown;

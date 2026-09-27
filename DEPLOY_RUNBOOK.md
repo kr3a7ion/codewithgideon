@@ -261,6 +261,44 @@ and no Firebase, which is handy for UI changes.
 
 ---
 
+## Admin redesign release (functions + rules + hosting)
+
+This release adds three Cloud Functions and two admin-only collections.
+
+```bash
+git checkout main && git pull   # after merging the admin redesign PR
+npm ci && npm --prefix functions ci
+npm --prefix functions test     # payments + automation tests
+npm run build
+
+firebase deploy --only functions      # adds adminCheckPayment,
+                                      # reconcilePendingPayments, sendClassReminders
+firebase deploy --only firestore:rules
+firebase hosting:channel:deploy admin --expires 7d
+```
+
+The first deploy of scheduled functions turns on Cloud Scheduler for the
+project. If the CLI asks to enable the Cloud Scheduler API, answer yes.
+Two scheduled jobs fit in Cloud Scheduler's free tier (3 jobs per billing
+account).
+
+On the preview URL, sign in as admin and check:
+- [ ] Today loads, and the badges match the list.
+- [ ] Payments → **Check with Paystack** on a checkout. Expect "Not paid on
+      Paystack" for an abandoned test checkout.
+- [ ] Classes → pick a cohort → **Generate schedule** shows a preview.
+      Cancel if you don't want the classes yet.
+- [ ] Inbox → open a chat and reply.
+- [ ] On a phone: bottom tabs, More sheet, open a student.
+
+Then `firebase deploy --only hosting`.
+
+Within 30 minutes, **Today → Automations** should show "Payment
+auto-check · last run …". Class reminders show a last run within 15
+minutes. Logs: `firebase functions:log --only reconcilePendingPayments`.
+
+---
+
 ## Rollback
 
 - Functions: `firebase functions:list` shows versions; redeploy the previous

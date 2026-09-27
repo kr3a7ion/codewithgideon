@@ -69,24 +69,33 @@ Students can:
 
 ## Admin Features
 
-Admins have access to a powerful control dashboard.
+The admin area (`/admin`) works on a phone and a computer: a grouped
+sidebar on desktop, bottom tabs plus a "More" sheet on phones.
 
-### Admin Capabilities
+| Page | What it's for |
+|---|---|
+| **Today** | What needs attention (unfinished checkouts, payments to review, unread chats and website messages, classes without recordings, intakes without classes), the live or next class with its link, key numbers, automation status |
+| **Students** | Search and filter everyone; a student panel with contact links (email, phone, WhatsApp), enrolment, pending checkout, payment history and actions |
+| **Payments** | Unfinished checkouts with **Check with Paystack**, the needs-review queue, recent payments |
+| **Inbox** | Student chats (app + website) and contact-form messages in one place |
+| **Classes** | The schedule per cohort (Upcoming, Past, Drafts), quick recording links, **Generate schedule** from the course syllabus, **Copy schedule** from another cohort |
+| **Cohorts** | The open intake per path and one-click **Start next intake** |
+| **Announcements** | Messages to a cohort (students see them under Notifications) |
+| **Courses & paths**, **Resources**, **Community** | What students can sign up for and the material around it |
+| **Settings** | Website content (APK link, contact page, socials, home page button), Google Sheets, CSV export, delete-all (typed confirmation) |
 
-- Manage **learning paths**
-- Create and edit **courses**
-- Create and assign **cohorts**
-- Publish **sessions**
-- Manage **student registrations**
-- Approve or verify **pending payments**
-- Review verified Paystack records and gateway fields
-- Export student data
-- Sync student data with **Google Sheets**
-- Manage **mobile mentor chat** separately from website support mail
-- Manage **resources** and **community spaces**
-- Manage **site settings** such as contact links, socials, APK link, and homepage CTA
-- Manage **contact inbox**
-- View platform activity
+### Automations
+
+- **Payment auto-check** (`reconcilePendingPayments`, every 30 min): asks
+  Paystack about checkouts that never reached verify or the webhook,
+  credits the paid ones and clears abandoned ones after a day.
+- **Check with Paystack** (`adminCheckPayment`): the same check for one
+  checkout, from the admin area. Replaces checking the Paystack dashboard
+  by hand.
+- **Class reminders** (`sendClassReminders`, every 15 min): posts a cohort
+  announcement about an hour before each published class.
+- **Generate / copy schedules** and **start next intake** run in the admin
+  area.
 
 ---
 
@@ -118,7 +127,10 @@ Workflow:
 4. Student access is unlocked
 5. Sessions become visible
 
-Pending payments can also be manually reconciled by an admin override after confirming the Paystack reference in the gateway dashboard.
+Checkouts that never reach verify or the webhook are checked with Paystack
+automatically every 30 minutes, or on demand with **Check with Paystack** in
+the admin area. A manual credit is still available for payments made outside
+Paystack.
 
 ---
 
@@ -184,10 +196,14 @@ src/
     │                           MentorChat, Notifications, Badges
     └── admin/              admin area (/admin/*)
         ├── useAdminWorkspace.tsx  all admin data + actions
-        ├── AdminArea.tsx          layout
-        ├── shell/                 header, notices, stats, section nav
-        ├── sections/              one file per admin section
-        └── modals/                course, session, inbox, chat, sheets
+        ├── AdminArea.tsx          routes
+        ├── nav.tsx                pages, groups, old-URL redirects
+        ├── insights.ts            what needs attention (Today + badges)
+        ├── automation.ts          schedule generation/copy, intake names
+        ├── layout/                sidebar, phone tabs, toasts, confirm
+        ├── pages/                 one file per page
+        ├── parts/                 class form, schedule dialogs, recording link
+        └── ui.tsx                 admin building blocks (panels, dialogs, menus)
 
 components/                 public pages, auth, registration, payment
 hooks/useAppLogic.ts        auth state, live profile, navigation bridge
@@ -369,7 +385,9 @@ npm run preview:ui    # student + admin areas with mock data, no Firebase (port 
 
 The preview harness is useful for UI work. Open
 `http://localhost:5174/student/dashboard?state=active` (or `state=locked`,
-`state=empty`) and `http://localhost:5174/admin/registrations`.
+`state=empty`) and `http://localhost:5174/admin/today`. Admin actions work
+against in-memory sample data, so you can try flows like generating a
+schedule without touching real data.
 
 # Checks
 

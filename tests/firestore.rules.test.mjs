@@ -343,3 +343,29 @@ test("students cannot write catalogue data", async () => {
   await assertFails(setDoc(doc(db("paid"), "courses/x"), {title: "Hack"}));
   await assertFails(setDoc(doc(db("paid"), "config/app"), {apkUrl: "https://evil"}));
 });
+
+// ---------------- automation (admin redesign) ----------------
+
+test("only admins can read automation status; nobody writes it from a client", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "automation/payments"), {checked: 1});
+    await setDoc(doc(ctx.firestore(), "automationReminders/r1"), {cohortId: COHORT});
+  });
+  await assertSucceeds(getDoc(doc(db("admin1"), "automation/payments")));
+  await assertSucceeds(getDoc(doc(db("admin1"), "automationReminders/r1")));
+  await assertFails(getDoc(doc(db("paid"), "automation/payments")));
+  await assertFails(getDoc(doc(db("paid"), "automationReminders/r1")));
+  await assertFails(setDoc(doc(db("admin1"), "automation/payments"), {checked: 2}));
+});
+
+test("class reminder messages match the cohort message shape", async () => {
+  // Same fields sendClassReminders writes; an admin may later edit or resend it.
+  await assertSucceeds(setDoc(doc(db("admin1"), `cohorts/${COHORT}/messages/reminder1`), {
+    cohortId: COHORT, cohortLabel: "September 2026",
+    title: "Class starting soon",
+    body: "Week 3: State management starts at 6:00 PM (WAT). Open Classes in the app or on the website to join.",
+    ctaLabel: "", ctaUrl: "", sentBy: "automation",
+    sentAt: serverTimestamp(), createdAt: Date.now(), status: "sent",
+  }));
+  await assertSucceeds(getDoc(doc(db("paid"), `cohorts/${COHORT}/messages/reminder1`)));
+});
