@@ -220,25 +220,7 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
   };
 
   return (
-    <div className="mb-8 rounded-[2rem] border border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 shadow-[0_12px_40px_rgba(15,23,42,0.08)] dark:shadow-[0_16px_40px_rgba(2,6,23,0.45)] backdrop-blur-sm p-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-        <div>
-          <h2 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 dark:text-white">
-            Course Resources
-          </h2>
-          <p className="text-sm text-slate-600 dark:text-slate-300">
-            Manage PDFs, code packs, video links, and folders that the mobile library can later consume.
-          </p>
-        </div>
-
-        <button
-          onClick={onRefresh}
-          className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
-        >
-          Refresh Resources
-        </button>
-      </div>
-
+    <div>
       <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-6">
         <form
           onSubmit={handleSave}
@@ -250,7 +232,7 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
                 {editingResource ? "Edit Resource" : "Add Resource"}
               </p>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Keep folder naming consistent so the app library stays tidy. For class-specific files, always target a real session ID because a single week can contain multiple classes.
+                Group files into folders like “Week 1” or “References”. To show a file inside one class, pick that class below.
               </p>
             </div>
 
@@ -278,9 +260,8 @@ const AdminResourcesPanel: React.FC<AdminResourcesPanelProps> = ({
           ) : null}
 
           <div className="p-4 rounded-2xl border border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/10 text-sm text-blue-900 dark:text-blue-100">
-            Class attachment logic:
-            Files only appear inside a specific class or recording when they have an exact <strong>session ID</strong>.
-            A week tag is now treated as a broad library label, not a precise class target.
+            Tip: pick a <strong>class</strong> to show the file inside that class and its recording.
+            A week label only groups files in the library.
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

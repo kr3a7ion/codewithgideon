@@ -152,12 +152,14 @@ const StudentDashboardPage = () => {
 };
 
 const AdminDashboardPage = () => {
-  const { navigateTo, logoutAdmin, adminSessionRemainingMs } = useApp();
+  const { navigateTo, logoutAdmin, adminSessionRemainingMs, isDark, toggleTheme } = useApp();
   return (
     <AdminDashboard
       onNavigate={navigateTo}
       onLogout={logoutAdmin}
       sessionRemainingMs={adminSessionRemainingMs}
+      isDark={isDark}
+      onToggleTheme={toggleTheme}
     />
   );
 };
@@ -178,6 +180,11 @@ const AppShell: React.FC = () => {
   } = useApp();
 
   const privateMeta = { noindex: true };
+  // Signed-in admins get a full-screen app layout without the site chrome.
+  const isAdminApp =
+    isAdminLoggedIn &&
+    location.pathname.startsWith("/admin") &&
+    !location.pathname.startsWith("/admin/login");
 
   return (
     <div className="flex min-h-screen flex-col bg-white transition-colors dark:bg-slate-950">
@@ -188,15 +195,17 @@ const AppShell: React.FC = () => {
         Skip to content
       </a>
 
-      <Header
-        currentView={currentView}
-        onNavigate={navigateTo}
-        isDark={isDark}
-        onToggleTheme={toggleTheme}
-        isStudentLoggedIn={isStudentLoggedIn}
-      />
+      {isAdminApp ? null : (
+        <Header
+          currentView={currentView}
+          onNavigate={navigateTo}
+          isDark={isDark}
+          onToggleTheme={toggleTheme}
+          isStudentLoggedIn={isStudentLoggedIn}
+        />
+      )}
 
-      <main id="main" className="flex-grow pt-20">
+      <main id="main" className={isAdminApp ? "flex-grow" : "flex-grow pt-20"}>
         <ErrorBoundary resetKey={location.pathname}>
           <Suspense fallback={<LoadingPanel />}>
             <Routes>
@@ -307,7 +316,7 @@ const AppShell: React.FC = () => {
         </ErrorBoundary>
       </main>
 
-      <Footer onNavigate={navigateTo} isAdminLoggedIn={isAdminLoggedIn} />
+      {isAdminApp ? null : <Footer onNavigate={navigateTo} isAdminLoggedIn={isAdminLoggedIn} />}
     </div>
   );
 };

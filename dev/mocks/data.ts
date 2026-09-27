@@ -70,14 +70,31 @@ export const previewSpaces = empty
 export const previewDb: Record<string, any> = {
   "config/app": null,
   mentorThreads: [
-    { id: "mentor_u1", studentUid: "u1", studentName: "Ada Okafor", studentEmail: "ada@example.com", status: "new", channel: "web_chat", threadType: "student_mentor_chat", lastMessage: "My ListView throws an unbounded height error.", lastMessageAt: Timestamp.fromMillis(now - 3600_000), lastMessageSenderType: "user", updatedAt: Timestamp.fromMillis(now - 3600_000), createdAt: Timestamp.fromMillis(now - 7200_000) },
+    { id: "mentor_u1", studentUid: "u1", studentName: "Ada Okafor", studentEmail: "ada@example.com", status: "new", channel: "web_chat", threadType: "student_mentor_chat", sessionTitle: "State management with Riverpod", lastMessage: "My ListView throws an unbounded height error.", lastMessageAt: Timestamp.fromMillis(now - 3600_000), lastMessageSenderType: "user", updatedAt: Timestamp.fromMillis(now - 3600_000), createdAt: Timestamp.fromMillis(now - 7200_000) },
+    { id: "mentor_u3", studentUid: "u3", studentName: "Chioma Eze", studentEmail: "chioma@example.com", status: "resolved", channel: "mobile_chat", threadType: "student_mentor_chat", lastMessage: "Thanks, it works now!", lastMessageAt: Timestamp.fromMillis(now - 2 * day), lastMessageSenderType: "user", updatedAt: Timestamp.fromMillis(now - 2 * day), createdAt: Timestamp.fromMillis(now - 3 * day) },
+  ],
+  "mentorThreads/mentor_u1/messages": [
+    { id: "a1", body: "My ListView throws 'Vertical viewport was given unbounded height'. What am I doing wrong?", senderType: "user", senderName: "Ada Okafor", createdAt: Timestamp.fromMillis(now - 3600_000) },
+  ],
+  "mentorThreads/mentor_u3/messages": [
+    { id: "b1", body: "How do I read a Firestore document once instead of listening?", senderType: "user", senderName: "Chioma Eze", createdAt: Timestamp.fromMillis(now - 3 * day) },
+    { id: "b2", body: "Use .get() on the document reference instead of .snapshots().", senderType: "admin", senderName: "Gideon", createdAt: Timestamp.fromMillis(now - 3 * day + 3600_000) },
+    { id: "b3", body: "Thanks, it works now!", senderType: "user", senderName: "Chioma Eze", createdAt: Timestamp.fromMillis(now - 2 * day) },
   ],
   contactMessages: [
-    { id: "c1", name: "Chioma", email: "chioma@example.com", message: "Do you have a weekend class?", status: "new", source: "web-contact-form", createdAt: Timestamp.fromMillis(now - 5 * 3600_000) },
+    { id: "c1", name: "Kelechi Nwosu", email: "kelechi@example.com", message: "Do you have a weekend class? I work Monday to Friday.", topic: "Courses", status: "new", source: "web-contact-form", createdAt: Timestamp.fromMillis(now - 5 * 3600_000) },
+    { id: "c2", name: "Bola", email: "bola@example.com", message: "Can I pay for the whole course at once?", topic: "Payments", status: "resolved", source: "web-contact-form", createdAt: Timestamp.fromMillis(now - 4 * day) },
   ],
   "**/payments": [
-    { id: "CWG_PAID_1", reference: "CWG_PAID_1", uid: "u1", status: "success", kind: "initial", weeks: 5, amountKobo: 5000000, baseAmount: 50000, weeklyRate: 10000, email: "ada@example.com", verifiedAt: Timestamp.fromMillis(now - 20 * day), source: "verify" },
+    { id: "CWG_PAID_1", reference: "CWG_PAID_1", uid: "u1", status: "success", kind: "initial", weeks: 5, amountKobo: 5000000, baseAmount: 50000, weeklyRate: 10000, email: "ada@example.com", verifiedAt: Timestamp.fromMillis(now - 20 * day), source: "verify", paystack: { channel: "card" } },
+    { id: "CWG_PAID_2", reference: "CWG_PAID_2", uid: "u5", status: "success", kind: "initial", weeks: 3, amountKobo: 3000000, baseAmount: 30000, weeklyRate: 10000, email: "funmi@example.com", verifiedAt: Timestamp.fromMillis(now - 3 * day), source: "webhook", paystack: { channel: "bank_transfer" } },
+    { id: "CWG_ODD_7", reference: "CWG_ODD_7", uid: "u3", status: "needs_review", reviewReason: "course_already_paid", kind: "topup", weeks: 0, amountKobo: 1000000, email: "chioma@example.com", verifiedAt: Timestamp.fromMillis(now - 1 * day), source: "webhook" },
   ],
+  "users/u1/payments": [
+    { id: "CWG_PAID_1", reference: "CWG_PAID_1", status: "success", kind: "initial", weeks: 5, amountKobo: 5000000, verifiedAt: Timestamp.fromMillis(now - 20 * day) },
+  ],
+  "automation/payments": { lastRunAt: Timestamp.fromMillis(now - 12 * 60_000), checked: 2, credited: 1, cleared: 0, waiting: 1, errors: 0 },
+  "automation/classReminders": { lastRunAt: Timestamp.fromMillis(now - 6 * 60_000), lastSent: 0, totalSent: 14 },
   "users/student_1/notificationReads": [{ id: "FLUTTER-2026-09_m2", readAt: new Date() }],
   "cohorts/FLUTTER-2026-09/messages": empty
     ? []

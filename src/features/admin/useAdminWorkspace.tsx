@@ -2,13 +2,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { registrationStore, RegistrationEntry, CourseDoc, CohortDoc, SessionDoc, ActiveCohortForPath, PathDoc, SyllabusWeek, CohortMessageDoc, ResourceDoc, CommunitySpaceDoc } from "../../../services/registrationStore";
 import { defaultSiteConfig, getSiteConfig, saveSiteConfig, SiteConfig } from "../../../services/siteConfig";
-import { Settings2, Users, CircleDollarSign, Clock3, ShieldCheck, FolderTree, GraduationCap, CalendarDays, CreditCard, Mail, ExternalLink, Copy, MessageSquare, Send, BellRing, BookOpen } from "lucide-react";
-import { collection, collectionGroup, getDocs, limit, query, doc, updateDoc, deleteDoc, addDoc, serverTimestamp, orderBy, onSnapshot } from "firebase/firestore";
-import { auth, db } from "../../../services/firebase";
+import { collection, collectionGroup, getDoc, getDocs, limit, query, doc, updateDoc, deleteDoc, addDoc, serverTimestamp, orderBy, onSnapshot } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import { auth, db, functions } from "../../../services/firebase";
+import type { SessionDraft } from "./automation";
 import {
-  AdminSectionKey,
-  adminSectionRoutes,
-  adminSectionFromPathname,
   getCohortDocId,
   findCohortDocIdByKey,
   ContactMessageDoc,
@@ -36,7 +34,6 @@ import {
   mergeInboxThreadEntries,
 } from "./lib";
 import type { View } from "../../app/views";
-import { useLocation, useNavigate } from "react-router-dom";
 
 export type AdminWorkspaceProps = {
   onNavigate: (view: View) => void;
@@ -131,21 +128,6 @@ export const useAdminWorkspace = ({
   const [siteConfigLoading, setSiteConfigLoading] = useState(false);
   const [siteConfigError, setSiteConfigError] = useState("");
   const [siteConfigSaved, setSiteConfigSaved] = useState("");
-  // The URL is the source of truth for the section, so in-app links,
-  // redirects and back/forward all show the right workspace.
-  const location = useLocation();
-  const activeAdminSection = adminSectionFromPathname(location.pathname);
-
-  const routerNavigate = useNavigate();
-  // Go through the router (not history.pushState) so the URL, page title and
-  // back button stay in sync with the rest of the app.
-  const selectAdminSection = (section: AdminSectionKey) => {
-    const nextPath = adminSectionRoutes[section] || "/admin";
-    if (location.pathname !== nextPath) {
-      routerNavigate(nextPath);
-    }
-  };
-  const setActiveAdminSection = selectAdminSection;
 
   const pathsById = useMemo(() => {
     const m = new Map<string, PathDoc>();
@@ -734,7 +716,8 @@ export const useAdminWorkspace = ({
     }
   };
 
-  const fetchCohorts = async () => {
+  const fetchCohorts = async (): Promise<CohortDoc[]> => {
+    let cohortList: CohortDoc[] = [];
     setCohortsLoading(true);
     try {
       const list: CohortDoc[] = await registrationStore.getCohorts();
@@ -745,6 +728,7 @@ export const useAdminWorkspace = ({
       }));
 
       setCohorts(safe);
+      cohortList = safe;
 
       // ✅ always store cohort DOC ID in selectedCohortId
       if (!selectedCohortId && safe.length) {
@@ -762,6 +746,7 @@ export const useAdminWorkspace = ({
     } finally {
       setCohortsLoading(false);
     }
+    return cohortList;
   };
 
   const fetchSessions = async (cohortId: string) => {
@@ -862,7 +847,7 @@ export const useAdminWorkspace = ({
       try {
         await fetchPaths();
 
-        await Promise.all([
+        const [, , , , , cohortList] = await Promise.all([
           fetchRegistrations(),
           fetchPaymentRecords(),
           fetchCourses(),
@@ -872,6 +857,12 @@ export const useAdminWorkspace = ({
           fetchInboxMessages(),
           fetchSupportMessages(),
           fetchSiteConfig(),
+        ]);
+
+        await Promise.all([
+          fetchOverviewSessions(cohortList),
+          fetchActiveCohorts(),
+          fetchAutomationStatus(),
         ]);
 
         if (selectedCohortId) {
@@ -1214,250 +1205,6 @@ export const useAdminWorkspace = ({
   const totalInboxCount = inboxMessages.length;
   const totalSupportCount = supportMessages.length;
 
-  const dashboardCounters = useMemo(
-    () => [
-      {
-        label: "Total Students",
-        value: stats.total,
-        icon: Users,
-        valueClass: "text-blue-900 dark:text-white",
-      },
-      {
-        label: "Pending",
-        value: stats.pending,
-        icon: Clock3,
-        valueClass: "text-orange-600",
-      },
-      {
-        label: "Complete",
-        value: stats.complete,
-        icon: ShieldCheck,
-        valueClass: "text-teal-600",
-      },
-      {
-        label: "Revenue",
-        value: `₦${stats.revenue.toLocaleString()}`,
-        icon: CircleDollarSign,
-        valueClass: "text-blue-900 dark:text-white",
-      },
-      {
-        label: "Pending Payments",
-        value: stats.pendingPaymentsCount,
-        icon: CreditCard,
-        valueClass: "text-purple-600",
-      },
-      {
-        label: "All Mobile Chats",
-        value: totalInboxCount,
-        icon: MessageSquare,
-        valueClass: "text-cyan-600",
-      },
-      {
-        label: "Unread Mobile",
-        value: unreadInboxCount,
-        icon: MessageSquare,
-        valueClass: "text-pink-600",
-      },
-      {
-        label: "All Support Mail",
-        value: totalSupportCount,
-        icon: Mail,
-        valueClass: "text-blue-600",
-      },
-      {
-        label: "Unread Support",
-        value: unreadSupportCount,
-        icon: Mail,
-        valueClass: "text-rose-600",
-      },
-    ],
-    [
-      stats.complete,
-      stats.pending,
-      stats.pendingPaymentsCount,
-      stats.revenue,
-      stats.total,
-      totalInboxCount,
-      totalSupportCount,
-      unreadInboxCount,
-      unreadSupportCount,
-    ],
-  );
-  const adminSections = useMemo(
-    () =>
-      [
-        {
-          key: "paths",
-          label: "Paths",
-          description: "Track setup and active season",
-          icon: FolderTree,
-          badge: paths.length,
-          tone: "indigo",
-          activeClass:
-            "bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/20",
-          inactiveClass:
-            "bg-indigo-50/60 text-indigo-900 border-indigo-100 hover:border-indigo-300 dark:bg-indigo-950/20 dark:text-indigo-200 dark:border-indigo-900/40 dark:hover:border-indigo-700/60",
-          badgeClass:
-            "bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-200 dark:border-indigo-700/50",
-        },
-        {
-          key: "cohorts",
-          label: "Cohorts",
-          description: "Manage cohort records",
-          icon: Users,
-          badge: cohorts.length,
-          tone: "teal",
-          activeClass:
-            "bg-teal-600 text-white border-teal-500 shadow-teal-500/20",
-          inactiveClass:
-            "bg-teal-50/60 text-teal-900 border-teal-100 hover:border-teal-300 dark:bg-teal-950/20 dark:text-teal-200 dark:border-teal-900/40 dark:hover:border-teal-700/60",
-          badgeClass:
-            "bg-teal-100 text-teal-700 border-teal-200 dark:bg-teal-900/40 dark:text-teal-200 dark:border-teal-700/50",
-        },
-        {
-          key: "sessions",
-          label: "Sessions",
-          description: "Schedule and publish classes",
-          icon: CalendarDays,
-          badge: sessions.length,
-          tone: "sky",
-          activeClass: "bg-sky-600 text-white border-sky-500 shadow-sky-500/20",
-          inactiveClass:
-            "bg-sky-50/60 text-sky-900 border-sky-100 hover:border-sky-300 dark:bg-sky-950/20 dark:text-sky-200 dark:border-sky-900/40 dark:hover:border-sky-700/60",
-          badgeClass:
-            "bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-700/50",
-        },
-        {
-          key: "messages",
-          label: "Messaging",
-          description: "Send cohort announcements",
-          icon: BellRing,
-          badge: cohortMessages.length,
-          tone: "violet",
-          activeClass:
-            "bg-violet-600 text-white border-violet-500 shadow-violet-500/20",
-          inactiveClass:
-            "bg-violet-50/60 text-violet-900 border-violet-100 hover:border-violet-300 dark:bg-violet-950/20 dark:text-violet-200 dark:border-violet-900/40 dark:hover:border-violet-700/60",
-          badgeClass:
-            "bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-900/40 dark:text-violet-200 dark:border-violet-700/50",
-        },
-        {
-          key: "mobileChat",
-          label: "Mobile Chat",
-          description: "Reply to in-app mentor chats",
-          icon: MessageSquare,
-          badge: unreadInboxCount,
-          tone: "cyan",
-          activeClass:
-            "bg-cyan-600 text-white border-cyan-500 shadow-cyan-500/20",
-          inactiveClass:
-            "bg-cyan-50/60 text-cyan-900 border-cyan-100 hover:border-cyan-300 dark:bg-cyan-950/20 dark:text-cyan-200 dark:border-cyan-900/40 dark:hover:border-cyan-700/60",
-          badgeClass:
-            "bg-cyan-100 text-cyan-700 border-cyan-200 dark:bg-cyan-900/40 dark:text-cyan-200 dark:border-cyan-700/50",
-        },
-        {
-          key: "community",
-          label: "Community",
-          description: "Publish student spaces",
-          icon: MessageSquare,
-          badge: communitySpaces.length,
-          tone: "pink",
-          activeClass:
-            "bg-pink-600 text-white border-pink-500 shadow-pink-500/20",
-          inactiveClass:
-            "bg-pink-50/60 text-pink-900 border-pink-100 hover:border-pink-300 dark:bg-pink-950/20 dark:text-pink-200 dark:border-pink-900/40 dark:hover:border-pink-700/60",
-          badgeClass:
-            "bg-pink-100 text-pink-700 border-pink-200 dark:bg-pink-900/40 dark:text-pink-200 dark:border-pink-700/50",
-        },
-        {
-          key: "courses",
-          label: "Courses",
-          description: "Course catalog management",
-          icon: BookOpen,
-          badge: courses.length,
-          tone: "amber",
-          activeClass:
-            "bg-amber-500 text-white border-amber-400 shadow-amber-500/20",
-          inactiveClass:
-            "bg-amber-50/60 text-amber-900 border-amber-100 hover:border-amber-300 dark:bg-amber-950/20 dark:text-amber-200 dark:border-amber-900/40 dark:hover:border-amber-700/60",
-          badgeClass:
-            "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700/50",
-        },
-        {
-          key: "resources",
-          label: "Resources",
-          description: "PDFs, code packs, and media links",
-          icon: ExternalLink,
-          badge: resources.length,
-          tone: "emerald",
-          activeClass:
-            "bg-emerald-600 text-white border-emerald-500 shadow-emerald-500/20",
-          inactiveClass:
-            "bg-emerald-50/60 text-emerald-900 border-emerald-100 hover:border-emerald-300 dark:bg-emerald-950/20 dark:text-emerald-200 dark:border-emerald-900/40 dark:hover:border-emerald-700/60",
-          badgeClass:
-            "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200 dark:border-emerald-700/50",
-        },
-        {
-          key: "payments",
-          label: "Payments",
-          description: "Review pending confirmations",
-          icon: CreditCard,
-          badge: pendingPayments.length,
-          tone: "rose",
-          activeClass:
-            "bg-rose-600 text-white border-rose-500 shadow-rose-500/20",
-          inactiveClass:
-            "bg-rose-50/60 text-rose-900 border-rose-100 hover:border-rose-300 dark:bg-rose-950/20 dark:text-rose-200 dark:border-rose-900/40 dark:hover:border-rose-700/60",
-          badgeClass:
-            "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/40 dark:text-rose-200 dark:border-rose-700/50",
-        },
-        {
-          key: "settings",
-          label: "Site Settings",
-          description: "Contact, socials, CTA, APK",
-          icon: Settings2,
-          badge: siteConfigForm.apkDownloadUrl ? 1 : 0,
-          tone: "blue",
-          activeClass:
-            "bg-blue-600 text-white border-blue-500 shadow-blue-500/20",
-          inactiveClass:
-            "bg-blue-50/60 text-blue-900 border-blue-100 hover:border-blue-300 dark:bg-blue-950/20 dark:text-blue-200 dark:border-blue-900/40 dark:hover:border-blue-700/60",
-          badgeClass:
-            "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-700/50",
-        },
-        {
-          key: "registrations",
-          label: "Registrations",
-          description: "Student enrollment records",
-          icon: GraduationCap,
-          badge: filteredData.length,
-          tone: "slate",
-          activeClass:
-            "bg-slate-700 text-white border-slate-600 shadow-slate-500/20",
-          inactiveClass:
-            "bg-slate-50 text-slate-900 border-slate-200 hover:border-slate-400 dark:bg-slate-800/60 dark:text-slate-100 dark:border-slate-700 dark:hover:border-slate-500",
-          badgeClass:
-            "bg-white text-slate-700 border-slate-200 dark:bg-slate-900/70 dark:text-slate-200 dark:border-slate-600",
-        },
-      ] as const,
-    [
-      cohortMessages.length,
-      communitySpaces.length,
-      cohorts.length,
-      courses.length,
-      filteredData.length,
-      paths.length,
-      pendingPayments.length,
-      resources.length,
-      sessions.length,
-      siteConfigForm.apkDownloadUrl,
-      unreadInboxCount,
-    ],
-  );
-
-  const activeSectionMeta = adminSections.find(
-    (section) => section.key === activeAdminSection,
-  );
 
   // -------------------------
   // Courses actions
@@ -2225,10 +1972,6 @@ export const useAdminWorkspace = ({
     }
   };
 
-  const settingsLabelClass =
-    "text-[10px] font-black uppercase tracking-widest text-slate-400";
-  const settingsInputClass =
-    "mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-800 dark:bg-slate-950 dark:text-white";
 
   // ---------- UI helpers ----------
   useEffect(() => {
@@ -2431,6 +2174,234 @@ export const useAdminWorkspace = ({
   // RETURN JSX (your UI preserved)
   // -------------------------
 
+  // =========================================================
+  // Admin redesign: overview data and automations
+  // =========================================================
+  const [activeByPath, setActiveByPath] = useState<
+    Record<string, ActiveCohortForPath>
+  >({});
+  const [overviewSessions, setOverviewSessions] = useState<OverviewSession[]>([]);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [automationStatus, setAutomationStatus] = useState<AutomationStatus>({});
+  const [paymentChecks, setPaymentChecks] = useState<Record<string, PaymentCheck>>({});
+  const [checkingRefs, setCheckingRefs] = useState<Record<string, boolean>>({});
+  const [studentPayments, setStudentPayments] = useState<
+    Record<string, PaymentRecordDoc[]>
+  >({});
+
+  /** activeCohorts/{pathId}: which intake new students join, per path. */
+  async function fetchActiveCohorts() {
+    try {
+      const snap = await getDocs(collection(db, "activeCohorts"));
+      const map: Record<string, ActiveCohortForPath> = {};
+      snap.docs.forEach((d) => {
+        map[d.id] = { ...(d.data() as ActiveCohortForPath) };
+      });
+      setActiveByPath(map);
+    } catch (e) {
+      console.error("fetchActiveCohorts failed:", e);
+    }
+  }
+
+  /** Sessions across recent cohorts, for Today (classes, missing recordings). */
+  async function fetchOverviewSessions(list: CohortDoc[] = cohorts) {
+    setOverviewLoading(true);
+    try {
+      const recent = [...list]
+        .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+        .slice(0, 12);
+      const results = await Promise.all(
+        recent.map(async (c) => {
+          try {
+            const rows = await registrationStore.getCohortSessions(c.id);
+            return (rows || []).map((session) => ({
+              cohortId: c.id,
+              cohortLabel: c.label || c.id,
+              pathId: String((c as any).pathId || (session as any).pathId || ""),
+              session,
+            }));
+          } catch {
+            return [] as OverviewSession[];
+          }
+        }),
+      );
+      setOverviewSessions(results.flat());
+    } finally {
+      setOverviewLoading(false);
+    }
+  }
+
+  async function fetchAutomationStatus() {
+    try {
+      const [payments, reminders] = await Promise.all([
+        getDoc(doc(db, "automation", "payments")),
+        getDoc(doc(db, "automation", "classReminders")),
+      ]);
+      setAutomationStatus({
+        payments: payments.exists() ? (payments.data() as any) : null,
+        classReminders: reminders.exists() ? (reminders.data() as any) : null,
+      });
+    } catch (e) {
+      // Not deployed yet, or rules not updated: the page shows "not running".
+      setAutomationStatus({ payments: null, classReminders: null });
+    }
+  }
+
+  /** Ask Paystack about one checkout and credit it if it was paid. */
+  const checkPaymentWithPaystack = async (uid: string, reference: string) => {
+    const ref = String(reference || "").trim();
+    if (!ref || checkingRefs[ref]) return null;
+    setCheckingRefs((p) => ({ ...p, [ref]: true }));
+    try {
+      const call = httpsCallable<
+        { reference: string; uid: string },
+        { ok: boolean; outcome: PaymentCheck["outcome"]; message: string; weeks?: number }
+      >(functions, "adminCheckPayment");
+      const { data } = await call({ reference: ref, uid });
+      const outcome = data?.outcome || (data?.ok ? "credited" : "error");
+      const message = data?.message || "Checked.";
+      const result: PaymentCheck = { outcome, message, at: Date.now() };
+      setPaymentChecks((p) => ({ ...p, [ref]: result }));
+      if (["credited", "already_credited", "needs_review"].includes(outcome)) {
+        await Promise.all([fetchRegistrations(), fetchPaymentRecords()]);
+      }
+      return result;
+    } catch (e: any) {
+      const result: PaymentCheck = {
+        outcome: "error",
+        message:
+          e?.message ||
+          "Couldn't check this payment. Deploy the adminCheckPayment function, then try again.",
+        at: Date.now(),
+      };
+      setPaymentChecks((p) => ({ ...p, [ref]: result }));
+      return result;
+    } finally {
+      setCheckingRefs((p) => ({ ...p, [ref]: false }));
+    }
+  };
+
+  const checkAllPending = async () => {
+    await runBusy("checkAllPending", async () => {
+      let credited = 0;
+      let notPaid = 0;
+      for (const reg of pendingPayments) {
+        const pending = (reg as any).pendingPayment;
+        const r = await checkPaymentWithPaystack(reg.uid, pending?.reference);
+        if (r?.outcome === "credited" || r?.outcome === "already_credited") credited += 1;
+        if (r?.outcome === "not_paid" || r?.outcome === "not_found") notPaid += 1;
+      }
+      notify(
+        "success",
+        `Checked ${pendingPayments.length} checkout${pendingPayments.length === 1 ? "" : "s"}: ${credited} credited, ${notPaid} not paid.`,
+      );
+    });
+  };
+
+  const fetchStudentPayments = async (uid: string) => {
+    if (!uid) return;
+    try {
+      const snap = await getDocs(collection(db, "users", uid, "payments"));
+      const rows = snap.docs
+        .map((d) => ({ id: d.id, userId: uid, ...(d.data() as any) }) as PaymentRecordDoc)
+        .sort((a, b) => toDateMs(b.verifiedAt) - toDateMs(a.verifiedAt));
+      setStudentPayments((p) => ({ ...p, [uid]: rows }));
+    } catch (e) {
+      console.error("fetchStudentPayments failed:", e);
+      setStudentPayments((p) => ({ ...p, [uid]: [] }));
+    }
+  };
+
+  /**
+   * Create many classes at once (generated or copied schedule). Classes that
+   * already exist at the same week and start time are skipped, so running it
+   * twice doesn't duplicate or overwrite anything.
+   */
+  const createSessionsBatch = async (
+    cohortId: string,
+    pathId: string,
+    drafts: SessionDraft[],
+  ) => {
+    const path = pathsById.get(pathId);
+    const pathTitle = String(path?.title || "").trim();
+    if (!cohortId || !pathId || !pathTitle) {
+      throw new Error("Pick a cohort whose course path still exists.");
+    }
+    const existing = await registrationStore.getCohortSessions(cohortId);
+    const taken = new Set(
+      (existing || []).map(
+        (s) => `${s.week}|${Math.round(sessionTimeToMs((s as any).startsAt) / 60000)}`,
+      ),
+    );
+
+    let created = 0;
+    let skipped = 0;
+    for (const d of drafts) {
+      const key = `${d.week}|${Math.round(d.startsAtMs / 60000)}`;
+      if (taken.has(key)) {
+        skipped += 1;
+        continue;
+      }
+      await registrationStore.addCohortSession(cohortId, {
+        title: d.title,
+        week: d.week,
+        pathId,
+        path: pathTitle,
+        isPublished: d.isPublished,
+        startsAt: d.startsAtMs,
+        durationMins: d.durationMins,
+        joinUrl: d.joinUrl,
+        recordingUrl: "",
+        notes: d.notes,
+      } as any);
+      taken.add(key);
+      created += 1;
+    }
+
+    if (selectedCohortId === cohortId) await fetchSessions(cohortId);
+    await fetchOverviewSessions();
+    return { created, skipped };
+  };
+
+  /** Quick edits from lists (no modal): recording link, publish toggle. */
+  const patchSession = async (
+    cohortId: string,
+    sessionId: string,
+    patch: Record<string, any>,
+  ) => {
+    await registrationStore.updateCohortSession(cohortId, sessionId, patch as any);
+    if (selectedCohortId === cohortId) await fetchSessions(cohortId);
+    await fetchOverviewSessions();
+  };
+
+  /** Start a new intake for a path; new paying students join it. */
+  const startIntake = async (pathId: string, seasonKey: string, label: string) => {
+    const res = await registrationStore.setActiveCohortForPathId(pathId, {
+      seasonKey,
+      seasonLabel: label,
+    } as any);
+    const list = await fetchCohorts();
+    await Promise.all([fetchActiveCohorts(), fetchOverviewSessions(list)]);
+    setSelectedCohortId(res.cohortKey);
+    return res;
+  };
+
+  /** Used by Settings after a typed confirmation. */
+  const clearAllRegistrationsConfirmed = async () => {
+    await registrationStore.clearAll();
+    setRegistrations([]);
+  };
+
+  const cohortStudentCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    registrations.forEach((r) => {
+      const key = String((r as any).cohortKey || "").trim();
+      if (key && r.status === "Complete") map[key] = (map[key] || 0) + 1;
+    });
+    return map;
+  }, [registrations]);
+
+
   return {
     onNavigate,
     onLogout,
@@ -2506,9 +2477,6 @@ export const useAdminWorkspace = ({
     setSiteConfigError,
     siteConfigSaved,
     setSiteConfigSaved,
-    activeAdminSection,
-    setActiveAdminSection,
-    selectAdminSection,
     pathsById,
     findPathIdByTitle,
     fetchPaths,
@@ -2642,9 +2610,6 @@ export const useAdminWorkspace = ({
     unreadSupportCount,
     totalInboxCount,
     totalSupportCount,
-    dashboardCounters,
-    adminSections,
-    activeSectionMeta,
     openAddCourse,
     toggleCourseLanding,
     toggleCourseExplore,
@@ -2686,9 +2651,50 @@ export const useAdminWorkspace = ({
     updateSiteConfigField,
     updateSupportTopics,
     handleSaveSiteConfig,
-    settingsLabelClass,
-    settingsInputClass,
+    // admin redesign
+    activeByPath,
+    overviewSessions,
+    overviewLoading,
+    automationStatus,
+    fetchAutomationStatus,
+    fetchActiveCohorts,
+    fetchOverviewSessions,
+    paymentChecks,
+    checkingRefs,
+    checkPaymentWithPaystack,
+    checkAllPending,
+    studentPayments,
+    fetchStudentPayments,
+    createSessionsBatch,
+    patchSession,
+    startIntake,
+    clearAllRegistrationsConfirmed,
+    cohortStudentCounts,
   };
+};
+
+export type OverviewSession = {
+  cohortId: string;
+  cohortLabel: string;
+  pathId: string;
+  session: SessionDoc;
+};
+
+export type PaymentCheck = {
+  outcome:
+    | "credited"
+    | "already_credited"
+    | "needs_review"
+    | "not_paid"
+    | "not_found"
+    | "error";
+  message: string;
+  at: number;
+};
+
+export type AutomationStatus = {
+  payments?: Record<string, any> | null;
+  classReminders?: Record<string, any> | null;
 };
 
 export type AdminWorkspace = ReturnType<typeof useAdminWorkspace>;
