@@ -36,7 +36,7 @@ import {
   mergeInboxThreadEntries,
 } from "./lib";
 import type { View } from "../../app/views";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 export type AdminWorkspaceProps = {
   onNavigate: (view: View) => void;
@@ -131,35 +131,27 @@ export const useAdminWorkspace = ({
   const [siteConfigLoading, setSiteConfigLoading] = useState(false);
   const [siteConfigError, setSiteConfigError] = useState("");
   const [siteConfigSaved, setSiteConfigSaved] = useState("");
-  const [activeAdminSection, setActiveAdminSection] = useState<AdminSectionKey>(
-    () => adminSectionFromPathname(window.location.pathname),
-  );
+  // The URL is the source of truth for the section, so in-app links,
+  // redirects and back/forward all show the right workspace.
+  const location = useLocation();
+  const activeAdminSection = adminSectionFromPathname(location.pathname);
 
   const routerNavigate = useNavigate();
   // Go through the router (not history.pushState) so the URL, page title and
   // back button stay in sync with the rest of the app.
   const selectAdminSection = (section: AdminSectionKey) => {
-    setActiveAdminSection(section);
     const nextPath = adminSectionRoutes[section] || "/admin";
-    if (window.location.pathname !== nextPath) {
+    if (location.pathname !== nextPath) {
       routerNavigate(nextPath);
     }
   };
+  const setActiveAdminSection = selectAdminSection;
 
   const pathsById = useMemo(() => {
     const m = new Map<string, PathDoc>();
     (paths || []).forEach((p) => m.set(p.id, p));
     return m;
   }, [paths]);
-
-  useEffect(() => {
-    const handlePopState = () => {
-      setActiveAdminSection(adminSectionFromPathname(window.location.pathname));
-    };
-
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
 
   // ✅ Legacy mapper: title -> pathId (for old docs missing pathId)
   const findPathIdByTitle = (title: string) => {

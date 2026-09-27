@@ -35,3 +35,5 @@ npm-debug.log*
 
 # Mac files
 .DS_Store
+# Firebase CLI local cache
+.firebase/
