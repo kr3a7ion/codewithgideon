@@ -1,5 +1,5 @@
 <div align="center">
-<img width="1200" height="475" alt="Code with gideon Logo" src="https://res.cloudinary.com/djjdzt7ka/image/upload/v1770216204/logo.jpg" />
+<img width="1200" height="630" alt="Code with Gideon: learn to build it, or have it built" src="public/og-default.jpg" />
 </div>
 
 
@@ -31,6 +31,40 @@ This platform provides:
 - **Admin student management**
 - **Mentor chat and student community access**
 - **Admin-managed public course and contact content**
+
+---
+
+# Public site: Learn · Work · Hire
+
+One brand, two doors. **Learn** is the live cohort classes, **Hire** is Gideon
+building websites for businesses, and **Work** is the proof for both.
+Designs: [Figma, "Code with Gideon — Rebrand"](https://www.figma.com/design/ANyVyXq9PfmTz1kxppwlJJ)
+(brand, components, and every page at 1440 and 390).
+
+| Route | Page |
+|---|---|
+| `/` | Hero with two equal doors, work preview, packages, cohorts, about (`#about`), FAQ |
+| `/courses`, `/courses/:slug` | Learn (course data from Admin → Courses), with "See what you'll build" |
+| `/work` | Portfolio grid (sample projects) |
+| `/work/:slug` | Case study: brief, features, steps, screens, "What you'd get", three calls to action |
+| `/hire` | Packages, process, proof, enquiry form (`#enquire`, `?need=landing\|booking\|other`), FAQ |
+
+- Content (work entries, packages, FAQs, WhatsApp number) lives in
+  `src/marketing/content.ts`; the building blocks are in `src/marketing/ui.tsx`.
+- Colours: navy is the brand, **teal = Learn**, **orange = Hire**, warm `paper`
+  for section backgrounds (`tailwind.config.js`).
+- Demo sites are linked, not rebuilt: `VITE_DEMOS_BASE_URL` (default
+  `https://demos.codewithgideon.com`). Optional `VITE_BOOKING_URL` (Cal.com or
+  Calendly) makes "Book a call" open that instead of WhatsApp.
+- Social previews: `npm run build` runs `scripts/prerender-meta.mjs`, which
+  writes `dist/work.html`, `dist/work/itura.html` and so on with each page's
+  title and image, because WhatsApp doesn't run JavaScript. `cleanUrls` in
+  `firebase.json` serves them.
+- Analytics: GA4 through Firebase Analytics (`VITE_FIREBASE_MEASUREMENT_ID`),
+  loaded when the browser is idle, never on `/admin` or `/student`. Events:
+  `cta_click`, `demo_open`, `whatsapp_click`, `generate_lead`. UTM tags on
+  outreach links (`?utm_source=whatsapp&utm_campaign=leadscout`) are kept and
+  saved with any enquiry.
 
 ---
 
@@ -336,6 +370,21 @@ Validation
 ↓
 Firestore Storage
 
+
+---
+
+## sendHireEnquiry
+
+Callable function used by the enquiry form on `/hire`
+(`functions/src/hire.ts`).
+
+- Asks for a WhatsApp number instead of an email (Nigerian `0803…`, `+234…`
+  or any 10–15 digit number), plus business name, need and budget range.
+- Saves to `contactMessages` with `category: "hire"`, so it shows in
+  Admin → Inbox → Website messages with a **Reply on WhatsApp** button.
+- Honeypot field and a limit of 5 enquiries per number per hour.
+- If the call fails, the page offers the same details as a pre-filled
+  WhatsApp message.
 
 ---
 

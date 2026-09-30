@@ -92,6 +92,18 @@ export default {
           teal: "#1698A0",
           orange: "#FF7A45",
         },
+        // Rebrand neutrals for the public site (Figma: "Code with Gideon —
+        // Rebrand"). Paper is the warm section background; line is the
+        // matching border. Teal = Learn, orange = Hire, navy = the brand.
+        paper: {
+          DEFAULT: "#F7F4EE",
+          dark: "#0D1728",
+        },
+        line: {
+          DEFAULT: "#E4DFD5",
+          strong: "#C9C2B4",
+          dark: "#1B2940",
+        },
       },
       fontFamily: {
         sans: ["Manrope", "ui-sans-serif", "system-ui", "sans-serif"],
@@ -99,6 +111,7 @@ export default {
       },
       boxShadow: {
         card: "0 1px 2px rgba(15, 43, 91, 0.04), 0 8px 24px rgba(15, 43, 91, 0.06)",
+        lift: "0 20px 50px rgba(8, 21, 46, 0.14)",
       },
     },
   },

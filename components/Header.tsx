@@ -1,6 +1,11 @@
-import React, { useState, useEffect } from "react";
-import { View } from "../src/App";
-import { IMAGES } from "../assets/images";
+import React, { useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { ArrowRight, Menu, Moon, Sun, X } from "lucide-react";
+import type { View } from "../src/App";
+import { cn } from "../src/ui";
+import { Lockup, mbtn } from "../src/marketing/ui";
+import { bookCallHref, BOOKING_URL } from "../src/marketing/content";
+import { trackCta, trackWhatsApp } from "../src/marketing/analytics";
 
 interface HeaderProps {
   currentView: View;
@@ -10,283 +15,180 @@ interface HeaderProps {
   isStudentLoggedIn?: boolean;
 }
 
-const Header: React.FC<HeaderProps> = ({
-  currentView,
-  onNavigate,
-  isDark,
-  onToggleTheme,
-  isStudentLoggedIn = false,
-}) => {
-  const [isScrolled, setIsScrolled] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+type Item = { label: string; to: string; caption: string; dot: string; underline: string; match: (path: string, hash: string) => boolean };
+
+const NAV: Item[] = [
+  { label: "Learn", to: "/courses", caption: "Live cohort classes", dot: "bg-teal-500", underline: "bg-teal-500", match: (p) => p.startsWith("/courses") },
+  { label: "Work", to: "/work", caption: "Sample projects and case studies", dot: "bg-blue-900 dark:bg-white", underline: "bg-blue-900 dark:bg-white", match: (p) => p.startsWith("/work") },
+  { label: "Hire", to: "/hire", caption: "A website for your business", dot: "bg-orange-500", underline: "bg-orange-500", match: (p) => p.startsWith("/hire") },
+  { label: "About", to: "/#about", caption: "Who Gideon is", dot: "bg-blue-900 dark:bg-white", underline: "bg-blue-900 dark:bg-white", match: (p, h) => p === "/" && h === "#about" },
+];
+
+const Header: React.FC<HeaderProps> = ({ onNavigate, isDark, onToggleTheme, isStudentLoggedIn = false }) => {
+  const { pathname, hash } = useLocation();
+  const [open, setOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleScroll = () => setIsScrolled(window.scrollY > 20);
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  // ✅ Close mobile menu when resizing to desktop
+  // Close the menu on navigation and on resize to desktop.
+  useEffect(() => setOpen(false), [pathname, hash]);
   useEffect(() => {
-    const onResize = () => {
-      if (window.innerWidth >= 768) setIsMobileMenuOpen(false); // md breakpoint
-    };
+    const onResize = () => window.innerWidth >= 1024 && setOpen(false);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // ✅ Prevent background scroll when mobile menu is open
+  // Lock page scroll, close on Escape, and keep focus inside the open menu.
   useEffect(() => {
-    if (!isMobileMenuOpen) return;
+    if (!open) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    panel.current?.querySelector<HTMLElement>("a,button")?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        menuButton.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
     return () => {
       document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
     };
-  }, [isMobileMenuOpen]);
+  }, [open]);
 
-  const scrollToSection = (e: React.MouseEvent<HTMLAnchorElement>, id: string) => {
-    e.preventDefault();
-
-    const scroll = () => {
-      const element = document.getElementById(id);
-      if (!element) return;
-
-      const headerOffset = 80;
-      const offsetPosition =
-        element.getBoundingClientRect().top + window.pageYOffset - headerOffset;
-
-      window.scrollTo({ top: offsetPosition, behavior: "smooth" });
-    };
-
-    if (currentView !== "home") {
-      onNavigate("home");
-      setTimeout(scroll, 100);
-    } else {
-      scroll();
-    }
-
-    setIsMobileMenuOpen(false);
+  const callHref = bookCallHref();
+  const onCall = (where: "nav" | "menu") => {
+    trackCta("book_call", where);
+    if (!BOOKING_URL) trackWhatsApp(where);
   };
-
-  const navItems = ["how-it-works", "courses", "pricing", "faq"] as const;
+  const account = isStudentLoggedIn
+    ? { label: "My dashboard", go: () => onNavigate("student-dashboard") }
+    : { label: "Log in", go: () => onNavigate("student-login") };
 
   return (
     <header
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        isScrolled || isMobileMenuOpen || currentView !== "home"
-          ? "bg-transparent py-4"
-          : "bg-transparent py-5"
-      }`}
+      className={cn(
+        "fixed inset-x-0 top-0 z-50 border-b bg-white/95 backdrop-blur transition-colors supports-[backdrop-filter]:bg-white/85 dark:bg-slate-950/90",
+        scrolled || open ? "border-line dark:border-line-dark" : "border-transparent",
+      )}
     >
-      <div className="w-full px-4 md:px-8 lg:px-10">
-        <div
-          className={`mx-auto flex w-full max-w-[1360px] items-center justify-between rounded-[24px] border px-4 py-3.5 md:px-6 md:py-4 transition-all duration-300 ${
-            isScrolled || isMobileMenuOpen || currentView !== "home"
-              ? "border-slate-200/80 bg-white/78 shadow-[0_16px_40px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-950/78"
-              : "border-white/18 bg-white/10 shadow-[0_20px_60px_rgba(15,23,42,0.10)] backdrop-blur-md dark:border-slate-800/70 dark:bg-slate-950/35"
-          }`}
-        >
-          {/* Logo */}
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault();
-              onNavigate("home");
-              setIsMobileMenuOpen(false);
-            }}
-            className="group flex items-center gap-3"
+      <div className="mx-auto flex h-16 w-full max-w-[1248px] items-center justify-between gap-4 px-5 sm:px-6 lg:h-[76px]">
+        <Link to="/" aria-label="Code with Gideon home" className="shrink-0 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600">
+          <Lockup markClassName="h-8 w-8 lg:h-9 lg:w-9" />
+        </Link>
+
+        <nav aria-label="Main" className="hidden lg:block">
+          <ul className="flex items-center gap-9">
+            {NAV.map((item) => {
+              const active = item.match(pathname, hash);
+              return (
+                <li key={item.label}>
+                  <Link
+                    to={item.to}
+                    onClick={() => {
+                      if (item.to === "/#about" && pathname === "/" && hash === "#about") document.getElementById("about")?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "group relative flex flex-col items-center gap-1.5 pt-2 text-[15px] font-semibold transition-colors",
+                      active ? "text-blue-900 dark:text-white" : "text-slate-600 hover:text-blue-900 dark:text-slate-300 dark:hover:text-white",
+                    )}
+                  >
+                    {item.label}
+                    <span className={cn("h-0.5 w-5 rounded-full transition-opacity", item.underline, active ? "opacity-100" : "opacity-0 group-hover:opacity-40")} aria-hidden />
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={account.go}
+            className="hidden rounded-lg px-2 py-2 text-[15px] font-semibold text-blue-900 hover:underline dark:text-white lg:block"
           >
-            <div className="relative overflow-hidden rounded-2xl border border-white/20 bg-white/85 p-1.5 shadow-[0_10px_30px_rgba(15,23,42,0.12)] transition-transform duration-300 group-hover:-translate-y-0.5 dark:border-slate-700/80 dark:bg-slate-900/90">
-              <div className="absolute inset-0 bg-gradient-to-br from-sky-500/8 via-transparent to-teal-400/10" />
-              <div className="relative h-9 w-9 overflow-hidden rounded-xl">
-                <img src={IMAGES.logo} alt="Code with Gideon Logo" />
-              </div>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-lg font-black tracking-tight text-slate-950 dark:text-white md:text-[1.15rem]">
-                CodeWithGideon
-              </span>
-            </div>
+            {account.label}
+          </button>
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            className="hidden h-10 w-10 items-center justify-center rounded-xl border border-line-strong text-blue-900 transition hover:bg-paper dark:border-slate-700 dark:text-white dark:hover:bg-slate-800 sm:flex"
+          >
+            {isDark ? <Sun className="h-[18px] w-[18px]" aria-hidden /> : <Moon className="h-[18px] w-[18px]" aria-hidden />}
+          </button>
+          <a
+            href={callHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => onCall("nav")}
+            className={mbtn({ kind: "primary", size: "sm", className: "hidden sm:inline-flex" })}
+          >
+            Book a call
           </a>
-
-          {/* Desktop Nav */}
-          <nav className="hidden items-center gap-2 rounded-full border border-slate-200/70 bg-white/70 px-2 py-2 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-slate-800 dark:bg-slate-900/70 md:flex">
-            {navItems.map((id) => (
-              <a
-                key={id}
-                href={`#${id}`}
-                onClick={(e) => scrollToSection(e, id)}
-                className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
-              >
-                {id.replace("-", " ").replace(/\b\w/g, (l) => l.toUpperCase())}
-              </a>
-            ))}
-          </nav>
-
-          {/* Desktop Actions */}
-          <div className="hidden items-center gap-3 md:flex">
-            {/* Theme toggle */}
-            <button
-              onClick={onToggleTheme}
-              className="rounded-2xl border border-slate-200/80 bg-white/78 p-2.5 text-slate-700 shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              aria-label="Toggle theme"
-              title="Toggle theme"
-            >
-              {isDark ? <SunIcon /> : <MoonIcon />}
-            </button>
-
-            {isStudentLoggedIn ? (
-              <button
-                onClick={() => onNavigate("student-dashboard")}
-                className="rounded-2xl bg-gradient-to-r from-slate-950 via-sky-900 to-teal-700 px-6 py-3 text-sm font-black text-white shadow-[0_16px_30px_rgba(8,47,73,0.28)] transition hover:-translate-y-0.5 dark:from-teal-500 dark:via-teal-600 dark:to-cyan-500"
-              >
-                My Dashboard
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={() => onNavigate("student-login")}
-                  className="rounded-full px-3 py-2 text-sm font-bold text-slate-800 transition hover:text-slate-950 dark:text-slate-200 dark:hover:text-white"
-                >
-                  Login
-                </button>
-                <a
-                  href="#courses"
-                  onClick={(e) => scrollToSection(e, "courses")}
-                  className="rounded-2xl bg-gradient-to-r from-slate-950 via-sky-900 to-teal-700 px-6 py-3 text-sm font-black text-white shadow-[0_16px_30px_rgba(8,47,73,0.28)] transition hover:-translate-y-0.5 dark:from-teal-500 dark:via-teal-600 dark:to-cyan-500"
-                >
-                  Join Now
-                </a>
-              </>
-            )}
-          </div>
-
-          {/* Mobile Actions */}
-          <div className="flex items-center gap-2 md:hidden">
-            {/* Theme toggle (mobile) */}
-            <button
-              onClick={onToggleTheme}
-              className="rounded-2xl border border-slate-200/80 bg-white/78 p-2.5 text-slate-700 shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
-              aria-label="Toggle theme"
-              title="Toggle theme"
-            >
-              {isDark ? <SunIcon /> : <MoonIcon />}
-            </button>
-
-            {/* Menu toggle */}
-            <button
-              className="rounded-2xl border border-slate-200/80 bg-white/78 p-2.5 text-slate-700 shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
-              onClick={() => setIsMobileMenuOpen((v) => !v)}
-              aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
-              title={isMobileMenuOpen ? "Close menu" : "Menu"}
-            >
-              {isMobileMenuOpen ? <XIcon /> : <MenuIcon />}
-            </button>
-          </div>
+          <button
+            ref={menuButton}
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-controls="mobile-menu"
+            aria-label={open ? "Close menu" : "Open menu"}
+            className="flex h-11 w-11 items-center justify-center rounded-xl border border-line-strong text-blue-900 dark:border-slate-700 dark:text-white lg:hidden"
+          >
+            {open ? <X className="h-5 w-5" aria-hidden /> : <Menu className="h-5 w-5" aria-hidden />}
+          </button>
         </div>
       </div>
 
-      {/* Mobile Menu */}
-      {isMobileMenuOpen && (
-        <div className="px-4 md:hidden">
-          <div className="mx-auto mt-3 w-full max-w-[1360px] overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 px-6 py-6 shadow-[0_20px_60px_rgba(15,23,42,0.16)] backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/96">
-            {navItems.map((id) => (
-              <a
-                key={id}
-                href={`#${id}`}
-                onClick={(e) => scrollToSection(e, id)}
-                className="block rounded-2xl px-4 py-3 text-base font-semibold text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-200 dark:hover:bg-slate-900 dark:hover:text-white"
-              >
-                {id.replace("-", " ").replace(/\b\w/g, (l) => l.toUpperCase())}
-              </a>
-            ))}
-
-            <div className="border-t border-gray-100 pt-4 dark:border-slate-800" />
-
-            {isStudentLoggedIn ? (
-              <button
-                onClick={() => {
-                  onNavigate("student-dashboard");
-                  setIsMobileMenuOpen(false);
-                }}
-                className="mt-4 w-full rounded-2xl bg-gradient-to-r from-slate-950 via-sky-900 to-teal-700 py-4 font-black text-white shadow-[0_16px_30px_rgba(8,47,73,0.28)] transition dark:from-teal-500 dark:via-teal-600 dark:to-cyan-500"
-              >
-                My Dashboard
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={() => {
-                    onNavigate("student-login");
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className="mt-4 w-full rounded-2xl bg-slate-100 py-3.5 font-bold text-slate-800 transition dark:bg-slate-900 dark:text-slate-100"
-                >
-                  Student Login
-                </button>
-
-                <a
-                  href="#courses"
-                  onClick={(e) => scrollToSection(e, "courses")}
-                  className="mt-3 block w-full rounded-2xl bg-gradient-to-r from-slate-950 via-sky-900 to-teal-700 py-4 text-center font-black text-white shadow-[0_16px_30px_rgba(8,47,73,0.28)] transition dark:from-teal-500 dark:via-teal-600 dark:to-cyan-500"
-                >
-                  Join the Next Cohort
-                </a>
-              </>
-            )}
+      {open ? (
+        <div
+          id="mobile-menu"
+          ref={panel}
+          className="max-h-[calc(100svh-4rem)] overflow-y-auto border-t border-line bg-white dark:border-line-dark dark:bg-slate-950 lg:hidden"
+        >
+          <nav aria-label="Main" className="mx-auto w-full max-w-[1248px] px-5 pt-2 sm:px-6">
+            <ul>
+              {NAV.map((item) => (
+                <li key={item.label} className="border-b border-line dark:border-line-dark">
+                  <Link to={item.to} className="flex items-center gap-3.5 py-4">
+                    <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", item.dot)} aria-hidden />
+                    <span className="flex-1">
+                      <span className="block font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">{item.label}</span>
+                      <span className="block text-sm font-medium text-slate-500 dark:text-slate-400">{item.caption}</span>
+                    </span>
+                    <ArrowRight className="h-5 w-5 text-slate-400" aria-hidden />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          <div className="mx-auto grid w-full max-w-[1248px] gap-3 px-5 pb-7 pt-6 sm:px-6">
+            <a href={callHref} target="_blank" rel="noopener noreferrer" onClick={() => onCall("menu")} className={mbtn({ kind: "primary", size: "lg", full: true })}>
+              Book a call
+            </a>
+            <button type="button" onClick={account.go} className={mbtn({ kind: "secondary", size: "lg", full: true })}>
+              {account.label}
+            </button>
+            <button type="button" onClick={onToggleTheme} className="mt-1 flex items-center justify-center gap-2 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
+              {isDark ? <Sun className="h-4 w-4" aria-hidden /> : <Moon className="h-4 w-4" aria-hidden />}
+              {isDark ? "Light mode" : "Dark mode"}
+            </button>
           </div>
         </div>
-      )}
+      ) : null}
     </header>
   );
 };
-
-function SunIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="text-slate-700 dark:text-slate-200">
-      <path
-        d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z"
-        stroke="currentColor"
-        strokeWidth="2"
-      />
-      <path
-        d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.4 1.4M17.6 17.6 19 19M19 5l-1.4 1.4M5 19l1.4-1.4"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function MoonIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="text-slate-700 dark:text-slate-200">
-      <path
-        d="M21 12.8A8.5 8.5 0 0 1 11.2 3 7 7 0 1 0 21 12.8Z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function MenuIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="text-slate-700 dark:text-slate-200">
-      <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function XIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="text-slate-700 dark:text-slate-200">
-      <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 export default Header;

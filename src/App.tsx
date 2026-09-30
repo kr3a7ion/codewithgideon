@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from "react";
+import React, { Suspense, lazy, useEffect } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -8,6 +8,7 @@ import { PageMeta } from "./app/usePageMeta";
 import { STUDENT_SECTIONS } from "./app/views";
 import { LoadingPanel } from "./ui";
 import HomePage from "./pages/HomePage";
+import { initAnalytics } from "./marketing/analytics";
 
 export type { View } from "./app/views";
 
@@ -26,6 +27,50 @@ const CreateAccount = lazy(() => import("../components/CreateAccount"));
 const ContinueRegistration = lazy(() => import("../components/ContinueRegistration"));
 const VerifyEmail = lazy(() => import("../components/VerifyEmail"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const WorkPage = lazy(() => import("./pages/WorkPage"));
+const CaseStudyPage = lazy(() => import("./pages/CaseStudyPage"));
+const HirePage = lazy(() => import("./pages/HirePage"));
+
+/**
+ * Scrolls to #anchors (e.g. /#about, /hire#enquire) once the target exists,
+ * and keeps it aligned while late content (courses, images) settles, unless
+ * the visitor starts scrolling themselves.
+ */
+const useScrollToHash = () => {
+  const { pathname, hash } = useLocation();
+  useEffect(() => {
+    if (!hash) return;
+    const id = decodeURIComponent(hash.slice(1));
+    const offset = () => (window.innerWidth >= 1024 ? 76 : 64);
+    const timers: number[] = [];
+    let cancelled = false;
+    const cancel = () => {
+      cancelled = true;
+    };
+    const align = (smooth: boolean) => {
+      if (cancelled) return;
+      const el = document.getElementById(id);
+      if (!el) return false;
+      const top = el.getBoundingClientRect().top + window.scrollY - offset();
+      if (Math.abs(window.scrollY - top) > 4) window.scrollTo({ top, behavior: smooth ? "smooth" : "auto" });
+      return true;
+    };
+    let tries = 0;
+    const first = () => {
+      if (align(false)) {
+        // Re-align while lazy content changes the layout above the target.
+        [250, 600, 1100, 1800].forEach((ms) => timers.push(window.setTimeout(() => align(false), ms)));
+      } else if (tries++ < 25) timers.push(window.setTimeout(first, 100));
+    };
+    timers.push(window.setTimeout(first, 60));
+    const events = ["wheel", "touchstart", "keydown", "mousedown"] as const;
+    events.forEach((e) => window.addEventListener(e, cancel, { passive: true }));
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t));
+      events.forEach((e) => window.removeEventListener(e, cancel));
+    };
+  }, [pathname, hash]);
+};
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -180,6 +225,8 @@ const AppShell: React.FC = () => {
   } = useApp();
 
   const privateMeta = { noindex: true };
+  useScrollToHash();
+  useEffect(() => initAnalytics(), []);
   // Signed-in admins get a full-screen app layout without the site chrome.
   const isAdminApp =
     isAdminLoggedIn &&
@@ -205,7 +252,7 @@ const AppShell: React.FC = () => {
         />
       )}
 
-      <main id="main" className={isAdminApp ? "flex-grow" : "flex-grow pt-20"}>
+      <main id="main" className={isAdminApp ? "flex-grow" : "flex-grow pt-16 lg:pt-[76px]"}>
         <ErrorBoundary resetKey={location.pathname}>
           <Suspense fallback={<LoadingPanel />}>
             <Routes>
@@ -227,6 +274,9 @@ const AppShell: React.FC = () => {
                 path="courses/:courseSlug"
                 element={<CourseDetail onNavigate={navigateTo} />}
               />
+              <Route path="work" element={<WorkPage />} />
+              <Route path="work/:slug" element={<CaseStudyPage />} />
+              <Route path="hire" element={<HirePage />} />
               <Route
                 path="contact"
                 element={
