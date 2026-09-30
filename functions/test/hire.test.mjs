@@ -9,7 +9,7 @@ export async function resolve(spec, ctx, next) {
   return next(spec, ctx);
 }`));
 
-const {normalizeWhatsApp, buildHireEnquiry} = await import("../lib/hire.js");
+const {normalizeWhatsApp, buildHireEnquiry, clientIp} = await import("../lib/hire.js");
 
 test("Nigerian numbers normalise to 234…", () => {
   assert.equal(normalizeWhatsApp("0803 000 0000"), "2348030000000");
@@ -45,4 +45,17 @@ test("missing or unknown fields are refused with a friendly message", () => {
   assert.throws(() => buildHireEnquiry({...valid, whatsapp: "123"}), /WhatsApp/);
   assert.throws(() => buildHireEnquiry({...valid, need: "app"}), /need/);
   assert.throws(() => buildHireEnquiry({...valid, budget: "a lot"}), /budget/);
+});
+
+test("built-in object keys are not accepted as a need or budget", () => {
+  for (const key of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+    assert.throws(() => buildHireEnquiry({...valid, need: key}), /need/);
+    assert.throws(() => buildHireEnquiry({...valid, budget: key}), /budget/);
+  }
+});
+
+test("client IP comes from the first forwarded hop", () => {
+  assert.equal(clientIp({headers: {"x-forwarded-for": "102.89.1.2, 10.0.0.1"}, ip: "10.0.0.1"}), "102.89.1.2");
+  assert.equal(clientIp({headers: {}, ip: "102.89.1.3"}), "102.89.1.3");
+  assert.equal(clientIp(undefined), "");
 });

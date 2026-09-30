@@ -69,8 +69,9 @@ export const buildHireEnquiry = (data: Record<string, unknown>): HireEnquiry => 
   if (name.length < 2) throw new Error("Enter your name.");
   if (businessName.length < 2) throw new Error("Enter your business name.");
   if (!whatsapp) throw new Error("Enter a valid WhatsApp number.");
-  if (!HIRE_NEEDS[need]) throw new Error("Choose what you need.");
-  if (!HIRE_BUDGETS[budget]) throw new Error("Choose a budget range.");
+  // Own keys only, so "constructor" or "__proto__" can't slip through.
+  if (!Object.prototype.hasOwnProperty.call(HIRE_NEEDS, need)) throw new Error("Choose what you need.");
+  if (!Object.prototype.hasOwnProperty.call(HIRE_BUDGETS, budget)) throw new Error("Choose a budget range.");
 
   const utm: Record<string, string> = {};
   const rawUtm = (data.utm && typeof data.utm === "object") ? data.utm as Record<string, unknown> : {};
@@ -106,6 +107,13 @@ export const buildHireEnquiry = (data: Record<string, unknown>): HireEnquiry => 
   };
 };
 
+/** The caller's IP from the Google front end (first X-Forwarded-For hop). */
+export const clientIp = (req: {headers?: Record<string, unknown>; ip?: string} | undefined): string => {
+  const fwd = req?.headers?.["x-forwarded-for"];
+  const first = String(Array.isArray(fwd) ? fwd[0] : fwd || "").split(",")[0].trim();
+  return first || String(req?.ip || "");
+};
+
 export const sendHireEnquiry = onCall(
   {region: "us-central1"},
   async (request) => {
@@ -124,7 +132,9 @@ export const sendHireEnquiry = onCall(
       throw new HttpsError("invalid-argument", String(e?.message || "Please check the form."));
     }
 
+    // Per number and per network, so changing the typed number doesn't help.
     await enforceRateLimit("hire", enquiry.whatsapp, 5, 60 * 60 * 1000);
+    await enforceRateLimit("hire-ip", clientIp(request.rawRequest), 10, 60 * 60 * 1000);
 
     try {
       const ref = await db.collection("contactMessages").add({

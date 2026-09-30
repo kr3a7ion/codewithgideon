@@ -259,7 +259,7 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
                   </span>
                 </div>
                 <div className="flex flex-1 flex-col gap-3 p-6">
-                  <h2 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">{path.title}</h2>
+                  <h3 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">{path.title}</h3>
                   <p className="flex-1 text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{path.description}</p>
                   <div className="mt-2 grid gap-2.5">
                     <button
@@ -303,7 +303,7 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
           id="build-title"
           eyebrow="Work"
           title="See what you’ll build."
-          description="The web cohort teaches the stack behind these sites: React, TypeScript and Tailwind, designed in Figma first. Try the live demos."
+          description="Sample booking sites for the kind of businesses web cohort learners build for. Try the live demos."
           action={<ArrowLink to="/work">See all work</ArrowLink>}
         />
         <div className="mt-10 grid gap-4 sm:gap-6 md:grid-cols-2">

@@ -466,12 +466,14 @@ const CourseDetail: React.FC<CourseDetailProps> = ({ onNavigate }) => {
           )}
         </section>
 
+        {/* The Work samples are websites, so only the web course links to them. */}
+        {/web|wordpress/i.test(`${course?.title || ""} ${token}`) ? (
         <section aria-labelledby="course-build" className="mt-16 rounded-[28px] bg-paper p-5 dark:bg-paper-dark sm:p-8 lg:p-10">
           <SectionHeader
             id="course-build"
             eyebrow="Work"
             title="See what you’ll build."
-            description="Sample booking sites built with the stack this cohort teaches. Try the live demos."
+            description="Sample booking sites for the kind of businesses web learners build for. Try the live demos."
             action={<ArrowLink to="/work">See all work</ArrowLink>}
           />
           <div className="mt-8 grid gap-4 sm:gap-6 md:grid-cols-2">
@@ -480,6 +482,7 @@ const CourseDetail: React.FC<CourseDetailProps> = ({ onNavigate }) => {
             ))}
           </div>
         </section>
+        ) : null}
       </div>
     </div>
   );

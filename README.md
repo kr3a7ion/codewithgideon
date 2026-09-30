@@ -61,7 +61,7 @@ Designs: [Figma, "Code with Gideon — Rebrand"](https://www.figma.com/design/AN
   title and image, because WhatsApp doesn't run JavaScript. `cleanUrls` in
   `firebase.json` serves them.
 - Analytics: GA4 through Firebase Analytics (`VITE_FIREBASE_MEASUREMENT_ID`),
-  loaded when the browser is idle, never on `/admin` or `/student`. Events:
+  loaded when the browser is idle (straight away for tagged links) and paused on `/admin` and `/student`. Events:
   `cta_click`, `demo_open`, `whatsapp_click`, `generate_lead`. UTM tags on
   outreach links (`?utm_source=whatsapp&utm_campaign=leadscout`) are kept and
   saved with any enquiry.

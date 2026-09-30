@@ -235,7 +235,7 @@ export const PACKAGES: Package[] = [
     price: "₦15,000",
     priceNote: "per month",
     timeline: "Ongoing",
-    includes: ["Hosting and domain admin", "Updates and small edits", "A monthly check that bookings still work"],
+    includes: ["Hosting and domain admin", "Updates to keep the site running", "Small edits to text, prices and photos"],
     cta: "Add after launch",
   },
 ];
@@ -248,7 +248,7 @@ export const HIRE_TERMS = [
 
 export const PROCESS = [
   { title: "Chat", body: "Tell me about your business on WhatsApp. I'll reply with a plan and a fixed price." },
-  { title: "Design", body: "I design your site in Figma and share the link. You comment, I adjust, and nothing is built until you're happy." },
+  { title: "Design", body: "I design your site in Figma and share the link. You comment, I adjust, and the build starts once you approve the design." },
   { title: "Build", body: "I build it to work fast on phones, then test every button, booking step and payment." },
   { title: "Launch", body: "Your site goes live on a domain in your name. The final 40% is due before go-live." },
 ];

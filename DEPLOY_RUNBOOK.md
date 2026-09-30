@@ -303,7 +303,9 @@ minutes. Logs: `firebase functions:log --only reconcilePendingPayments`.
 
 Adds `/work`, `/work/itura`, `/work/adire` and `/hire`, a new home page,
 header, footer and logo, and one new Cloud Function (`sendHireEnquiry`). No
-rules or index changes.
+rules or index changes. `firebase.json` now serves page HTML with
+`no-cache` (so a deploy is picked up at once) and keeps hashed JS/CSS
+cached for a year.
 
 ### 1. Point the demos subdomain at Netlify (before the site goes live)
 

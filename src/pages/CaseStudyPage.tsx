@@ -72,7 +72,7 @@ const CaseStudyPage: React.FC = () => {
             <Link
               to={work.learn.href}
               onClick={() => trackCta("learn_to_build", "case_study")}
-              className={mbtn({ kind: "ghost", size: "lg", className: "justify-start !text-teal-700 dark:!text-teal-300 sm:justify-center" })}
+              className={mbtn({ kind: "ghost", size: "lg", className: "!text-teal-700 dark:!text-teal-300" })}
             >
               Learn to build this <ArrowRight className="h-5 w-5" aria-hidden />
             </Link>
@@ -207,7 +207,7 @@ const CaseStudyPage: React.FC = () => {
               <Tag tone="learn">Learn</Tag>
               <h2 className="font-display text-lg font-semibold text-blue-900 dark:text-white">Learn to build this</h2>
               <p className="text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">
-                The {work.learn.label.toLowerCase()} teaches the stack behind this site, live with Gideon.
+                Learn to build business websites like this one in the {work.learn.label.toLowerCase()}, live with Gideon.
               </p>
               <Link to={work.learn.href} onClick={() => trackCta("learn_to_build", "case_study")} className={mbtn({ kind: "learn", full: true })}>
                 See the web cohort <ArrowRight className="h-[18px] w-[18px]" aria-hidden />

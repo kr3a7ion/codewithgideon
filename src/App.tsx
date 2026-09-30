@@ -8,7 +8,7 @@ import { PageMeta } from "./app/usePageMeta";
 import { STUDENT_SECTIONS } from "./app/views";
 import { LoadingPanel } from "./ui";
 import HomePage from "./pages/HomePage";
-import { initAnalytics } from "./marketing/analytics";
+import { initAnalytics, syncAnalyticsRoute } from "./marketing/analytics";
 
 export type { View } from "./app/views";
 
@@ -37,7 +37,9 @@ const HirePage = lazy(() => import("./pages/HirePage"));
  * the visitor starts scrolling themselves.
  */
 const useScrollToHash = () => {
-  const { pathname, hash } = useLocation();
+  // `key` changes on every navigation, so clicking /hire#enquire again while
+  // already there (or a package's ?need= link) still scrolls to the form.
+  const { pathname, search, hash, key } = useLocation();
   useEffect(() => {
     if (!hash) return;
     const id = decodeURIComponent(hash.slice(1));
@@ -69,7 +71,7 @@ const useScrollToHash = () => {
       timers.forEach((t) => window.clearTimeout(t));
       events.forEach((e) => window.removeEventListener(e, cancel));
     };
-  }, [pathname, hash]);
+  }, [pathname, search, hash, key]);
 };
 
 // ---------------------------------------------------------------------------
@@ -227,6 +229,7 @@ const AppShell: React.FC = () => {
   const privateMeta = { noindex: true };
   useScrollToHash();
   useEffect(() => initAnalytics(), []);
+  useEffect(() => syncAnalyticsRoute(location.pathname), [location.pathname]);
   // Signed-in admins get a full-screen app layout without the site chrome.
   const isAdminApp =
     isAdminLoggedIn &&

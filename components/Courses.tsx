@@ -185,7 +185,7 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
         eyebrow="Learn"
         tone="learn"
         title="Learn to build sites like these."
-        description="Live cohort classes with Gideon: small groups, real projects and a recording of every class."
+        description="Live cohort classes with Gideon: real projects and a recording of every class."
         action={
           <>
             <ArrowLink to="/work" tone="learn">

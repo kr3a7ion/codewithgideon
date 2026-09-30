@@ -187,7 +187,7 @@ const HomePage: React.FC = () => {
               Hi, I&rsquo;m Gideon.
             </h2>
             <p className="text-base leading-[26px] text-blue-100 sm:text-lg sm:leading-7">
-              I&rsquo;m a developer and electrical technician in Abuja, and I teach frontend development. I run the cohorts myself and I build websites and
+              I&rsquo;m a developer and electrical technician in Abuja, and I teach frontend development. I teach the cohorts live, and I build websites and
               apps for businesses.
             </p>
             <p className="text-base leading-[26px] text-blue-200">

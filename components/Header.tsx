@@ -56,6 +56,23 @@ const Header: React.FC<HeaderProps> = ({ onNavigate, isDark, onToggleTheme, isSt
       if (e.key === "Escape") {
         setOpen(false);
         menuButton.current?.focus();
+        return;
+      }
+      if (e.key !== "Tab" || !panel.current || !menuButton.current) return;
+      // Cycle focus between the menu button and the menu's own links.
+      const items = [menuButton.current, ...panel.current.querySelectorAll<HTMLElement>("a[href],button:not([disabled])")];
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (!active || !items.includes(active)) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -94,9 +111,6 @@ const Header: React.FC<HeaderProps> = ({ onNavigate, isDark, onToggleTheme, isSt
                 <li key={item.label}>
                   <Link
                     to={item.to}
-                    onClick={() => {
-                      if (item.to === "/#about" && pathname === "/" && hash === "#about") document.getElementById("about")?.scrollIntoView({ behavior: "smooth" });
-                    }}
                     aria-current={active ? "page" : undefined}
                     className={cn(
                       "group relative flex flex-col items-center gap-1.5 pt-2 text-[15px] font-semibold transition-colors",
@@ -161,7 +175,7 @@ const Header: React.FC<HeaderProps> = ({ onNavigate, isDark, onToggleTheme, isSt
             <ul>
               {NAV.map((item) => (
                 <li key={item.label} className="border-b border-line dark:border-line-dark">
-                  <Link to={item.to} className="flex items-center gap-3.5 py-4">
+                  <Link to={item.to} onClick={() => setOpen(false)} className="flex items-center gap-3.5 py-4">
                     <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", item.dot)} aria-hidden />
                     <span className="flex-1">
                       <span className="block font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">{item.label}</span>

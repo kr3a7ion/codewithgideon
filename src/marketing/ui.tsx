@@ -269,6 +269,7 @@ export const DemoLink: React.FC<{ work: WorkEntry; location: CtaLocation; classN
     {children ?? (
       <>
         Live demo <ArrowUpRight className="h-4 w-4" aria-hidden />
+        <span className="sr-only"> of {work.name}</span>
       </>
     )}
     <span className="sr-only"> (opens in a new tab)</span>
@@ -440,7 +441,7 @@ export const FaqList: React.FC<{ items: Faq[]; defaultOpen?: number; headingLeve
 export const TwoDoorBand: React.FC<{ location?: CtaLocation; learnTitle?: string; learnBody?: string }> = ({
   location = "band",
   learnTitle = "Want to build sites like these?",
-  learnBody = "The web cohort covers the same stack: React, TypeScript and Tailwind, designed in Figma first.",
+  learnBody = "In the web development cohort you learn to build business websites like these, live with Gideon.",
 }) => (
   <div className="grid gap-4 md:grid-cols-2 md:gap-6">
     <div className="flex flex-col items-start gap-3 rounded-3xl bg-teal-50 p-6 dark:bg-teal-950/60 sm:p-8">

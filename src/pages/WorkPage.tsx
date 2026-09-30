@@ -46,7 +46,7 @@ const WorkPage: React.FC = () => {
         <ul className="mt-10 grid gap-3 sm:gap-6 md:grid-cols-3">
           {[
             { icon: PenTool, title: "Designed in Figma first", body: "You see and comment on the design before any code is written." },
-            { icon: Code2, title: "React, TypeScript, Tailwind", body: "The same stack the web cohort teaches. Fast on phones." },
+            { icon: Code2, title: "React, TypeScript, Tailwind", body: "Modern, fast on phones and easy to hand over." },
             { icon: CalendarCheck, title: "Built to take bookings", body: "Live availability, deposits and a WhatsApp confirmation." },
           ].map(({ icon: Icon, title, body }) => (
             <li key={title} className="flex gap-3.5 rounded-2xl bg-paper p-5 dark:bg-paper-dark">

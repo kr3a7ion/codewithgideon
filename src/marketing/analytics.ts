@@ -8,8 +8,9 @@
  * ?utm_source=whatsapp&utm_campaign=leadscout. This module adds the events
  * that matter: which door people pick, demo opens, WhatsApp taps and leads.
  *
- * Analytics loads after the page is idle and never blocks rendering. Admin
- * and student pages are not tracked.
+ * Analytics loads after the page is idle and never blocks rendering. It
+ * doesn't start on admin or student pages, and collection is paused while a
+ * visitor is on them.
  */
 import type { Analytics } from "firebase/analytics";
 
@@ -18,10 +19,12 @@ type Params = Record<string, string | number | boolean | undefined>;
 let loading: Promise<Analytics | null> | null = null;
 const queue: [string, Params][] = [];
 
+const isPrivatePath = (path: string) => /^\/(admin|student)(\/|$)/.test(path);
+
 const enabled = () =>
   typeof window !== "undefined" &&
   Boolean((import.meta.env as Record<string, string | undefined>).VITE_FIREBASE_MEASUREMENT_ID) &&
-  !/^\/(admin|student)(\/|$)/.test(window.location.pathname);
+  !isPrivatePath(window.location.pathname);
 
 function load(): Promise<Analytics | null> {
   if (!loading) {
@@ -68,14 +71,29 @@ export function getUtm(): Record<string, string> {
   }
 }
 
-/** Start analytics once the browser is idle. Safe to call more than once. */
+/**
+ * Start analytics once the browser is idle. Safe to call more than once.
+ * Visits from a tagged link (utm_*) start straight away, so GA4's first
+ * page view still carries the campaign even if the visitor clicks on fast.
+ */
 export function initAnalytics() {
   if (typeof window !== "undefined") rememberUtm();
   if (!enabled()) return;
   const start = () => void load();
+  if (/[?&]utm_/.test(window.location.search)) return start();
   const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
   if (w.requestIdleCallback) w.requestIdleCallback(start, { timeout: 4000 });
   else window.setTimeout(start, 1500);
+}
+
+/** Pause collection on admin and student pages, resume on the public site. */
+export function syncAnalyticsRoute(pathname: string) {
+  if (!loading) return;
+  void loading.then(async (analytics) => {
+    if (!analytics) return;
+    const { setAnalyticsCollectionEnabled } = await import("firebase/analytics");
+    setAnalyticsCollectionEnabled(analytics, !isPrivatePath(pathname));
+  });
 }
 
 /** Log a GA4 event. Queued until analytics has loaded; a no-op without it. */

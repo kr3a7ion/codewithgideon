@@ -35,7 +35,7 @@ import {
 } from "../marketing/ui";
 
 const inputClass =
-  "h-[50px] w-full rounded-xl border-[1.5px] border-line-strong bg-white px-4 text-base text-blue-900 placeholder:text-slate-400 focus:border-blue-900 focus:outline-none focus:ring-4 focus:ring-blue-900/10 aria-[invalid=true]:border-red-600 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:focus:border-slate-300";
+  "h-[50px] w-full rounded-xl border-[1.5px] border-[#8592A8] bg-white px-4 text-base text-blue-900 placeholder:text-slate-500 focus:border-blue-900 focus:outline-none focus:ring-4 focus:ring-blue-900/10 aria-[invalid=true]:border-red-600 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:focus:border-slate-300";
 
 const isNeed = (v: string | null): v is HireNeed => v === "landing" || v === "booking" || v === "other";
 
@@ -129,7 +129,7 @@ const EnquiryForm: React.FC = () => {
     return (
       <div ref={resultRef} tabIndex={-1} role="status" className="flex flex-col items-start gap-4 rounded-3xl border border-line bg-white p-6 shadow-lift outline-none dark:border-line-dark dark:bg-slate-900 sm:p-8">
         <CheckCircle2 className="h-10 w-10 text-teal-600 dark:text-teal-300" aria-hidden />
-        <h3 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">Thanks, {name.split(" ")[0]}. Your enquiry is in.</h3>
+        <h3 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">Thanks, {name.trim().split(/\s+/)[0]}. Your enquiry is in.</h3>
         <p className="text-base leading-[26px] text-slate-600 dark:text-slate-300">
           I&rsquo;ll reply on WhatsApp with a plan and a fixed price. Want a faster answer? Send it on WhatsApp too.
         </p>
@@ -202,7 +202,7 @@ const EnquiryForm: React.FC = () => {
             <label
               key={o.value}
               className={`flex cursor-pointer items-center gap-2.5 rounded-xl border-[1.5px] px-3.5 py-3 text-sm font-semibold text-blue-900 transition-colors has-[:focus-visible]:ring-4 has-[:focus-visible]:ring-blue-900/15 dark:text-white ${
-                need === o.value ? "border-orange-500 bg-orange-50 dark:bg-orange-950/40" : "border-line-strong bg-white hover:border-slate-400 dark:border-slate-600 dark:bg-slate-900"
+                need === o.value ? "border-orange-500 bg-orange-50 dark:bg-orange-950/40" : "border-[#8592A8] bg-white hover:border-blue-900 dark:border-slate-500 dark:bg-slate-900"
               }`}
             >
               <input
