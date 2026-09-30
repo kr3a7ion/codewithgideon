@@ -45,15 +45,6 @@ const groups: { id: string; title: string; description: string; fields: FieldDef
       { key: "tiktokHandle", label: "TikTok handle" },
     ],
   },
-  {
-    id: "home",
-    title: "Home page button",
-    description: "The main button on the home page.",
-    fields: [
-      { key: "homepageCtaLabel", label: "Button text" },
-      { key: "homepageCtaHref", label: "Button link", hint: "A page on this site like /courses, or a full link" },
-    ],
-  },
 ];
 
 const SettingsPage: React.FC = () => {

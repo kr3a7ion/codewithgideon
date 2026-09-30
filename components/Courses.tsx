@@ -1,5 +1,10 @@
 // components/Courses.tsx
 import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { Smartphone, Video, Wallet } from "lucide-react";
+import { ArrowLink, Section, SectionHeader, Tag, mbtn } from "../src/marketing/ui";
+import { trackCta } from "../src/marketing/analytics";
+import { WHATSAPP_MESSAGES, whatsappLink } from "../src/marketing/content";
 import { Course } from "../types";
 import { IMAGES } from "../assets/images";
 import { View } from "../src/App";
@@ -174,172 +179,115 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
         : resolvedPathTitle;
 
   return (
-    <section
-      id="courses"
-      className="py-24 bg-gray-50 dark:bg-slate-900 transition-colors scroll-mt-24"
-    >
-      <div className="max-w-7xl mx-auto px-6 text-center lg:text-left">
-        <div className="flex flex-col md:flex-row items-end justify-between mb-16 gap-4">
-          <div className="md:w-2/3">
-            <h2 className="text-3xl md:text-5xl font-black text-blue-900 dark:text-white mb-4 tracking-tight">
-              Master Your Craft.
-            </h2>
-            <p className="text-slate-600 dark:text-slate-300 text-lg">
-              Structured learning designed for real-world impact. Pick your
-              path.
-            </p>
-          </div>
+    <Section id="courses" tone="page" labelledBy="cohorts-title">
+      <SectionHeader
+        id="cohorts-title"
+        eyebrow="Learn"
+        tone="learn"
+        title="Learn to build sites like these."
+        description="Live cohort classes with Gideon: real projects and a recording of every class."
+        action={
+          <>
+            <ArrowLink to="/work" tone="learn">
+              See what you&rsquo;ll build
+            </ArrowLink>
+            <ArrowLink to="/courses">All courses</ArrowLink>
+          </>
+        }
+      />
 
-          <button
-            onClick={() => onNavigate("curriculums")}
-            className="text-teal-600 dark:text-teal-400 font-bold flex items-center hover:text-teal-700 dark:hover:text-teal-300 transition-colors mx-auto md:mx-0"
-          >
-            Explore All Paths
-            <svg
-              className="w-5 h-5 ml-1"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M17 8l4 4m0 0l-4 4m4-4H3"
-              />
-            </svg>
-          </button>
-        </div>
+      <ul className="mt-10 grid gap-3 sm:gap-6 md:grid-cols-3">
+        {[
+          { icon: Video, title: "Live classes with Gideon", body: "Ask questions while the code is being written, not after." },
+          { icon: Wallet, title: "Pay week by week", body: "Unlock the weeks you want. No big upfront fee." },
+          { icon: Smartphone, title: "Everything in the app", body: "Classes, recordings, resources and mentor chat in one place." },
+        ].map(({ icon: Icon, title, body }) => (
+          <li key={title} className="flex gap-3.5 rounded-2xl bg-teal-50 p-4 dark:bg-teal-950/60 sm:p-5">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white dark:bg-slate-900">
+              <Icon className="h-5 w-5 text-teal-700 dark:text-teal-300" aria-hidden />
+            </span>
+            <span>
+              <span className="block font-display text-base font-semibold text-blue-900 dark:text-white sm:text-lg">{title}</span>
+              <span className="mt-0.5 hidden text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300 sm:block">{body}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
 
-        {loading ? (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="bg-white dark:bg-slate-800 rounded-[2.5rem] overflow-hidden shadow-xl border border-gray-100 dark:border-slate-700 animate-pulse"
-              >
-                <div className="h-56 bg-slate-200 dark:bg-slate-700" />
-                <div className="p-8 space-y-4">
-                  <div className="h-6 w-3/4 bg-slate-200 dark:bg-slate-700 rounded" />
-                  <div className="h-4 w-full bg-slate-200 dark:bg-slate-700 rounded" />
-                  <div className="h-4 w-5/6 bg-slate-200 dark:bg-slate-700 rounded" />
-                  <div className="grid grid-cols-2 gap-4 pt-4">
-                    <div className="h-14 bg-slate-200 dark:bg-slate-700 rounded-2xl" />
-                    <div className="h-14 bg-slate-200 dark:bg-slate-700 rounded-2xl" />
-                  </div>
-                  <div className="space-y-3 pt-4">
-                    <div className="h-12 bg-slate-200 dark:bg-slate-700 rounded-2xl" />
-                    <div className="h-12 bg-slate-200 dark:bg-slate-700 rounded-2xl" />
-                  </div>
-                </div>
+      {loading ? (
+        <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="animate-pulse overflow-hidden rounded-[20px] border border-line bg-white dark:border-line-dark dark:bg-slate-900">
+              <div className="h-40 bg-slate-100 dark:bg-slate-800" />
+              <div className="space-y-3 p-6">
+                <div className="h-6 w-3/4 rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-4 w-full rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-11 rounded-xl bg-slate-100 dark:bg-slate-800" />
               </div>
-            ))}
+            </div>
+          ))}
+        </div>
+      ) : displayCourses.length === 0 ? (
+        <div className="mt-8 rounded-[20px] border border-line bg-paper px-6 py-10 text-center dark:border-line-dark dark:bg-paper-dark">
+          <h3 className="font-display text-xl font-semibold text-blue-900 dark:text-white">The next cohort is being prepared</h3>
+          <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+            See all paths, or message Gideon on WhatsApp to hear when the next cohort opens.
+          </p>
+          <div className="mt-5 flex flex-col justify-center gap-3 sm:flex-row">
+            <Link to="/courses" className={mbtn({ kind: "learn" })}>
+              See all paths
+            </Link>
+            <a href={whatsappLink(WHATSAPP_MESSAGES.general)} target="_blank" rel="noopener noreferrer" className={mbtn({ kind: "secondary" })}>
+              Ask on WhatsApp
+            </a>
           </div>
-        ) : displayCourses.length === 0 ? (
-          <div className="rounded-[2rem] border border-slate-200 bg-white px-8 py-12 text-center shadow-xl dark:border-slate-800 dark:bg-slate-800">
-            <h3 className="text-2xl font-black text-blue-900 dark:text-white">
-              Courses are being prepared
-            </h3>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-600 dark:text-slate-300">
-              No courses are currently set to show on the homepage. Explore all
-              paths or check back soon for the next cohort opening.
-            </p>
-            <button
-              onClick={() => onNavigate("curriculums")}
-              className="mt-6 rounded-2xl bg-blue-900 px-6 py-3 text-sm font-black uppercase tracking-widest text-white transition hover:bg-blue-800 dark:bg-teal-600 dark:hover:bg-teal-500"
-            >
-              Explore Paths
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-            {displayCourses.map((course, idx) => {
-              const resolvedPathTitle =
-                (course.pathId && pathTitleById.get(course.pathId)) ||
-                course.title;
-
-              return (
-                <div
-                  key={course.id}
-                  className="bg-white dark:bg-slate-800 rounded-[2.5rem] overflow-hidden shadow-xl border border-gray-100 dark:border-slate-700 flex flex-col hover:shadow-2xl transition-all group"
-                >
-                  <div className="h-56 bg-blue-900 relative overflow-hidden">
-                    <img
-                      src={course.imageUrl}
-                      alt={course.title}
-                      className="w-full h-full object-cover opacity-70 group-hover:scale-110 transition-transform duration-700"
-                    />
-                    <div className="absolute top-4 left-4 bg-white/90 dark:bg-slate-900/90 backdrop-blur px-3 py-1 rounded-full text-[10px] font-black text-blue-900 dark:text-teal-400 uppercase tracking-widest">
-                      {course.level}
-                    </div>
-                  </div>
-
-                  <div className="p-8 flex-grow">
-                    <div className="flex justify-between items-start mb-4">
-                      <h3 className="text-2xl font-black text-blue-900 dark:text-white leading-tight">
-                        {course.title}
-                      </h3>
-                    </div>
-
-                    <p className="text-slate-500 dark:text-slate-400 text-sm mb-8 leading-relaxed line-clamp-3">
-                      {course.description}
-                    </p>
-
-                    <div className="grid grid-cols-2 gap-4 mb-8">
-                      <div className="p-3 bg-gray-50 dark:bg-slate-700/50 rounded-2xl border border-gray-100 dark:border-slate-700">
-                        <p className="text-[9px] uppercase font-black text-slate-400 mb-1">
-                          Duration
-                        </p>
-                        <p className="text-xs font-bold text-blue-900 dark:text-slate-200">
-                          {course.duration}
-                        </p>
-                      </div>
-                      <div className="p-3 bg-gray-50 dark:bg-slate-700/50 rounded-2xl border border-gray-100 dark:border-slate-700">
-                        <p className="text-[9px] uppercase font-black text-slate-400 mb-1">
-                          Live Classes
-                        </p>
-                        <p className="text-xs font-bold text-blue-900 dark:text-slate-200">
-                          {course.sessions}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-3">
-                      <button
-                        onClick={() =>
-                          course.courseId
-                            ? onNavigate("course-detail", {
-                                courseId: course.courseId,
-                                title: course.title,
-                              })
-                            : onNavigate(course.syllabusView)
-                        }
-                        className="w-full py-4 bg-blue-900 dark:bg-slate-700 text-white font-black rounded-2xl shadow-lg hover:bg-blue-800 dark:hover:bg-slate-600 transition-all text-sm"
-                      >
-                        View Syllabus
-                      </button>
-
-                      {/* ✅ pathId-first, but passed via `path` param to avoid breaking App.tsx */}
-                      <button
-                        onClick={() =>
-                          onNavigate(
-                            "create-account",
-                            toRegistrationParam(course, resolvedPathTitle),
-                          )
-                        }
-                        className="w-full py-4 bg-teal-600 hover:bg-teal-500 text-white font-black rounded-2xl shadow-lg transition-all text-sm"
-                      >
-                        Join Cohort — {course.priceLabel}
-                      </button>
-                    </div>
-                  </div>
+        </div>
+      ) : (
+        <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {displayCourses.map((course) => {
+            const resolvedPathTitle = (course.pathId && pathTitleById.get(course.pathId)) || course.title;
+            const meta = [course.duration, course.sessions].filter(Boolean).join(" · ");
+            return (
+              <article key={course.id} className="group flex flex-col overflow-hidden rounded-[20px] border border-line bg-white shadow-card dark:border-line-dark dark:bg-slate-900">
+                <div className="relative h-40 overflow-hidden bg-blue-900">
+                  <img src={course.imageUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover opacity-80 transition-transform duration-500 group-hover:scale-105" />
+                  <span className="absolute left-4 top-4">
+                    <Tag>{course.level}</Tag>
+                  </span>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </section>
+                <div className="flex flex-1 flex-col gap-2.5 p-6">
+                  <h3 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">{course.title}</h3>
+                  <p className="line-clamp-3 flex-1 text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{course.description}</p>
+                  {meta ? <p className="text-xs font-bold text-slate-500 dark:text-slate-400">{meta}</p> : null}
+                  <div className="mt-2 grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        course.courseId ? onNavigate("course-detail", { courseId: course.courseId, title: course.title }) : onNavigate(course.syllabusView)
+                      }
+                      className={mbtn({ kind: "secondary", full: true, tight: true })}
+                    >
+                      Syllabus
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        trackCta("join_cohort", "cohorts");
+                        onNavigate("create-account", toRegistrationParam(course, resolvedPathTitle));
+                      }}
+                      className={mbtn({ kind: "learn", full: true, tight: true })}
+                    >
+                      Join cohort
+                    </button>
+                  </div>
+                  <p className="text-center text-xs font-semibold text-slate-500 dark:text-slate-400">{course.priceLabel}</p>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </Section>
   );
 };
 

@@ -3,6 +3,8 @@ import { useLocation } from "react-router-dom";
 import { usePageMeta } from "../src/app/usePageMeta";
 import { View } from "../src/App";
 import { IMAGES } from "../assets/images";
+import { ArrowLink, SectionHeader, WorkCard } from "../src/marketing/ui";
+import { WORK } from "../src/marketing/content";
 import {
   CourseDoc,
   SyllabusWeek,
@@ -463,6 +465,24 @@ const CourseDetail: React.FC<CourseDetailProps> = ({ onNavigate }) => {
             </div>
           )}
         </section>
+
+        {/* The Work samples are websites, so only the web course links to them. */}
+        {/web|wordpress/i.test(`${course?.title || ""} ${token}`) ? (
+        <section aria-labelledby="course-build" className="mt-16 rounded-[28px] bg-paper p-5 dark:bg-paper-dark sm:p-8 lg:p-10">
+          <SectionHeader
+            id="course-build"
+            eyebrow="Work"
+            title="See what you’ll build."
+            description="Sample booking sites for the kind of businesses web learners build for. Try the live demos."
+            action={<ArrowLink to="/work">See all work</ArrowLink>}
+          />
+          <div className="mt-8 grid gap-4 sm:gap-6 md:grid-cols-2">
+            {WORK.map((w) => (
+              <WorkCard key={w.slug} work={w} location="cohorts" />
+            ))}
+          </div>
+        </section>
+        ) : null}
       </div>
     </div>
   );

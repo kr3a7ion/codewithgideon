@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { View } from "../src/App";
 import { IMAGES } from "../assets/images";
+import { ArrowLink, Eyebrow, Section, SectionHeader, Tag, WorkCard, container, mbtn } from "../src/marketing/ui";
+import { WORK } from "../src/marketing/content";
+import { trackCta } from "../src/marketing/analytics";
 import {
   registrationStore,
   CourseDoc,
@@ -195,145 +198,121 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
   };
 
   return (
-    <div className="py-24 bg-gray-50 dark:bg-slate-950 min-h-screen transition-colors">
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="text-center mb-16">
-          <button
-            onClick={() => onNavigate("home")}
-            className="text-slate-500 hover:text-blue-900 dark:hover:text-teal-400 mb-8 inline-flex items-center text-sm font-bold uppercase tracking-widest"
+    <>
+      <section className="bg-paper dark:bg-paper-dark" aria-labelledby="learn-title">
+        <div className={`${container} pb-10 pt-10 sm:pb-14 sm:pt-16`}>
+          <Eyebrow tone="learn">Learn</Eyebrow>
+          <h1
+            id="learn-title"
+            className="mt-4 max-w-[760px] font-display text-[40px] font-bold leading-[44px] tracking-[-0.02em] text-blue-900 dark:text-white sm:text-[56px] sm:leading-[60px] lg:text-[64px] lg:leading-[68px] lg:tracking-[-0.025em]"
           >
-            <svg
-              className="w-4 h-4 mr-2"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M10 19l-7-7m0 0l7-7m-7 7h18"
-              />
-            </svg>
-            Back to Home
-          </button>
-
-          <h1 className="text-4xl md:text-6xl font-black text-blue-900 dark:text-white mb-6">
-            Choose Your Path.
+            Learn to <span className="text-teal-600 dark:text-teal-300">build it</span>, live.
           </h1>
-          <p className="text-xl text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-            Each curriculum is designed to be practical, structured, and
-            instructor-led.
+          <p className="mt-5 max-w-[640px] text-base leading-[26px] text-slate-600 dark:text-slate-300 sm:text-lg sm:leading-7">
+            Pick a path. Every cohort is live with Gideon, recorded after every class, and paid for week by week.
           </p>
+          <div className="mt-6 flex flex-wrap gap-x-7 gap-y-3">
+            <ArrowLink to="/work" tone="learn">
+              See what you&rsquo;ll build
+            </ArrowLink>
+            <ArrowLink to="/#about">Meet your teacher</ArrowLink>
+          </div>
         </div>
+      </section>
 
+      <Section tone="page" className="!pt-10 sm:!pt-14">
+        <h2 className="sr-only">Paths</h2>
         {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+          <div className="grid gap-6 md:grid-cols-3">
             {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="bg-white dark:bg-slate-900 rounded-[2.5rem] overflow-hidden border-2 border-slate-200 dark:border-slate-700 shadow-2xl animate-pulse"
-              >
-                <div className="h-52 bg-slate-200 dark:bg-slate-800" />
-                <div className="p-8 space-y-4">
-                  <div className="h-6 w-3/4 bg-slate-200 dark:bg-slate-800 rounded" />
-                  <div className="h-4 w-full bg-slate-200 dark:bg-slate-800 rounded" />
-                  <div className="h-4 w-5/6 bg-slate-200 dark:bg-slate-800 rounded" />
-                  <div className="space-y-3 pt-4">
-                    <div className="h-12 bg-slate-200 dark:bg-slate-800 rounded-2xl" />
-                    <div className="h-12 bg-slate-200 dark:bg-slate-800 rounded-2xl" />
-                  </div>
+              <div key={i} className="animate-pulse overflow-hidden rounded-[20px] border border-line bg-white dark:border-line-dark dark:bg-slate-900">
+                <div className="h-48 bg-slate-100 dark:bg-slate-800" />
+                <div className="space-y-3 p-6">
+                  <div className="h-6 w-3/4 rounded bg-slate-100 dark:bg-slate-800" />
+                  <div className="h-4 w-full rounded bg-slate-100 dark:bg-slate-800" />
+                  <div className="h-11 rounded-xl bg-slate-100 dark:bg-slate-800" />
                 </div>
               </div>
             ))}
           </div>
         ) : merged.length === 0 ? (
-          <div className="mx-auto max-w-2xl rounded-[2rem] border border-slate-200 bg-white px-8 py-12 text-center shadow-xl dark:border-slate-800 dark:bg-slate-900">
-            <h2 className="text-2xl font-black text-blue-900 dark:text-white">
-              Courses are being prepared
-            </h2>
-            <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-slate-300">
-              No courses are open for enrollment right now. Check back soon, or
-              send us a message and we'll tell you when the next cohort starts.
+          <div className="mx-auto max-w-2xl rounded-[20px] border border-line bg-paper px-6 py-10 text-center dark:border-line-dark dark:bg-paper-dark">
+            <h2 className="font-display text-xl font-semibold text-blue-900 dark:text-white">Courses are being prepared</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
+              No courses are open for enrollment right now. Check back soon, or send a message and you&rsquo;ll hear when the next cohort starts.
             </p>
-            <button
-              type="button"
-              onClick={() => onNavigate("contact")}
-              className="mt-6 inline-flex items-center justify-center rounded-xl bg-blue-900 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-800 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
-            >
+            <button type="button" onClick={() => onNavigate("contact")} className={mbtn({ kind: "learn", className: "mt-5" })}>
               Contact us
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {merged.map((path) => (
-              <div
+              <article
                 key={`${path.source}-${path.courseId || path.pathId || path.title}`}
-                className={`bg-white dark:bg-slate-900 rounded-[2.5rem] overflow-hidden border-2 ${path.accent} shadow-2xl flex flex-col hover:translate-y-[-8px] transition-all duration-300 group`}
+                className="group flex flex-col overflow-hidden rounded-[20px] border border-line bg-white shadow-card dark:border-line-dark dark:bg-slate-900"
               >
-                <div className="h-52 overflow-hidden relative">
-                  <img
-                    src={path.image}
-                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 opacity-80"
-                    alt={path.title}
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-blue-900/80 to-transparent"></div>
-                  <div className="absolute bottom-6 left-6">
-                    <span className="text-white text-[10px] font-black uppercase tracking-widest bg-blue-900/40 backdrop-blur-sm px-3 py-1 rounded-full border border-white/20">
-                      {path.focus}
-                    </span>
-                  </div>
+                <div className="relative h-48 overflow-hidden bg-blue-900">
+                  <img src={path.image} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover opacity-80 transition-transform duration-500 group-hover:scale-105" />
+                  <span className="absolute bottom-4 left-4">
+                    <Tag>{path.focus}</Tag>
+                  </span>
                 </div>
-
-                <div className="p-8 flex-grow">
-                  <div className="flex justify-between items-start mb-4">
-                    <h2 className="text-2xl font-black text-blue-900 dark:text-white leading-tight">
-                      {path.title}
-                    </h2>
-                  </div>
-
-                  <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed mb-8">
-                    {path.description}
-                  </p>
-
-                  <div className="flex flex-col gap-3">
+                <div className="flex flex-1 flex-col gap-3 p-6">
+                  <h3 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">{path.title}</h3>
+                  <p className="flex-1 text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{path.description}</p>
+                  <div className="mt-2 grid gap-2.5">
                     <button
+                      type="button"
                       onClick={() =>
                         path.courseId
-                          ? onNavigate("course-detail", {
-                              courseId: path.courseId,
-                              title: path.title,
-                            })
+                          ? onNavigate("course-detail", { courseId: path.courseId, title: path.title })
                           : onNavigate(path.syllabusView || "curriculums")
                       }
-                      className="w-full py-4 bg-blue-900 dark:bg-slate-800 text-white font-black rounded-2xl shadow-lg hover:bg-blue-800 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-2"
+                      className={mbtn({ kind: "secondary", full: true })}
                     >
-                      View Syllabus
+                      View syllabus
                     </button>
-
                     <button
-                      onClick={() =>
-                        onNavigate("create-account", toRegistrationParam(path))
-                      }
-                      className="w-full py-4 bg-teal-600 hover:bg-teal-500 text-white font-black rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2"
+                      type="button"
+                      onClick={() => {
+                        trackCta("join_cohort", "cohorts");
+                        onNavigate("create-account", toRegistrationParam(path));
+                      }}
+                      className={mbtn({ kind: "learn", full: true })}
                     >
-                      Enroll Now — {path.priceLabel || "Pricing at enrollment"}
+                      Join the cohort
                     </button>
+                    <p className="text-center text-xs font-semibold text-slate-500 dark:text-slate-400">{path.priceLabel || "Pricing at enrollment"}</p>
                   </div>
                 </div>
-              </div>
+              </article>
             ))}
           </div>
         )}
 
         {!loading && loadFailed && merged.length > 0 && (
-          <div className="mx-auto mt-10 max-w-2xl rounded-3xl border border-teal-200 bg-teal-50 px-6 py-5 text-center text-sm font-semibold text-teal-900 dark:border-teal-500/30 dark:bg-teal-500/10 dark:text-teal-100">
-            Live course data could not be reached, so a temporary course list is
-            being shown.
-          </div>
+          <p className="mx-auto mt-8 max-w-2xl rounded-2xl border border-teal-200 bg-teal-50 px-5 py-4 text-center text-sm font-semibold text-teal-900 dark:border-teal-500/30 dark:bg-teal-500/10 dark:text-teal-100">
+            Live course data couldn&rsquo;t be reached, so a temporary course list is shown.
+          </p>
         )}
-      </div>
-    </div>
+      </Section>
+
+      <Section tone="paper" labelledBy="build-title">
+        <SectionHeader
+          id="build-title"
+          eyebrow="Work"
+          title="See what you’ll build."
+          description="Sample booking sites for the kind of businesses web cohort learners build for. Try the live demos."
+          action={<ArrowLink to="/work">See all work</ArrowLink>}
+        />
+        <div className="mt-10 grid gap-4 sm:gap-6 md:grid-cols-2">
+          {WORK.map((w) => (
+            <WorkCard key={w.slug} work={w} location="cohorts" />
+          ))}
+        </div>
+      </Section>
+    </>
   );
 };
 
