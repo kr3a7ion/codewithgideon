@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect } from "react";
+import React, { Suspense, lazy, useEffect, useMemo } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -9,6 +9,7 @@ import { STUDENT_SECTIONS } from "./app/views";
 import { LoadingPanel } from "./ui";
 import HomePage from "./pages/HomePage";
 import { initAnalytics, syncAnalyticsRoute } from "./marketing/analytics";
+import { auth } from "../services/firebase";
 
 export type { View } from "./app/views";
 
@@ -18,14 +19,14 @@ const TermsOfService = lazy(() => import("../components/TermsOfService"));
 const RefundPolicy = lazy(() => import("../components/RefundPolicy"));
 const Curriculums = lazy(() => import("../components/Curriculums"));
 const CourseDetail = lazy(() => import("../components/CourseDetail"));
-const Payment = lazy(() => import("../components/Payment"));
+const PaymentPageView = lazy(() => import("./features/join/PaymentPage"));
 const AdminLogin = lazy(() => import("../components/AdminLogin"));
 const AdminDashboard = lazy(() => import("./features/admin/AdminArea"));
-const StudentLogin = lazy(() => import("../components/StudentLogin"));
+const LoginPage = lazy(() => import("./features/join/LoginPage"));
 const StudentDashboard = lazy(() => import("./features/learn/StudentArea"));
-const CreateAccount = lazy(() => import("../components/CreateAccount"));
-const ContinueRegistration = lazy(() => import("../components/ContinueRegistration"));
-const VerifyEmail = lazy(() => import("../components/VerifyEmail"));
+const CreateAccountPage = lazy(() => import("./features/join/CreateAccountPage"));
+const DetailsPage = lazy(() => import("./features/join/DetailsPage"));
+const VerifyEmailView = lazy(() => import("./features/join/VerifyEmailPage"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const WorkPage = lazy(() => import("./pages/WorkPage"));
 const CaseStudyPage = lazy(() => import("./pages/CaseStudyPage"));
@@ -94,7 +95,7 @@ const RequireStudent: React.FC<{ children: React.ReactNode }> = ({ children }) =
       {isStudentLoggedIn ? (
         children
       ) : (
-        <StudentLogin
+        <LoginPage
           onNavigate={navigateTo}
           onLogin={loginStudent}
           onGoogleAuth={loginStudentWithGoogle}
@@ -125,7 +126,7 @@ const RequireAdmin: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 const StudentLoginPage = () => {
   const { navigateTo, loginStudent, loginStudentWithGoogle } = useApp();
   return (
-    <StudentLogin
+    <LoginPage
       onNavigate={navigateTo}
       onLogin={loginStudent}
       onGoogleAuth={loginStudentWithGoogle}
@@ -135,15 +136,22 @@ const StudentLoginPage = () => {
 
 const VerifyEmailPage = () => {
   const {
+    isLoadingAuth,
     verificationState,
     navigateTo,
     refreshVerifiedSession,
     resendVerificationEmail,
     logoutPendingVerification,
   } = useApp();
-  if (!verificationState) return <StudentLoginPage />;
+  if (!verificationState) {
+    // Just after sign-up, Firebase reports the new (unverified) user a
+    // moment before the app records it. Wait instead of flashing the login.
+    const pending = auth.currentUser && !auth.currentUser.emailVerified;
+    if (isLoadingAuth || pending) return <LoadingPanel label="Loading" />;
+    return <StudentLoginPage />;
+  }
   return (
-    <VerifyEmail
+    <VerifyEmailView
       role={verificationState.role}
       email={verificationState.email}
       onNavigate={navigateTo}
@@ -159,26 +167,29 @@ const PaymentPage = () => {
     useApp();
   // After a page refresh on /student/payment there is no hand-off data yet,
   // so build the checkout from the signed-in student's profile.
-  const paymentUserData: any =
-    activeRegistration ||
-    (studentProfile
-      ? studentProfile.status === "Complete"
-        ? {
-            ...studentProfile,
-            isTopUp: true,
-            originalWeeks: Number(studentProfile.weeksToCommit || 0),
-            weeksToCommit: 1,
-            reference: studentProfile.pendingPayment?.reference,
-          }
-        : {
-            ...studentProfile,
-            isTopUp: false,
-            reference: studentProfile.pendingPayment?.reference,
-          }
-      : null);
+  const paymentUserData: any = useMemo(
+    () =>
+      activeRegistration ||
+      (studentProfile
+        ? studentProfile.status === "Complete"
+          ? {
+              ...studentProfile,
+              isTopUp: true,
+              originalWeeks: Number(studentProfile.weeksToCommit || 0),
+              weeksToCommit: 1,
+              reference: studentProfile.pendingPayment?.reference,
+            }
+          : {
+              ...studentProfile,
+              isTopUp: false,
+              reference: studentProfile.pendingPayment?.reference,
+            }
+        : null),
+    [activeRegistration, studentProfile],
+  );
 
   return (
-    <Payment
+    <PaymentPageView
       onNavigate={navigateTo}
       selectedPath={paymentUserData?.path || selectedPath}
       userData={paymentUserData}
@@ -235,6 +246,10 @@ const AppShell: React.FC = () => {
     isAdminLoggedIn &&
     location.pathname.startsWith("/admin") &&
     !location.pathname.startsWith("/admin/login");
+  // Sign-up, checkout and the student area have their own slim header.
+  const isStudentApp =
+    location.pathname === "/register" || location.pathname.startsWith("/student");
+  const hideSiteChrome = isAdminApp || isStudentApp;
 
   return (
     <div className="flex min-h-screen flex-col bg-white transition-colors dark:bg-slate-950">
@@ -245,7 +260,7 @@ const AppShell: React.FC = () => {
         Skip to content
       </a>
 
-      {isAdminApp ? null : (
+      {hideSiteChrome ? null : (
         <Header
           currentView={currentView}
           onNavigate={navigateTo}
@@ -255,7 +270,7 @@ const AppShell: React.FC = () => {
         />
       )}
 
-      <main id="main" className={isAdminApp ? "flex-grow" : "flex-grow pt-16 lg:pt-[76px]"}>
+      <main id="main" className={hideSiteChrome ? "flex-grow" : "flex-grow pt-16 lg:pt-[76px]"}>
         <ErrorBoundary resetKey={location.pathname}>
           <Suspense fallback={<LoadingPanel />}>
             <Routes>
@@ -322,9 +337,9 @@ const AppShell: React.FC = () => {
                 path="student/payment"
                 element={
                   <PageMeta title="Payment" {...privateMeta}>
-                    <AuthReady>
+                    <RequireStudent>
                       <PaymentPage />
-                    </AuthReady>
+                    </RequireStudent>
                   </PageMeta>
                 }
               />
@@ -369,20 +384,20 @@ const AppShell: React.FC = () => {
         </ErrorBoundary>
       </main>
 
-      {isAdminApp ? null : <Footer onNavigate={navigateTo} isAdminLoggedIn={isAdminLoggedIn} />}
+      {hideSiteChrome ? null : <Footer onNavigate={navigateTo} isAdminLoggedIn={isAdminLoggedIn} />}
     </div>
   );
 };
 
 const CreateAccountRoute = () => {
   const { navigateTo, loginStudentWithGoogle } = useApp();
-  return <CreateAccount onNavigate={navigateTo} onGoogleAuth={loginStudentWithGoogle} />;
+  return <CreateAccountPage onNavigate={navigateTo} onGoogleAuth={loginStudentWithGoogle} />;
 };
 
 const ContinueRegistrationRoute = () => {
   const { navigateTo, selectedPath, loginStudentWithGoogle } = useApp();
   return (
-    <ContinueRegistration
+    <DetailsPage
       onNavigate={navigateTo}
       selectedPath={selectedPath}
       onGoogleAuth={loginStudentWithGoogle}
