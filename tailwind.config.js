@@ -1,5 +1,5 @@
 /**
- * Code with Gideon design tokens (shared with the Flutter app).
+ * CodeWithGideon design tokens (shared with the Flutter app).
  *
  * Brand colours come from the mobile AppTheme so web and app look like one
  * product:
@@ -92,7 +92,7 @@ export default {
           teal: "#1698A0",
           orange: "#FF7A45",
         },
-        // Rebrand neutrals for the public site (Figma: "Code with Gideon —
+        // Rebrand neutrals for the public site (Figma: "CodeWithGideon —
         // Rebrand"). Paper is the warm section background; line is the
         // matching border. Teal = Learn, orange = Hire, navy = the brand.
         paper: {

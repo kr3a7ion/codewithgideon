@@ -301,7 +301,7 @@ const AppShell: React.FC = () => {
               <Route
                 path="register"
                 element={
-                  <PageMeta title="Create account" description="Create your Code with Gideon account and join the next cohort.">
+                  <PageMeta title="Create account" description="Create your CodeWithGideon account and join the next cohort.">
                     <CreateAccountRoute />
                   </PageMeta>
                 }

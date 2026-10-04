@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const ORIGIN = "https://codewithgideon.com";
-const SITE = "Code with Gideon";
+const SITE = "CodeWithGideon";
 const dist = join(process.cwd(), "dist");
 
 const routes = [

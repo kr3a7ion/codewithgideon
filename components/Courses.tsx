@@ -1,10 +1,9 @@
 // components/Courses.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Smartphone, Video, Wallet } from "lucide-react";
 import { ArrowLink, Section, SectionHeader, Tag, mbtn } from "../src/marketing/ui";
 import { trackCta } from "../src/marketing/analytics";
-import { WHATSAPP_MESSAGES, whatsappLink } from "../src/marketing/content";
+import { upcomingCohortLabel, useContactLinks } from "../src/marketing/useContactLinks";
 import { Course } from "../types";
 import { IMAGES } from "../assets/images";
 import { View } from "../src/App";
@@ -71,6 +70,8 @@ type DisplayCourse = {
   level: string;
   description: string;
   priceLabel: string;
+  /** "₦10,000 / week" when the course has a weekly price. */
+  weeklyPrice?: string;
   imageUrl: string;
   syllabusView: View;
   source: "sample" | "firestore";
@@ -85,6 +86,8 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
   const [paths, setPaths] = useState<PathDoc[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  const { whatsapp, nextCohortDate } = useContactLinks();
+  const cohortStarts = upcomingCohortLabel(nextCohortDate);
 
   const loadCourses = async () => {
     setLoading(true);
@@ -150,6 +153,10 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
           description: String(c.description || "").trim(),
           priceLabel:
             String(c.priceLabel || "").trim() || "Pricing at enrollment",
+          weeklyPrice:
+            Number((c as any).pricePerWeek) > 0
+              ? `₦${Number((c as any).pricePerWeek).toLocaleString("en-NG")}`
+              : undefined,
           imageUrl:
             String(c.imageUrl || "").trim() || fallbackImageByIndex(idx + 3),
           syllabusView: ((c.syllabusView as View) ||
@@ -184,35 +191,17 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
         id="cohorts-title"
         eyebrow="Learn"
         tone="learn"
-        title="Learn to build sites like these."
-        description="Live cohort classes with Gideon: real projects and a recording of every class."
-        action={
-          <>
-            <ArrowLink to="/work" tone="learn">
-              See what you&rsquo;ll build
-            </ArrowLink>
-            <ArrowLink to="/courses">All courses</ArrowLink>
-          </>
-        }
+        title="Choose your path."
+        description="Every path runs as a live cohort with Gideon. Pick one, pay for the weeks you want, and join the next class."
+        action={<ArrowLink to="/courses">All courses</ArrowLink>}
       />
-
-      <ul className="mt-10 grid gap-3 sm:gap-6 md:grid-cols-3">
-        {[
-          { icon: Video, title: "Live classes with Gideon", body: "Ask questions while the code is being written, not after." },
-          { icon: Wallet, title: "Pay week by week", body: "Unlock the weeks you want. No big upfront fee." },
-          { icon: Smartphone, title: "Everything in the app", body: "Classes, recordings, resources and mentor chat in one place." },
-        ].map(({ icon: Icon, title, body }) => (
-          <li key={title} className="flex gap-3.5 rounded-2xl bg-teal-50 p-4 dark:bg-teal-950/60 sm:p-5">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white dark:bg-slate-900">
-              <Icon className="h-5 w-5 text-teal-700 dark:text-teal-300" aria-hidden />
-            </span>
-            <span>
-              <span className="block font-display text-base font-semibold text-blue-900 dark:text-white sm:text-lg">{title}</span>
-              <span className="mt-0.5 hidden text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300 sm:block">{body}</span>
-            </span>
-          </li>
-        ))}
-      </ul>
+      {/* Admin → Settings → Home page → Next cohort start date */}
+      {cohortStarts ? (
+        <p className="mt-5 inline-flex items-center gap-2 rounded-full bg-teal-50 py-1.5 pl-3 pr-3.5 text-[13px] font-bold leading-[18px] text-teal-700 dark:bg-teal-950 dark:text-teal-200">
+          <span className="h-2 w-2 rounded-full bg-teal-500" aria-hidden />
+          Enrolling now · next cohort starts {cohortStarts}
+        </p>
+      ) : null}
 
       {loading ? (
         <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -237,7 +226,7 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
             <Link to="/courses" className={mbtn({ kind: "learn" })}>
               See all paths
             </Link>
-            <a href={whatsappLink(WHATSAPP_MESSAGES.general)} target="_blank" rel="noopener noreferrer" className={mbtn({ kind: "secondary" })}>
+            <a href={whatsapp} target="_blank" rel="noopener noreferrer" className={mbtn({ kind: "secondary" })}>
               Ask on WhatsApp
             </a>
           </div>
@@ -258,7 +247,15 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
                 <div className="flex flex-1 flex-col gap-2.5 p-6">
                   <h3 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">{course.title}</h3>
                   <p className="line-clamp-3 flex-1 text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{course.description}</p>
-                  {meta ? <p className="text-xs font-bold text-slate-500 dark:text-slate-400">{meta}</p> : null}
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    {meta ? <p className="text-xs font-bold text-slate-500 dark:text-slate-400">{meta}</p> : <span />}
+                    {course.weeklyPrice ? (
+                      <p className="whitespace-nowrap">
+                        <span className="font-display text-lg font-semibold text-blue-900 dark:text-white">{course.weeklyPrice}</span>
+                        <span className="text-sm font-medium text-slate-500 dark:text-slate-400"> / week</span>
+                      </p>
+                    ) : null}
+                  </div>
                   <div className="mt-2 grid grid-cols-2 gap-2.5">
                     <button
                       type="button"
@@ -280,7 +277,7 @@ const Courses: React.FC<CoursesProps> = ({ onNavigate }) => {
                       Join cohort
                     </button>
                   </div>
-                  <p className="text-center text-xs font-semibold text-slate-500 dark:text-slate-400">{course.priceLabel}</p>
+                  {course.weeklyPrice ? null : <p className="text-center text-xs font-semibold text-slate-500 dark:text-slate-400">{course.priceLabel}</p>}
                 </div>
               </article>
             );

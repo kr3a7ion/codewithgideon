@@ -8,19 +8,12 @@
 
 export const SITE_URL = "https://codewithgideon.com";
 
-/** Gideon's business WhatsApp (international format, digits only). */
-export const WHATSAPP_NUMBER = "2349056277492";
-export const WHATSAPP_DISPLAY = "+234 905 627 7492";
-
-export const WHATSAPP_MESSAGES = {
-  hire: "Hi Gideon, I'd like a website for my business.",
-  call: "Hi Gideon, I'd like to book a quick call.",
-  general: "Hi Gideon, I have a question.",
-} as const;
-
-export const whatsappLink = (text: string = WHATSAPP_MESSAGES.hire) =>
-  `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
-
+/**
+ * WhatsApp: every button uses the "WhatsApp link" from Admin → Settings
+ * (config/app.whatsappUrl), read through useContactLinks(). It's a WhatsApp
+ * Business message link, which carries its own preset message, so pages
+ * don't add per-button text.
+ */
 const env = import.meta.env as Record<string, string | undefined>;
 
 /**
@@ -31,8 +24,6 @@ export const DEMOS_BASE_URL = (env.VITE_DEMOS_BASE_URL || "https://demos.codewit
 
 /** Optional free-call link (Cal.com or Calendly). Falls back to WhatsApp. */
 export const BOOKING_URL = (env.VITE_BOOKING_URL || "").trim();
-
-export const bookCallHref = () => BOOKING_URL || whatsappLink(WHATSAPP_MESSAGES.call);
 
 export type WorkSlug = "itura" | "adire";
 
@@ -262,8 +253,15 @@ export type Faq = { q: string; a: string };
 export const LEARN_FAQ: Faq[] = [
   { q: "Do I need any experience?", a: "No. Beginner tracks start from zero. Intermediate tracks expect basic variables, loops and functions in any language." },
   { q: "Are classes recorded?", a: "Yes. Every live class is recorded and added to your dashboard after it ends, so you can catch up any time while you're an active learner." },
-  { q: "How do payments work?", a: "You pay by the week. Choose how many weeks to unlock and pay the weekly rate shown at sign-up. Paystack may add a small gateway charge." },
   { q: "What if I miss a class?", a: "Watch the recording, then ask your mentor or the student community about anything that wasn't clear." },
+  { q: "Where do classes happen?", a: "Live and online. Each class has a join link in your student dashboard and in the CodeWithGideon app." },
+];
+
+export const JOIN_FAQ: Faq[] = [
+  { q: "How do payments work?", a: "You pay by the week. Choose how many weeks to unlock and pay the weekly rate shown at sign-up, by card, transfer or USSD through Paystack." },
+  { q: "Can I add more weeks later?", a: "Yes. Top up from your dashboard whenever you're ready for the next weeks." },
+  { q: "Which path should I pick?", a: "Flutter and Web Development both start from zero: pick Flutter for mobile apps and Web for websites. AI-Assisted Development suits people who already code. Still unsure? Message Gideon on WhatsApp." },
+  { q: "What's the refund policy?", a: "It's on the Refund Policy page, linked at the bottom of every page." },
 ];
 
 export const HIRE_FAQ: Faq[] = [

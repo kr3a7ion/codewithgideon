@@ -43,44 +43,8 @@ export const Section: React.FC<{
 // Brand
 // ---------------------------------------------------------------------------
 
-/** Speech bubble = learning with a real person; teal < Learn, orange > Hire. */
-export const BrandMark: React.FC<{ className?: string; reversed?: boolean; title?: string }> = ({
-  className,
-  reversed = false,
-  title,
-}) => (
-  <svg viewBox="0 0 48 48" fill="none" className={className} role={title ? "img" : undefined} aria-hidden={title ? undefined : true}>
-    {title ? <title>{title}</title> : null}
-    <path
-      d="M14 5h20c5.52 0 10 4.48 10 10v11c0 5.52-4.48 10-10 10H22l-9 7v-7c-5 0-9-4.5-9-10V15C4 9.48 8.48 5 14 5Z"
-      fill={reversed ? "#FFFFFF" : "#0F2B5B"}
-    />
-    <path d="M19 15l-5.5 5.5L19 26" stroke={reversed ? "#12808A" : "#3FBCBE"} strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M26.5 13.5l-5 14" stroke={reversed ? "#0F2B5B" : "#FFFFFF"} strokeWidth="3.2" strokeLinecap="round" />
-    <path d="M29 15l5.5 5.5L29 26" stroke={reversed ? "#D9561F" : "#FF7A45"} strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-/** Mark + "Code with Gideon" wordmark. `onDark` for navy backgrounds. */
-export const Lockup: React.FC<{ onDark?: boolean; className?: string; markClassName?: string }> = ({
-  onDark = false,
-  className,
-  markClassName = "h-9 w-9",
-}) => (
-  <span className={cn("inline-flex items-center gap-2.5", className)}>
-    <BrandMark className={cn("shrink-0", markClassName)} reversed={onDark} />
-    <span
-      className={cn(
-        "whitespace-nowrap font-display text-[17px] font-bold tracking-[-0.02em]",
-        onDark ? "text-white" : "text-blue-900 dark:text-white",
-      )}
-    >
-      Code{" "}
-      <span className={cn("font-semibold", onDark ? "text-slate-400" : "text-slate-500 dark:text-slate-400")}>with</span>{" "}
-      Gideon
-    </span>
-  </span>
-);
+// The official logo lives in ./logo.tsx; re-exported so pages import one place.
+export { BrandMark, Lockup } from "./logo";
 
 export const WhatsAppIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
@@ -376,12 +340,18 @@ export const PackageCard: React.FC<{ pkg: Package; location?: CtaLocation; headi
   );
 };
 
-export const StepCard: React.FC<{ n: number; title: string; body: string; tone?: "hire" | "neutral" }> = ({ n, title, body, tone = "hire" }) => (
+const stepTone = {
+  hire: "bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
+  learn: "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300",
+  neutral: "bg-paper text-blue-900 dark:bg-slate-800 dark:text-white",
+};
+
+export const StepCard: React.FC<{ n: number; title: string; body: string; tone?: keyof typeof stepTone }> = ({ n, title, body, tone = "hire" }) => (
   <li className="flex flex-col gap-3 rounded-[20px] border border-line bg-white p-6 dark:border-line-dark dark:bg-slate-900">
     <span
       className={cn(
         "flex h-10 w-10 items-center justify-center rounded-xl font-display text-base font-bold",
-        tone === "hire" ? "bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300" : "bg-paper text-blue-900 dark:bg-slate-800 dark:text-white",
+        stepTone[tone],
       )}
       aria-hidden
     >

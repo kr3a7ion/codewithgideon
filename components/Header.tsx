@@ -4,7 +4,8 @@ import { ArrowRight, Menu, Moon, Sun, X } from "lucide-react";
 import type { View } from "../src/App";
 import { cn } from "../src/ui";
 import { Lockup, mbtn } from "../src/marketing/ui";
-import { bookCallHref, BOOKING_URL } from "../src/marketing/content";
+import { BOOKING_URL } from "../src/marketing/content";
+import { useContactLinks } from "../src/marketing/useContactLinks";
 import { trackCta, trackWhatsApp } from "../src/marketing/analytics";
 
 interface HeaderProps {
@@ -82,7 +83,7 @@ const Header: React.FC<HeaderProps> = ({ onNavigate, isDark, onToggleTheme, isSt
     };
   }, [open]);
 
-  const callHref = bookCallHref();
+  const { bookCall: callHref } = useContactLinks();
   const onCall = (where: "nav" | "menu") => {
     trackCta("book_call", where);
     if (!BOOKING_URL) trackWhatsApp(where);
@@ -99,8 +100,8 @@ const Header: React.FC<HeaderProps> = ({ onNavigate, isDark, onToggleTheme, isSt
       )}
     >
       <div className="mx-auto flex h-16 w-full max-w-[1248px] items-center justify-between gap-4 px-5 sm:px-6 lg:h-[76px]">
-        <Link to="/" aria-label="Code with Gideon home" className="shrink-0 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600">
-          <Lockup markClassName="h-8 w-8 lg:h-9 lg:w-9" />
+        <Link to="/" aria-label="CodeWithGideon home" className="shrink-0 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600">
+          <Lockup className="h-8 lg:h-9" />
         </Link>
 
         <nav aria-label="Main" className="hidden lg:block">

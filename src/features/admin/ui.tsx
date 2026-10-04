@@ -16,7 +16,7 @@ export const AdminPage: React.FC<{
   // Runs after the route-level PageMeta effect, so the tab shows the page.
   useEffect(() => {
     const t = window.setTimeout(() => {
-      document.title = `${title} · Admin | Code with Gideon`;
+      document.title = `${title} · Admin | CodeWithGideon`;
     }, 0);
     return () => window.clearTimeout(t);
   }, [title]);

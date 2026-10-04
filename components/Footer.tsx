@@ -4,7 +4,7 @@ import { Mail } from "lucide-react";
 import type { View } from "../src/App";
 import { useSiteConfig } from "../hooks/useSiteConfig";
 import { Lockup, WhatsAppIcon } from "../src/marketing/ui";
-import { WHATSAPP_DISPLAY, WHATSAPP_MESSAGES, whatsappLink } from "../src/marketing/content";
+import { useContactLinks } from "../src/marketing/useContactLinks";
 import { trackWhatsApp } from "../src/marketing/analytics";
 
 interface FooterProps {
@@ -16,6 +16,7 @@ const linkClass = "text-sm font-medium text-white/90 transition-colors hover:tex
 
 const Footer: React.FC<FooterProps> = ({ onNavigate, isAdminLoggedIn }) => {
   const { config } = useSiteConfig();
+  const { whatsapp } = useContactLinks();
   const apk = config.apkDownloadUrl;
 
   const columns: { title: string; dot: string; links: { label: string; to?: string; href?: string; onClick?: () => void }[] }[] = [
@@ -55,20 +56,20 @@ const Footer: React.FC<FooterProps> = ({ onNavigate, isAdminLoggedIn }) => {
       <div className="mx-auto w-full max-w-[1248px] px-5 pb-8 pt-12 sm:px-6 lg:pt-[72px]">
         <div className="flex flex-col gap-10 lg:flex-row lg:gap-20">
           <div className="max-w-sm space-y-4">
-            <Link to="/" aria-label="Code with Gideon home" className="inline-block">
-              <Lockup onDark />
+            <Link to="/" aria-label="CodeWithGideon home" className="inline-block">
+              <Lockup onDark className="h-9" />
             </Link>
             <p className="text-base leading-[26px] text-slate-400">Live coding classes and websites for businesses, from Abuja.</p>
             <div className="flex flex-col items-start gap-3">
               <a
-                href={whatsappLink(WHATSAPP_MESSAGES.general)}
+                href={whatsapp}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => trackWhatsApp("footer")}
                 className="inline-flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5 text-sm font-medium hover:bg-white/10"
               >
                 <WhatsAppIcon className="h-[18px] w-[18px] text-teal-300" />
-                WhatsApp · {WHATSAPP_DISPLAY}
+                Chat on WhatsApp
               </a>
               <a
                 href={`mailto:${config.contactEmail}`}
@@ -124,7 +125,7 @@ const Footer: React.FC<FooterProps> = ({ onNavigate, isAdminLoggedIn }) => {
         </div>
 
         <div className="mt-12 flex flex-col gap-2 border-t border-white/10 pt-6 text-sm sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-slate-400">© {new Date().getFullYear()} Code with Gideon · Abuja, Nigeria</p>
+          <p className="text-slate-400">© {new Date().getFullYear()} CodeWithGideon · Abuja, Nigeria</p>
           <button
             type="button"
             onClick={() => onNavigate(isAdminLoggedIn ? "admin-dashboard" : "admin-login")}

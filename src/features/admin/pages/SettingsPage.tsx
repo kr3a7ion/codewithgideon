@@ -7,9 +7,22 @@ import { Button, Field, inputClass } from "../../../ui";
 import { useAdmin } from "../AdminWorkspaceContext";
 import { AdminPage, Dialog, Panel } from "../ui";
 
-type FieldDef = { key: keyof SiteConfig; label: string; hint?: string; type?: "url" | "email" | "textarea" };
+type FieldDef = { key: keyof SiteConfig; label: string; hint?: string; type?: "url" | "email" | "textarea" | "date" };
 
 const groups: { id: string; title: string; description: string; fields: FieldDef[] }[] = [
+  {
+    id: "home",
+    title: "Home page",
+    description: "Small details on the public home page. The courses shown there come from Courses → “On home page”.",
+    fields: [
+      {
+        key: "nextCohortDate",
+        label: "Next cohort start date",
+        type: "date",
+        hint: "Shows “Enrolling now · next cohort starts …” above the courses. Leave empty to hide it. It hides itself once the date passes.",
+      },
+    ],
+  },
   {
     id: "app",
     title: "Mobile app",
@@ -23,10 +36,10 @@ const groups: { id: string; title: string; description: string; fields: FieldDef
   {
     id: "contact",
     title: "Contact page",
-    description: "What visitors see on the Contact page.",
+    description: "What visitors see on the Contact page, plus the WhatsApp link the whole site uses.",
     fields: [
       { key: "contactEmail", label: "Contact email", type: "email" },
-      { key: "whatsappUrl", label: "WhatsApp link", type: "url" },
+      { key: "whatsappUrl", label: "WhatsApp link", type: "url", hint: "Used by every WhatsApp button on the site, e.g. https://wa.me/message/…" },
       { key: "responseTime", label: "Reply time", hint: "e.g. “Within 24 hours”" },
       { key: "contactHeading", label: "Heading" },
       { key: "contactSubheading", label: "Subheading" },
@@ -85,7 +98,7 @@ const SettingsPage: React.FC = () => {
         ) : (
           <input
             id={id}
-            type={f.type === "url" ? "url" : f.type === "email" ? "email" : "text"}
+            type={f.type === "url" || f.type === "email" || f.type === "date" ? f.type : "text"}
             value={value}
             onChange={(e) => updateSiteConfigField(f.key, e.target.value as any)}
             className={inputClass}
