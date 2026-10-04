@@ -3,7 +3,6 @@ import { Link, useSearchParams } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 import { ArrowRight, ArrowUpRight, CalendarDays, CheckCircle2 } from "lucide-react";
 import { functions } from "../../services/firebase";
-import { useSiteConfig } from "../../hooks/useSiteConfig";
 import { usePageMeta } from "../app/usePageMeta";
 import {
   BOOKING_URL,
@@ -13,12 +12,11 @@ import {
   HIRE_TERMS,
   PACKAGES,
   PROCESS,
-  WHATSAPP_MESSAGES,
   WORK,
   type HireNeed,
-  whatsappLink,
 } from "../marketing/content";
 import { getUtm, track, trackCta, trackWhatsApp } from "../marketing/analytics";
+import { copyText, useContactLinks } from "../marketing/useContactLinks";
 import {
   CheckItem,
   DemoLink,
@@ -50,6 +48,39 @@ export const normalizeWhatsApp = (raw: string): string | null => {
 
 type Errors = Partial<Record<"name" | "business" | "whatsapp" | "need" | "budget", string>>;
 
+/**
+ * Opens the WhatsApp link from Admin → Settings. A WhatsApp Business message
+ * link can't carry the visitor's details, so we copy them first and tell the
+ * visitor to paste them into the chat.
+ */
+const WhatsAppWithDetails: React.FC<{ text: string; label: string; size?: "sm" | "md"; className?: string }> = ({ text, label, size = "md", className }) => {
+  const { whatsapp } = useContactLinks();
+  const [copied, setCopied] = useState<boolean | null>(null);
+  return (
+    <div className={className}>
+      <a
+        href={whatsapp}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={() => {
+          trackWhatsApp("hire");
+          void copyText(text).then(setCopied);
+        }}
+        className={mbtn({ kind: "hire", size })}
+      >
+        <WhatsAppIcon className={size === "sm" ? "h-[18px] w-[18px]" : "h-5 w-5"} /> {label}
+      </a>
+      <p role="status" className="mt-2 text-sm font-medium">
+        {copied === true
+          ? "Your details are copied. Paste them into the chat."
+          : copied === false
+            ? "Copying didn’t work here, so type your details into the chat."
+            : "This copies your details so you can paste them into the chat."}
+      </p>
+    </div>
+  );
+};
+
 const EnquiryForm: React.FC = () => {
   const [params] = useSearchParams();
   const initialNeed = params.get("need");
@@ -75,7 +106,7 @@ const EnquiryForm: React.FC = () => {
   const needLabel = HIRE_NEEDS.find((n) => n.value === need)?.label || "";
   const budgetLabel = HIRE_BUDGETS.find((b) => b.value === budget)?.label || "";
   const fallbackText = [
-    WHATSAPP_MESSAGES.hire,
+    "Hi Gideon, I'd like a website for my business.",
     name && `Name: ${name}`,
     business && `Business: ${business}`,
     needLabel && `I need: ${needLabel}`,
@@ -133,9 +164,7 @@ const EnquiryForm: React.FC = () => {
         <p className="text-base leading-[26px] text-slate-600 dark:text-slate-300">
           I&rsquo;ll reply on WhatsApp with a plan and a fixed price. Want a faster answer? Send it on WhatsApp too.
         </p>
-        <a href={whatsappLink(fallbackText)} target="_blank" rel="noopener noreferrer" onClick={() => trackWhatsApp("hire")} className={mbtn({ kind: "hire" })}>
-          <WhatsAppIcon className="h-5 w-5" /> Send on WhatsApp too
-        </a>
+        <WhatsAppWithDetails text={fallbackText} label="Send on WhatsApp too" className="text-slate-500 dark:text-slate-400" />
       </div>
     );
   }
@@ -273,9 +302,7 @@ const EnquiryForm: React.FC = () => {
       {status === "failed" ? (
         <div ref={resultRef} tabIndex={-1} role="alert" className="rounded-xl border border-orange-300 bg-orange-50 p-4 text-sm font-medium text-orange-900 outline-none dark:border-orange-500/40 dark:bg-orange-950/40 dark:text-orange-100">
           <p>{serverError}</p>
-          <a href={whatsappLink(fallbackText)} target="_blank" rel="noopener noreferrer" onClick={() => trackWhatsApp("hire")} className={mbtn({ kind: "hire", size: "sm", className: "mt-3" })}>
-            <WhatsAppIcon className="h-[18px] w-[18px]" /> Send on WhatsApp
-          </a>
+          <WhatsAppWithDetails text={fallbackText} label="Send on WhatsApp" size="sm" className="mt-3" />
         </div>
       ) : null}
 
@@ -297,7 +324,7 @@ const EnquiryForm: React.FC = () => {
 
 /** /hire — packages, process and the enquiry form (brief §5). */
 const HirePage: React.FC = () => {
-  const { config } = useSiteConfig();
+  const { whatsapp, responseTime } = useContactLinks();
   usePageMeta({
     title: "Hire Gideon: websites that take bookings",
     description:
@@ -324,7 +351,7 @@ const HirePage: React.FC = () => {
             </p>
             <div className="flex flex-col gap-3 sm:flex-row">
               <a
-                href={whatsappLink(WHATSAPP_MESSAGES.hire)}
+                href={whatsapp}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => trackWhatsApp("hire")}
@@ -336,7 +363,7 @@ const HirePage: React.FC = () => {
                 Send an enquiry
               </a>
             </div>
-            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Reply time: {config.responseTime.toLowerCase()}.</p>
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Reply time: {responseTime.toLowerCase()}.</p>
           </div>
           <Link to={`/work/${adire.slug}`} className="block overflow-hidden rounded-[18px] shadow-lift sm:rounded-[20px]" aria-label={`${adire.name} case study`}>
             <img
@@ -437,7 +464,7 @@ const HirePage: React.FC = () => {
               Fill in the form or message me on WhatsApp. Either way you&rsquo;ll get a reply with a plan and a fixed price.
             </p>
             <a
-              href={whatsappLink(WHATSAPP_MESSAGES.hire)}
+              href={whatsapp}
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => trackWhatsApp("hire")}

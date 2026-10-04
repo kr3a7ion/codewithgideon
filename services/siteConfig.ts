@@ -19,6 +19,8 @@ export type SiteConfig = {
   apkDownloadUrl: string;
   apkDownloadLabel: string;
   apkDownloadSubLabel: string;
+  /** YYYY-MM-DD shown on the home page as "next cohort starts …". Empty = "Enrolling now". */
+  nextCohortDate: string;
 };
 
 export const defaultSiteConfig: SiteConfig = {
@@ -32,8 +34,7 @@ export const defaultSiteConfig: SiteConfig = {
   instagramHandle: "@c0dewithgideon",
   tiktokUrl: "https://www.tiktok.com/@codewithgideon",
   tiktokHandle: "@codewithgideon",
-  whatsappUrl:
-    "https://api.whatsapp.com/message/NMQR2ZKNJTZBL1?autoload=1&app_absent=0",
+  whatsappUrl: "https://wa.me/message/NMQR2ZKNJTZBL1",
   responseTime: "Typically within 24 hours",
   supportTopics: ["Enrollment", "Billing", "App Access"],
   homepageCtaLabel: "Start Your Journey",
@@ -41,6 +42,7 @@ export const defaultSiteConfig: SiteConfig = {
   apkDownloadUrl: "",
   apkDownloadLabel: "Download APK",
   apkDownloadSubLabel: "Direct Install",
+  nextCohortDate: "",
 };
 
 const normalizeTopics = (value: unknown): string[] => {
@@ -118,6 +120,9 @@ export const mergeSiteConfig = (data?: Record<string, unknown>): SiteConfig => {
       raw.apkDownloadSubLabel,
       defaultSiteConfig.apkDownloadSubLabel,
     ),
+    nextCohortDate: /^\d{4}-\d{2}-\d{2}$/.test(String(raw.nextCohortDate || "").trim())
+      ? String(raw.nextCohortDate).trim()
+      : "",
   };
 };
 

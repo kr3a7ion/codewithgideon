@@ -1,12 +1,13 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { ArrowUpRight, Check, MapPin } from "lucide-react";
+import { ArrowUpRight, CalendarDays, Check, Download, FileText, MapPin, MessageSquare, PlayCircle, TrendingUp, Video } from "lucide-react";
 import Courses from "../../components/Courses";
 import { IMAGES } from "../../assets/images";
 import { useApp } from "../app/AppContext";
 import { usePageMeta } from "../app/usePageMeta";
-import { HIRE_FAQ, HIRE_TERMS, LEARN_FAQ, PACKAGES, WHATSAPP_MESSAGES, WORK, whatsappLink } from "../marketing/content";
+import { HIRE_FAQ, HIRE_TERMS, JOIN_FAQ, LEARN_FAQ, PACKAGES, WORK } from "../marketing/content";
 import { trackCta, trackWhatsApp } from "../marketing/analytics";
+import { useContactLinks } from "../marketing/useContactLinks";
 import {
   ArrowLink,
   CheckItem,
@@ -17,6 +18,7 @@ import {
   PackageCard,
   Section,
   SectionHeader,
+  StepCard,
   Tag,
   TwoDoorBand,
   WhatsAppIcon,
@@ -24,15 +26,61 @@ import {
   container,
   mbtn,
 } from "../marketing/ui";
-import { useSiteConfig } from "../../hooks/useSiteConfig";
+
+const LEARN_STEPS = [
+  { title: "Create your account", body: "Sign up with email or Google and choose the path you want to learn." },
+  { title: "Pay for the weeks you want", body: "Pay by card, transfer or USSD through Paystack. Add more weeks any time." },
+  { title: "Join live classes", body: "Classes run live with Gideon. Join from the app or your student dashboard." },
+  { title: "Rewatch and ask", body: "Every class is recorded. Stuck? Ask your mentor or the student community." },
+];
+
+const APP_FEATURES = [
+  { icon: Video, label: "Live classes" },
+  { icon: PlayCircle, label: "Recordings" },
+  { icon: FileText, label: "Resources" },
+  { icon: MessageSquare, label: "Mentor chat" },
+  { icon: CalendarDays, label: "Class schedule" },
+  { icon: TrendingUp, label: "Weekly progress" },
+];
+
+const CLASSES_FAQ = [LEARN_FAQ[0], LEARN_FAQ[1], JOIN_FAQ[0], LEARN_FAQ[2]];
+const WEBSITES_FAQ = [HIRE_FAQ[0], HIRE_FAQ[2], HIRE_FAQ[3], HIRE_FAQ[4]];
+
+/** Illustrative student app screen for the "app" section (decorative). */
+const PhoneMock: React.FC = () => (
+  <div aria-hidden className="mx-auto w-[260px] rounded-[38px] bg-blue-950 p-2.5 shadow-lift ring-1 ring-white/10 sm:w-[280px]">
+    <div className="flex flex-col gap-3 rounded-[30px] bg-white p-4 text-blue-900">
+      <p className="mt-2 font-display text-lg font-semibold">Good evening, Amaka</p>
+      <div className="rounded-2xl bg-teal-600 p-4 text-white">
+        <p className="text-[11px] font-extrabold uppercase tracking-[0.1em] text-teal-100">Next live class</p>
+        <p className="mt-1.5 font-display text-base font-semibold leading-6">Week 3 · Layouts that work on any phone</p>
+        <p className="mt-1 text-sm font-medium text-teal-50">Tue · 7:00 pm</p>
+        <p className="mt-3 rounded-xl bg-white py-2 text-center text-sm font-bold text-teal-700">Join class</p>
+      </div>
+      <p className="text-[11px] font-extrabold uppercase tracking-[0.1em] text-slate-500">This week</p>
+      {[
+        { icon: PlayCircle, text: "Recording: Week 2 · Flexbox" },
+        { icon: FileText, text: "Resource: Layout cheat sheet" },
+        { icon: MessageSquare, text: "Mentor: Nice work! Try gap instead of margins." },
+      ].map(({ icon: Icon, text }) => (
+        <p key={text} className="flex items-start gap-2.5 rounded-xl border border-line px-3 py-2.5 text-[13px] font-semibold leading-5">
+          <Icon className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" />
+          {text}
+        </p>
+      ))}
+    </div>
+  </div>
+);
 
 /**
- * Home: one brand, two doors. Order from the brief: hero (two equal doors),
- * work preview, packages for businesses, cohorts, about, FAQ.
+ * Home: one brand, two doors. The two-door hero leads, then the Learn block
+ * (courses from Admin → Courses, how it works, the app), then the Hire block
+ * (sample work, packages), then Gideon, FAQ and the two-door band.
+ * Figma: "03 Home" in the rebrand file.
  */
 const HomePage: React.FC = () => {
   const { navigateTo } = useApp();
-  const { config } = useSiteConfig();
+  const { whatsapp, email, apk } = useContactLinks();
   usePageMeta({
     description:
       "Learn to code in live cohort classes with Gideon, or get a website that takes bookings for your business. Web, Flutter and AI-assisted development in Abuja, Nigeria.",
@@ -41,7 +89,7 @@ const HomePage: React.FC = () => {
 
   return (
     <>
-      {/* Hero */}
+      {/* Hero: two equal doors */}
       <section className="bg-paper dark:bg-paper-dark" aria-labelledby="hero-title">
         <div className={`${container} grid items-center gap-10 pb-14 pt-9 sm:pt-14 lg:grid-cols-[minmax(0,640px)_minmax(0,1fr)] lg:gap-10 lg:pb-[88px] lg:pt-[72px]`}>
           <div className="flex flex-col gap-6 lg:gap-7">
@@ -121,7 +169,55 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* Work preview */}
+      {/* Learn: courses from Admin → Courses ("On home page" toggle) */}
+      <Courses onNavigate={navigateTo} />
+
+      {/* Learn: how a cohort works */}
+      <Section id="how" tone="paper" labelledBy="how-title">
+        <SectionHeader id="how-title" eyebrow="How it works" tone="learn" title="From sign-up to your first live class." description="Four steps, and you can start this week." />
+        <ol className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {LEARN_STEPS.map((s, i) => (
+            <StepCard key={s.title} n={i + 1} title={s.title} body={s.body} tone="learn" />
+          ))}
+        </ol>
+      </Section>
+
+      {/* Learn: the student app */}
+      <Section tone="navy" labelledBy="app-title">
+        <div className="grid items-center gap-12 lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-20">
+          <div>
+            <Eyebrow onDark>The app</Eyebrow>
+            <h2 id="app-title" className="mt-4 font-display text-[30px] font-bold leading-9 tracking-[-0.02em] sm:text-[40px] sm:leading-[46px]">
+              Your classroom in your pocket.
+            </h2>
+            <p className="mt-5 max-w-[640px] text-base leading-[26px] text-blue-100 sm:text-lg sm:leading-7">
+              Classes, recordings, resources, community and mentor chat, all in the CodeWithGideon app. On a laptop? The same things are in your student dashboard.
+            </p>
+            <ul className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3.5">
+              {APP_FEATURES.map(({ icon: Icon, label }) => (
+                <li key={label} className="flex items-center gap-2.5 rounded-xl border border-white/15 bg-white/10 px-3 py-2.5 text-sm font-semibold sm:px-3.5">
+                  <Icon className="h-[18px] w-[18px] shrink-0 text-teal-300" aria-hidden />
+                  {label}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+              {apk ? (
+                <a href={apk} target="_blank" rel="noopener noreferrer" onClick={() => trackCta("download_app", "app")} className={mbtn({ kind: "learn", size: "lg" })}>
+                  <Download className="h-5 w-5" aria-hidden /> Download the app
+                </a>
+              ) : null}
+              <button type="button" onClick={() => navigateTo("student-login")} className={mbtn({ kind: "onDark", size: "lg" })}>
+                Student login
+              </button>
+            </div>
+            {apk ? <p className="mt-4 text-sm font-medium text-blue-200">Android app (APK).</p> : null}
+          </div>
+          <PhoneMock />
+        </div>
+      </Section>
+
+      {/* Hire: sample work */}
       <Section tone="page" labelledBy="work-title">
         <SectionHeader
           id="work-title"
@@ -138,7 +234,7 @@ const HomePage: React.FC = () => {
         </div>
       </Section>
 
-      {/* For businesses */}
+      {/* Hire: packages */}
       <Section tone="paper" labelledBy="biz-title">
         <SectionHeader
           id="biz-title"
@@ -162,11 +258,8 @@ const HomePage: React.FC = () => {
         </ul>
       </Section>
 
-      {/* Cohorts (Learn): existing course data from Admin → Courses */}
-      <Courses onNavigate={navigateTo} />
-
-      {/* About */}
-      <Section id="about" tone="navy" labelledBy="about-title">
+      {/* Meet your teacher */}
+      <Section id="about" tone="page" labelledBy="about-title">
         <div className="grid items-center gap-8 lg:grid-cols-[440px_minmax(0,1fr)] lg:gap-[72px]">
           <figure className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-800 to-teal-700 lg:rounded-[28px]">
             <img
@@ -174,44 +267,34 @@ const HomePage: React.FC = () => {
               alt="Gideon Okanlawon"
               loading="lazy"
               decoding="async"
-              className="aspect-[4/5] w-full object-cover sm:aspect-[4/3] lg:aspect-[440/520]"
+              className="aspect-[4/5] w-full object-cover sm:aspect-[4/3] lg:aspect-[440/500]"
             />
             <figcaption className="absolute bottom-4 left-4 rounded-2xl bg-white/95 px-4 py-3 shadow-card">
               <span className="block font-display text-base font-semibold text-blue-900">Gideon Okanlawon</span>
-              <span className="block text-sm font-medium text-slate-600">Developer · Electrical technician</span>
+              <span className="block text-sm font-medium text-slate-600">Developer and frontend teacher</span>
             </figcaption>
           </figure>
           <div className="space-y-5">
-            <Eyebrow onDark>About</Eyebrow>
-            <h2 id="about-title" className="font-display text-[30px] font-bold leading-9 tracking-[-0.02em] sm:text-[40px] sm:leading-[46px]">
+            <Eyebrow tone="learn">Meet your teacher</Eyebrow>
+            <h2 id="about-title" className="font-display text-[30px] font-bold leading-9 tracking-[-0.02em] text-blue-900 dark:text-white sm:text-[40px] sm:leading-[46px]">
               Hi, I&rsquo;m Gideon.
             </h2>
-            <p className="text-base leading-[26px] text-blue-100 sm:text-lg sm:leading-7">
-              I&rsquo;m a developer and electrical technician in Abuja, and I teach frontend development. I teach the cohorts live, and I build websites and
-              apps for businesses.
-            </p>
-            <p className="text-base leading-[26px] text-blue-200">
-              The projects on this site are the kind of work I teach. Learners see how real sites get made, and businesses get a site built the way I teach
-              it: clean, fast on phones and easy to hand over.
+            <p className="max-w-[640px] text-base leading-[26px] text-slate-600 dark:text-slate-300 sm:text-lg sm:leading-7">
+              I&rsquo;m a developer and frontend teacher in Abuja. I build websites and apps for a living, and I teach every cohort live, so you learn how real
+              projects get made.
             </p>
             <ul className="flex flex-wrap gap-2.5">
-              {["Based in Abuja", "Teaches frontend", "Electrical technician"].map((f) => (
-                <li key={f} className="rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-bold">
+              {["Based in Abuja", "Frontend developer", "Teaches every cohort live"].map((f) => (
+                <li key={f} className="rounded-full border border-line bg-paper px-3 py-1.5 text-xs font-bold text-blue-900 dark:border-line-dark dark:bg-paper-dark dark:text-white">
                   {f}
                 </li>
               ))}
             </ul>
             <div className="flex flex-col gap-3 pt-2 sm:flex-row">
-              <a
-                href={whatsappLink(WHATSAPP_MESSAGES.general)}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => trackWhatsApp("about")}
-                className={mbtn({ kind: "hire", size: "lg" })}
-              >
+              <a href={whatsapp} target="_blank" rel="noopener noreferrer" onClick={() => trackWhatsApp("about")} className={mbtn({ kind: "learn", size: "lg" })}>
                 <WhatsAppIcon className="h-5 w-5" /> Chat on WhatsApp
               </a>
-              <a href={`mailto:${config.contactEmail}`} className={mbtn({ kind: "onDark", size: "lg" })}>
+              <a href={`mailto:${email}`} className={mbtn({ kind: "secondary", size: "lg" })}>
                 Email Gideon
               </a>
             </div>
@@ -220,7 +303,7 @@ const HomePage: React.FC = () => {
       </Section>
 
       {/* FAQ */}
-      <Section tone="page" labelledBy="faq-title">
+      <Section tone="paper" labelledBy="faq-title">
         <SectionHeader
           id="faq-title"
           eyebrow="FAQ"
@@ -228,7 +311,7 @@ const HomePage: React.FC = () => {
           description={
             <>
               Still stuck?{" "}
-              <a href={whatsappLink(WHATSAPP_MESSAGES.general)} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-900 underline dark:text-white" onClick={() => trackWhatsApp("faq")}>
+              <a href={whatsapp} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-900 underline dark:text-white" onClick={() => trackWhatsApp("faq")}>
                 Message Gideon on WhatsApp
               </a>{" "}
               and you&rsquo;ll get a real answer.
@@ -240,18 +323,18 @@ const HomePage: React.FC = () => {
             <h3 className="mb-4 flex items-center gap-2 font-display text-lg font-semibold text-blue-900 dark:text-white">
               <span className="h-2 w-2 rounded-full bg-teal-500" aria-hidden /> About the classes
             </h3>
-            <FaqList items={LEARN_FAQ} headingLevel="h4" />
+            <FaqList items={CLASSES_FAQ} headingLevel="h4" />
           </div>
           <div>
             <h3 className="mb-4 flex items-center gap-2 font-display text-lg font-semibold text-blue-900 dark:text-white">
               <span className="h-2 w-2 rounded-full bg-orange-500" aria-hidden /> About websites
             </h3>
-            <FaqList items={[HIRE_FAQ[0], HIRE_FAQ[2], HIRE_FAQ[3], HIRE_FAQ[4]]} headingLevel="h4" />
+            <FaqList items={WEBSITES_FAQ} headingLevel="h4" />
           </div>
         </div>
       </Section>
 
-      <Section tone="paper" className="!py-12 sm:!py-16 lg:!py-20">
+      <Section tone="page" className="!py-12 sm:!py-16 lg:!py-20">
         <TwoDoorBand location="band" />
       </Section>
     </>

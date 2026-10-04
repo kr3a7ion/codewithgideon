@@ -177,13 +177,13 @@ const WebsiteMessage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const m: any = selectedSupportMessage;
   const email = getInboxEmail(m);
   const status = String(m.status || "new").toLowerCase();
-  const subject = encodeURIComponent("Re: your message to Code with Gideon");
+  const subject = encodeURIComponent("Re: your message to CodeWithGideon");
   const quoted = encodeURIComponent(`\n\n---\nYou wrote:\n${getInboxMessageBody(m)}`);
   // Website enquiries from /hire carry a WhatsApp number instead of an email.
   const wa = String(m.whatsapp || "").replace(/\D/g, "");
   const firstName = String(getInboxDisplayName(m) || "").split(" ")[0];
   const waText = encodeURIComponent(
-    `Hi ${firstName}, it's Gideon from Code with Gideon. Thanks for your enquiry${m.businessName ? ` about a website for ${m.businessName}` : ""}.`,
+    `Hi ${firstName}, it's Gideon from CodeWithGideon. Thanks for your enquiry${m.businessName ? ` about a website for ${m.businessName}` : ""}.`,
   );
 
   return (

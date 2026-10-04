@@ -1,7 +1,7 @@
 import React from "react";
 import { useEffect } from "react";
 
-const SITE = "Code with Gideon";
+const SITE = "CodeWithGideon";
 const ORIGIN = "https://codewithgideon.com";
 const DEFAULT_TITLE = `${SITE} | Learn to code, or get a website built`;
 const DEFAULT_DESCRIPTION =

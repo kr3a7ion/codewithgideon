@@ -112,7 +112,7 @@ export function track(name: string, params: Params = {}) {
 }
 
 /** Where on the page a click happened, for event params. */
-export type CtaLocation = "nav" | "hero" | "work" | "packages" | "cohorts" | "about" | "footer" | "case_study" | "hire" | "band" | "menu" | "faq";
+export type CtaLocation = "nav" | "hero" | "work" | "packages" | "cohorts" | "app" | "about" | "footer" | "case_study" | "hire" | "band" | "menu" | "faq";
 
 export const trackCta = (cta: string, location: CtaLocation) => track("cta_click", { cta, location });
 export const trackWhatsApp = (location: CtaLocation) => track("whatsapp_click", { location });

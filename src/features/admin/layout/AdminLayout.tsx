@@ -20,6 +20,7 @@ import { useAdminInsights } from "../insights";
 import { ADMIN_NAV, NAV_GROUPS, pageFromPath, type AdminPageKey } from "../nav";
 import { formatSessionCountdown } from "../lib";
 import { Dialog, IconButton } from "../ui";
+import { BrandMark, Lockup } from "../../../marketing/logo";
 
 type Props = {
   children: React.ReactNode;
@@ -27,22 +28,15 @@ type Props = {
   onToggleTheme?: () => void;
 };
 
-const Brand: React.FC<{ compact?: boolean }> = ({ compact }) => (
-  <div className="flex items-center gap-2.5">
-    <span
-      aria-hidden
-      className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-blue-900 font-display text-base font-bold text-white"
-    >
-      G
-    </span>
-    {compact ? null : (
-      <span className="leading-tight">
-        <span className="block font-display text-sm font-bold text-blue-900 dark:text-white">Code with Gideon</span>
-        <span className="block text-xs font-semibold text-slate-500 dark:text-slate-400">Admin</span>
-      </span>
-    )}
-  </div>
-);
+const Brand: React.FC<{ compact?: boolean }> = ({ compact }) =>
+  compact ? (
+    <BrandMark className="h-8" title="CodeWithGideon admin" />
+  ) : (
+    <div className="flex flex-col gap-1">
+      <Lockup className="h-7" title="CodeWithGideon" />
+      <span className="pl-[31px] text-xs font-semibold text-slate-500 dark:text-slate-400">Admin</span>
+    </div>
+  );
 
 const CountBadge: React.FC<{ count?: number; active?: boolean }> = ({ count, active }) =>
   count ? (

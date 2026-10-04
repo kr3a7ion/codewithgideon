@@ -1,5 +1,5 @@
 <div align="center">
-<img width="1200" height="630" alt="Code with Gideon: learn to build it, or have it built" src="public/og-default.jpg" />
+<img width="1200" height="630" alt="CodeWithGideon: learn to build it, or have it built" src="public/og-default.jpg" />
 </div>
 
 
@@ -38,19 +38,31 @@ This platform provides:
 
 One brand, two doors. **Learn** is the live cohort classes, **Hire** is Gideon
 building websites for businesses, and **Work** is the proof for both.
-Designs: [Figma, "Code with Gideon — Rebrand"](https://www.figma.com/design/ANyVyXq9PfmTz1kxppwlJJ)
+Designs: [Figma rebrand file](https://www.figma.com/design/ANyVyXq9PfmTz1kxppwlJJ)
 (brand, components, and every page at 1440 and 390).
 
 | Route | Page |
 |---|---|
-| `/` | Hero with two equal doors, work preview, packages, cohorts, about (`#about`), FAQ |
+| `/` | Hero with two equal doors; Learn block (courses, how it works, the app); Hire block (sample work, packages); meet your teacher (`#about`); FAQ; two-door band |
 | `/courses`, `/courses/:slug` | Learn (course data from Admin → Courses), with "See what you'll build" |
 | `/work` | Portfolio grid (sample projects) |
 | `/work/:slug` | Case study: brief, features, steps, screens, "What you'd get", three calls to action |
 | `/hire` | Packages, process, proof, enquiry form (`#enquire`, `?need=landing\|booking\|other`), FAQ |
 
-- Content (work entries, packages, FAQs, WhatsApp number) lives in
-  `src/marketing/content.ts`; the building blocks are in `src/marketing/ui.tsx`.
+- Content (work entries, packages, FAQs) lives in `src/marketing/content.ts`;
+  the building blocks are in `src/marketing/ui.tsx`.
+- Brand name: **CodeWithGideon**, one word. The official logo is in
+  `src/marketing/logo.tsx` (React) and `public/brand/` (SVG files: mark, lockup,
+  stacked lockup and app icon, each for light and dark backgrounds). Logo teal
+  `#1FBEC3` is for the logo only; UI teal stays `teal-600`.
+- Set from Admin → Settings, no deploy needed:
+  - **WhatsApp link** (Contact page group) is used by every WhatsApp button on
+    the site. It's a WhatsApp Business message link, so buttons can't prefill
+    text; the Hire form copies the visitor's details for them to paste.
+  - **Next cohort start date** (Home page group) shows "Enrolling now · next
+    cohort starts …" above the home page courses and hides itself once the
+    date passes.
+  - Which courses appear on the home page: Admin → Courses → "On home page".
 - Colours: navy is the brand, **teal = Learn**, **orange = Hire**, warm `paper`
   for section backgrounds (`tailwind.config.js`).
 - Demo sites are linked, not rebuilt: `VITE_DEMOS_BASE_URL` (default
@@ -116,7 +128,7 @@ sidebar on desktop, bottom tabs plus a "More" sheet on phones.
 | **Cohorts** | The open intake per path and one-click **Start next intake** |
 | **Announcements** | Messages to a cohort (students see them under Notifications) |
 | **Courses & paths**, **Resources**, **Community** | What students can sign up for and the material around it |
-| **Settings** | Website content (APK link, contact page, socials, home page button), Google Sheets, CSV export, delete-all (typed confirmation) |
+| **Settings** | Website content (next cohort date, APK link, contact page and the site-wide WhatsApp link, socials), Google Sheets, CSV export, delete-all (typed confirmation) |
 
 ### Automations
 
