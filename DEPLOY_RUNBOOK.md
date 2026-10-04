@@ -299,6 +299,74 @@ minutes. Logs: `firebase functions:log --only reconcilePendingPayments`.
 
 ---
 
+## Rebrand release: Learn · Work · Hire (functions + hosting)
+
+Adds `/work`, `/work/itura`, `/work/adire` and `/hire`, a new home page,
+header, footer and logo, and one new Cloud Function (`sendHireEnquiry`). No
+rules or index changes. `firebase.json` now serves page HTML with
+`no-cache` (so a deploy is picked up at once) and keeps hashed JS/CSS
+cached for a year.
+
+### 1. Point the demos subdomain at Netlify (before the site goes live)
+
+The Work pages link to `https://demos.codewithgideon.com/itura/` and
+`/adire/`. In Netlify, open the site that hosts the two demos →
+**Domain management → Add a domain** → `demos.codewithgideon.com`. At your DNS
+provider, add a `CNAME` record: name `demos`, value `<your-site>.netlify.app`.
+Wait until both links open over https.
+
+Not ready yet? Put the Netlify address in `.env.production.local` instead, for
+example `VITE_DEMOS_BASE_URL=https://your-site.netlify.app`, and rebuild. The
+demos must keep working as they are, including `#book` and `#booked`.
+
+Optional: `VITE_BOOKING_URL=https://cal.com/...` makes "Book a call" open your
+call link. Without it, it opens WhatsApp.
+
+### 2. Deploy
+
+```bash
+git checkout main && git pull   # after merging the rebrand PR
+npm ci && npm --prefix functions ci
+npm --prefix functions test     # includes the enquiry form tests
+npm run build                   # also writes the social-preview pages
+
+firebase deploy --only functions:sendHireEnquiry
+firebase hosting:channel:deploy rebrand --expires 7d
+```
+
+On the preview URL, check:
+- [ ] Header: Learn, Work, Hire, About and **Book a call** (opens WhatsApp with
+      "Hi Gideon, I'd like to book a quick call.").
+- [ ] `/work`: both cards; **Live demo** opens in a new tab; **Case study** opens
+      the case study.
+- [ ] Both case studies: the "Sample project" label, all sections, and the three
+      buttons (View live demo, Get one for your business, Learn to build this).
+- [ ] `/hire`: packages, the four steps and the form. The WhatsApp button opens
+      with "Hi Gideon, I'd like a website for my business."
+- [ ] Send a test enquiry. It appears in Admin → Inbox → Website messages as
+      "Website enquiry", and **Reply on WhatsApp** opens a chat with that number.
+- [ ] `/courses` and a course page show "See what you'll build".
+- [ ] On a phone (or at 390px wide), no page scrolls sideways.
+
+Then run `firebase deploy --only hosting`.
+
+### 3. After going live
+
+- Paste `https://codewithgideon.com/work/itura` into a WhatsApp chat. The
+  preview should show the Ìtura image. (WhatsApp caches previews; add
+  `?v=2` to test again.)
+- GA4 (Firebase console → Analytics, or analytics.google.com):
+  - In **Admin → Data streams → Web → Enhanced measurement**, keep
+    "Page changes based on browser history events" on. This is how page views
+    are counted.
+  - In **Admin → Events**, mark `generate_lead` as a key event.
+  - Outreach links like `https://codewithgideon.com/hire?utm_source=whatsapp&utm_campaign=leadscout`
+    show up under Acquisition, and the tags are saved with each enquiry.
+- Admin → Settings no longer has "Home page button". The new home page has
+  two fixed doors: Learn → /courses and Hire → /hire.
+
+---
+
 ## Rollback
 
 - Functions: `firebase functions:list` shows versions; redeploy the previous

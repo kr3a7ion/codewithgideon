@@ -28,6 +28,9 @@ export default defineConfig(({ mode }) => {
         output: {
           manualChunks(id) {
             if (!id.includes("node_modules")) return undefined;
+            // Analytics loads lazily after the page is idle; keep it out of the
+            // eager Firebase chunk.
+            if (/@firebase\/(analytics|installations)|firebase\/analytics/.test(id)) return "vendor-analytics";
             if (id.includes("firebase")) return "vendor-firebase";
             if (id.includes("framer-motion")) return "vendor-motion";
             if (id.includes("lucide-react")) return "vendor-icons";

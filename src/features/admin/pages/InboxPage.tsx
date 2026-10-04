@@ -179,6 +179,12 @@ const WebsiteMessage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const status = String(m.status || "new").toLowerCase();
   const subject = encodeURIComponent("Re: your message to Code with Gideon");
   const quoted = encodeURIComponent(`\n\n---\nYou wrote:\n${getInboxMessageBody(m)}`);
+  // Website enquiries from /hire carry a WhatsApp number instead of an email.
+  const wa = String(m.whatsapp || "").replace(/\D/g, "");
+  const firstName = String(getInboxDisplayName(m) || "").split(" ")[0];
+  const waText = encodeURIComponent(
+    `Hi ${firstName}, it's Gideon from Code with Gideon. Thanks for your enquiry${m.businessName ? ` about a website for ${m.businessName}` : ""}.`,
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -189,7 +195,7 @@ const WebsiteMessage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         <div className="min-w-0 flex-1">
           <p className="truncate font-semibold text-slate-900 dark:text-white">{getInboxDisplayName(m)}</p>
           <p className="truncate text-xs text-slate-500">
-            {email} · {new Date(getInboxActivityMs(m) || toDateMs(m.createdAt)).toLocaleString()}
+            {email || (wa ? `WhatsApp +${wa}` : "")} · {new Date(getInboxActivityMs(m) || toDateMs(m.createdAt)).toLocaleString()}
           </p>
         </div>
         {status === "resolved" ? <Pill tone="success">Done</Pill> : null}
@@ -217,6 +223,18 @@ const WebsiteMessage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           </a>
         ) : null}
         {email ? <CopyButton text={email} label="Copy email" /> : null}
+        {wa ? (
+          <a
+            href={`https://wa.me/${wa}?text=${waText}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => markSupportStatus(m.id, "resolved")}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-orange-500 px-3.5 text-sm font-bold text-blue-950 hover:bg-orange-400"
+          >
+            <Send className="h-4 w-4" aria-hidden /> Reply on WhatsApp
+          </a>
+        ) : null}
+        {wa ? <CopyButton text={`+${wa}`} label="Copy number" /> : null}
       </div>
     </div>
   );
