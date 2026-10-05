@@ -10,6 +10,7 @@ import { getBadgesForLength, studentSectionRoutes } from "./lib";
 import { sessionInfo, startsIn } from "./time";
 import { UpdatesBell } from "./ui";
 import { Bone, TrackBone } from "./Skeleton";
+import { BadgeMedal } from "./BadgeMedal";
 
 // ---------------------------------------------------------------------------
 // Week track: the whole course as a row of weeks
@@ -119,6 +120,8 @@ export const HomeHero: React.FC<{
   totalWeeks: number;
   paidWeeks: number;
   currentWeek: number;
+  /** Weeks with a finished class: one badge each. */
+  completedWeeks: number;
   intendedWeeks: number;
   weeklyRate: number;
   remainingWeeks: number;
@@ -132,8 +135,10 @@ export const HomeHero: React.FC<{
   onPay: () => void;
 }> = (p) => {
   const badges = getBadgesForLength(p.totalWeeks);
-  // The badge depends on the current week, which needs the classes.
-  const badge = p.state === "active" && p.paidWeeks && !p.loading ? badges[Math.max(0, Math.min(p.currentWeek || 1, badges.length) - 1)] : null;
+  // The latest badge earned: one per week with a finished class (the same
+  // rule as the app). Hidden until the classes load.
+  const earned = p.state === "active" && !p.loading ? Math.min(p.completedWeeks, badges.length) : 0;
+  const badge = earned ? badges[earned - 1] : null;
   const i = p.session ? sessionInfo(p.session) : null;
   const live = i?.phase === "live";
 
@@ -275,13 +280,11 @@ export const HomeHero: React.FC<{
               {badge ? (
                 <Link
                   to={studentSectionRoutes.badges}
-                  className="inline-flex items-center gap-2 rounded-full bg-white/10 py-1 pl-1.5 pr-3 text-[13px] font-bold text-white hover:bg-white/15"
+                  className="group inline-flex items-center gap-1.5 rounded-full bg-white/10 py-1 pl-1 pr-3 text-[13px] font-bold text-white hover:bg-white/15"
                 >
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/15 text-sm" aria-hidden>
-                    {badge.badge}
-                  </span>
+                  <BadgeMedal badge={badge} size={30} className="-my-1.5" />
                   {badge.title}
-                  <span className="sr-only">: your week {badge.week} badge</span>
+                  <span className="sr-only">: your latest badge, week {badge.week}</span>
                 </Link>
               ) : null}
             </div>

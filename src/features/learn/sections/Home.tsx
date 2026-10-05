@@ -70,6 +70,7 @@ const Home: React.FC = () => {
       totalWeeks={s.totalProgramWeeks}
       paidWeeks={s.paidWeeks}
       currentWeek={s.currentWeek}
+      completedWeeks={s.completedWeeks}
       intendedWeeks={state === "checking" ? review?.requestedWeeks || s.intendedWeeks : s.intendedWeeks}
       weeklyRate={s.weeklyRate}
       remainingWeeks={s.remainingWeeks}

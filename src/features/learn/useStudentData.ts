@@ -567,7 +567,7 @@ export const useStudentData = (
   );
 
   // ---------------- class highlights ----------------
-  const { liveSession, nextSession, latestSession, upcomingSessions, pastSessions, currentWeek } = useMemo(() => {
+  const { liveSession, nextSession, latestSession, upcomingSessions, pastSessions, currentWeek, completedWeeks } = useMemo(() => {
     const empty = {
       liveSession: null as SessionDoc | null,
       nextSession: null as SessionDoc | null,
@@ -575,6 +575,7 @@ export const useStudentData = (
       upcomingSessions: [] as SessionDoc[],
       pastSessions: [] as SessionDoc[],
       currentWeek: 0,
+      completedWeeks: 0,
     };
     if (isLocked) return empty;
     const now = Date.now();
@@ -604,6 +605,9 @@ export const useStudentData = (
       upcomingSessions: upcoming.map((x) => x.s),
       pastSessions: past.map((x) => x.s),
       currentWeek: current,
+      // Weeks with a finished class. Badges are earned per finished week,
+      // the same rule as the mobile app.
+      completedWeeks: new Set(past.map((x) => x.i.week).filter((w) => w > 0)).size,
     };
   }, [sessions, isLocked]);
 
@@ -670,6 +674,7 @@ export const useStudentData = (
     upcomingSessions,
     pastSessions,
     currentWeek,
+    completedWeeks,
     resources,
     resourcesLoading,
     communitySpaces,
