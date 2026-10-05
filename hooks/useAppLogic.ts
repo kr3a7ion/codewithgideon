@@ -14,6 +14,7 @@ import {
   User,
 } from "firebase/auth";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { forgetJoinCourse, rememberJoinCourse } from "../src/features/join/joinCourse";
 
 const HANDOFF_KEY = "cwg_registration_handoff";
 const ADMIN_SESSION_KEY = "cwg_admin_session_active";
@@ -70,7 +71,9 @@ const viewFromPathname = (pathname: string): View => {
     path === "/student/community" ||
     path === "/student/chat" ||
     path === "/student/notifications" ||
-    path === "/student/badges"
+    path === "/student/badges" ||
+    path === "/student/account" ||
+    path === "/student/more"
   ) {
     return "student-dashboard";
   }
@@ -233,6 +236,11 @@ export const useAppLogic = () => {
 
     if (typeof extraData === "string") {
       setSelectedPath(extraData);
+      // Remember the course picked on a course page, so the join flow still
+      // knows it after a reload or when the email link opens a new tab.
+      if (nextView === "create-account" || nextView === "continue-registration") {
+        rememberJoinCourse(extraData);
+      }
     }
 
     syncUrlForView(nextView, "push", extraData);
@@ -456,6 +464,7 @@ export const useAppLogic = () => {
 
     setActiveRegistration(null);
     localStorage.removeItem(HANDOFF_KEY);
+    forgetJoinCourse();
   };
 
   const loginAdmin = async (email: string, password: string) => {
@@ -620,6 +629,9 @@ export const useAppLogic = () => {
     isAdminLoggedIn: !!adminUser,
     adminSessionRemainingMs,
     isStudentLoggedIn: !!studentUser,
+    studentAccount: studentUser
+      ? { uid: studentUser.uid, email: String(studentUser.email || "").trim() }
+      : null,
     isLoadingAuth,
     studentProfile,
     verificationState,

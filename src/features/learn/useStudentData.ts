@@ -31,6 +31,9 @@ import {
   toMs,
   type StudentSection,
 } from "./lib";
+import { sessionInfo } from "./time";
+import { usePayments } from "./usePayments";
+import { cadenceText } from "../join/useJoinCourses";
 
 export type MentorChatMessage = {
   id: string;
@@ -39,7 +42,16 @@ export type MentorChatMessage = {
   senderName?: string;
   senderEmail?: string;
   createdAt?: any;
+  /** The class the student asked about (sent with the message). */
+  sessionId?: string;
+  sessionTitle?: string;
 };
+
+/** What a mentor message is about, shown as a small pill above it. */
+export type MentorContext = { sessionId: string; sessionTitle: string };
+
+/** The placeholder session id the web used before messages had a context. */
+const GENERAL_CHAT_ID = "web-student-chat";
 
 type NotificationReadMap = Record<string, { readAt?: any }>;
 
@@ -103,6 +115,8 @@ export const useStudentData = (
   const [courseMaxWeeks, setCourseMaxWeeks] = useState(0);
   const [weeklyRate, setWeeklyRate] = useState(0);
   const [courseError, setCourseError] = useState("");
+  const [courseTitle, setCourseTitle] = useState("");
+  const [courseCadence, setCourseCadence] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -138,6 +152,8 @@ export const useStudentData = (
           );
         });
         if (!mounted) return;
+        if (found?.title) setCourseTitle(String(found.title).trim());
+        if (found?.sessions) setCourseCadence(cadenceText(found.sessions));
         if (found) {
           const w = Number(found.weeks);
           const p = Number(found.pricePerWeek);
@@ -185,6 +201,25 @@ export const useStudentData = (
   const pendingPayment =
     profile?.pendingPayment?.status === "Pending" ? profile.pendingPayment : null;
   const hasPendingTopUp = pendingPayment?.kind === "topup";
+
+  // ---------------- payments ----------------
+  // The payment function clears pendingPayment when a payment needs review,
+  // so the payments subcollection is what tells us a payment is being checked.
+  const {
+    payments,
+    receipts,
+    reviewPayment,
+    loading: paymentsLoading,
+    error: paymentsError,
+  } = usePayments(uid);
+  /** active: paid. pending: hasn't paid yet. checking: paid, admin is confirming it. */
+  const paymentState: "active" | "pending" | "checking" = isEnrolled
+    ? "active"
+    : reviewPayment
+      ? "checking"
+      : "pending";
+  const topUpInReview = isEnrolled && !!reviewPayment;
+  const paidSoFar = receipts.reduce((sum, p) => sum + (p.baseAmount || 0), 0);
 
   // ---------------- sessions ----------------
   const [sessions, setSessions] = useState<SessionDoc[]>([]);
@@ -430,6 +465,11 @@ export const useStudentData = (
               senderName: String(data.senderName || "").trim(),
               senderEmail: String(data.senderEmail || "").trim(),
               createdAt: data.createdAt,
+              sessionId: String(data.sessionId || "").trim(),
+              sessionTitle:
+                String(data.sessionId || "").trim() === GENERAL_CHAT_ID
+                  ? ""
+                  : String(data.sessionTitle || "").trim(),
             } as MentorChatMessage;
           })
           .filter((m) => m.body);
@@ -450,30 +490,42 @@ export const useStudentData = (
     };
   }, [mentorThreadId]);
 
-  // Mark the mentor's reply as read while the chat is open.
-  useEffect(() => {
-    if (!isChatOpen || !mentorThreadId) return;
-    if (mentorThreadMeta?.lastMessageSenderType !== "admin") return;
-    const lastAt = toMs(mentorThreadMeta?.lastMessageAt) || 0;
-    const readAt = toMs(mentorThreadMeta?.studentLastReadAt) || 0;
-    if (readAt >= lastAt) return;
-    updateDoc(doc(db, "mentorThreads", mentorThreadId), {
-      status: "read",
-      studentLastReadAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }).catch(() => {
-      // Read state is a nicety; chat works without it.
-    });
-  }, [isChatOpen, mentorThreadId, mentorThreadMeta]);
-
-  const hasUnreadMentorReply =
-    !isChatOpen &&
+  const mentorReplyUnread =
     mentorThreadMeta?.lastMessageSenderType === "admin" &&
     (toMs(mentorThreadMeta?.lastMessageAt) || 0) >
       (toMs(mentorThreadMeta?.studentLastReadAt) || 0);
 
+  const markMentorRead = useCallback(async () => {
+    if (!mentorThreadId || !mentorReplyUnread) return;
+    // Optimistic, so the badge clears straight away.
+    setMentorThreadMeta((m) => (m ? { ...m, studentLastReadAt: new Date() } : m));
+    try {
+      await updateDoc(doc(db, "mentorThreads", mentorThreadId), {
+        status: "read",
+        studentLastReadAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      // Read state is a nicety; chat works without it.
+    }
+  }, [mentorThreadId, mentorReplyUnread]);
+
+  // Mark the mentor's reply as read while the chat is open.
+  useEffect(() => {
+    if (isChatOpen && mentorReplyUnread) void markMentorRead();
+  }, [isChatOpen, mentorReplyUnread, markMentorRead]);
+
+  const hasUnreadMentorReply = !isChatOpen && !!mentorReplyUnread;
+
+  const lastMentorReply = useMemo(() => {
+    for (let i = mentorMessages.length - 1; i >= 0; i -= 1) {
+      if (mentorMessages[i].senderType === "admin") return mentorMessages[i];
+    }
+    return null;
+  }, [mentorMessages]);
+
   const sendMentorMessage = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, context?: MentorContext | null): Promise<boolean> => {
       if (!profile || isLocked) return false;
       const body = text.trim();
       if (body.length < 5) {
@@ -490,8 +542,8 @@ export const useStudentData = (
           message: body,
           clientMessageId: `web_${profile.uid}_${Date.now()}`,
           contextType: "web",
-          sessionId: "web-student-chat",
-          sessionTitle: "General mentor chat",
+          sessionId: context?.sessionId || GENERAL_CHAT_ID,
+          sessionTitle: context?.sessionTitle || "General mentor chat",
           pathTitle: profile.path,
           cohortKey,
           cohortId,
@@ -510,21 +562,65 @@ export const useStudentData = (
   );
 
   // ---------------- class highlights ----------------
-  const { liveSession, nextSession, latestSession } = useMemo(() => {
-    if (isLocked) return { liveSession: null, nextSession: null, latestSession: null };
+  const { liveSession, nextSession, latestSession, upcomingSessions, pastSessions, currentWeek } = useMemo(() => {
+    const empty = {
+      liveSession: null as SessionDoc | null,
+      nextSession: null as SessionDoc | null,
+      latestSession: null as SessionDoc | null,
+      upcomingSessions: [] as SessionDoc[],
+      pastSessions: [] as SessionDoc[],
+      currentWeek: 0,
+    };
+    if (isLocked) return empty;
     const now = Date.now();
-    const timed = sessions
-      .map((s) => ({ s, ms: toMs((s as any).startsAt) ?? NaN }))
-      .filter((x) => Number.isFinite(x.ms));
+    const infos = sessions.map((s) => ({ s, i: sessionInfo(s, now) }));
     const live = sessions.find((s) => isLiveNow(s, now)) || null;
-    const next =
-      timed.filter((x) => x.ms > now).sort((a, b) => a.ms - b.ms)[0]?.s || null;
-    const latest = timed.sort((a, b) => b.ms - a.ms)[0]?.s || null;
-    return { liveSession: live, nextSession: next, latestSession: latest };
+    // Upcoming = live or not started yet, soonest first. Untimed classes go last.
+    const upcoming = infos
+      .filter((x) => x.i.phase !== "ended")
+      .sort((a, b) => {
+        const am = a.i.hasTime ? a.i.startMs : Number.MAX_SAFE_INTEGER;
+        const bm = b.i.hasTime ? b.i.startMs : Number.MAX_SAFE_INTEGER;
+        return am - bm || a.i.week - b.i.week;
+      });
+    const past = infos.filter((x) => x.i.phase === "ended").sort((a, b) => b.i.startMs - a.i.startMs);
+    const next = upcoming.find((x) => x.i.hasTime && x.i.phase !== "live")?.s || null;
+    // The week the student is on: the live or next class, else the latest one.
+    const weekOf = (x?: { i: { week: number } }) => (x ? x.i.week : 0);
+    const current =
+      weekOf(infos.find((x) => x.s === live)) ||
+      weekOf(upcoming.find((x) => x.i.hasTime)) ||
+      weekOf(past[0]) ||
+      0;
+    return {
+      liveSession: live,
+      nextSession: next,
+      latestSession: past[0]?.s || null,
+      upcomingSessions: upcoming.map((x) => x.s),
+      pastSessions: past.map((x) => x.s),
+      currentWeek: current,
+    };
   }, [sessions, isLocked]);
 
-  const unreadNotificationCount =
-    unreadCohortMessages.length + (hasUnreadMentorReply ? 1 : 0);
+  // ---------------- profile edits ----------------
+  const updateProfileDetails = useCallback(
+    async (changes: { fullName: string; phone: string }) => {
+      if (!uid) throw new Error("You're signed out. Log in again to save.");
+      // Students may only change these fields (see firestore.rules).
+      await updateDoc(doc(db, "users", uid), {
+        fullName: changes.fullName.trim(),
+        phone: changes.phone.replace(/\D/g, ""),
+        updatedAt: Date.now(),
+      });
+    },
+    [uid],
+  );
+
+  const unreadNotificationCount = unreadCohortMessages.length;
+
+  const markEverythingRead = useCallback(async () => {
+    await Promise.all([markAllCohortMessagesRead(), markMentorRead()]);
+  }, [markAllCohortMessagesRead, markMentorRead]);
 
   return {
     profile,
@@ -536,6 +632,8 @@ export const useStudentData = (
     // course + enrolment
     courseLoading,
     courseError,
+    courseTitle: courseTitle || profile?.path || "",
+    courseCadence,
     weeklyRate,
     totalProgramWeeks,
     hasCoursePricing,
@@ -548,12 +646,24 @@ export const useStudentData = (
     canTopUp,
     pendingPayment,
     hasPendingTopUp,
+    // payments
+    payments,
+    receipts,
+    reviewPayment,
+    paymentsLoading,
+    paymentsError,
+    paymentState,
+    topUpInReview,
+    paidSoFar,
     // content
     sessions,
     sessionsLoading,
     liveSession,
     nextSession,
     latestSession,
+    upcomingSessions,
+    pastSessions,
+    currentWeek,
     resources,
     resourcesLoading,
     communitySpaces,
@@ -565,6 +675,7 @@ export const useStudentData = (
     unreadCohortMessages,
     markCohortMessageRead,
     markAllCohortMessagesRead,
+    markEverythingRead,
     notificationError,
     unreadNotificationCount,
     // mentor
@@ -574,7 +685,10 @@ export const useStudentData = (
     mentorError,
     mentorSending,
     hasUnreadMentorReply,
+    lastMentorReply,
+    markMentorRead,
     sendMentorMessage,
+    updateProfileDetails,
   };
 };
 

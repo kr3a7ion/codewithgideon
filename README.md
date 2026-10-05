@@ -84,32 +84,49 @@ Designs: [Figma rebrand file](https://www.figma.com/design/ANyVyXq9PfmTz1kxppwlJ
 
 ## Student Features
 
-Students can:
+### Joining (3 steps)
 
-- Create an account
-- Login securely
-- Continue registration after login
-- Select learning paths
-- Make payments
-- Access unlocked classes
-- Join live sessions
-- View class schedule
-- Open resources and community spaces
-- Chat with a mentor from the student dashboard
-- Earn weekly progress badges
-- Track progress
-- Contact the platform via a contact form
+Sign-up, checkout and the student area have their own slim layout, outside
+the marketing header and footer (Figma pages 08 and 09).
 
-### Student Dashboard Includes
+1. **Account** (`/register`): Google, or email and password. The course the
+   student picked on a course page is remembered in `localStorage`
+   (`cwg_join_course`), so it survives a reload or the verification link
+   opening a new tab.
+2. **Check your email** (`/student/verify-email`): checks every few seconds
+   while the tab is open and moves on by itself once the email is confirmed.
+3. **Your details and weeks** (`/student/register`): name, WhatsApp number,
+   age range and gender (no preselected answers), course and weeks picker
+   with a live order summary. "Save and finish later" keeps the details.
+4. **Review and pay** (`/student/payment`): Paystack pop-up. The page shows
+   "Confirming your payment" while the server checks it, then **You're in**
+   with the next class, the app link and mentor chat.
 
-- Current course overview
-- Next session information
-- Live session indicator
-- Payment continuation
-- Unlocked sessions preview
-- Classes, resources, community, mentor chat, badges, and notifications
-- Clear locked states while payment is pending
-- Direct join buttons for live and recorded classes
+A payment Paystack received but the server couldn't credit (`needs_review`)
+shows **"We're confirming your payment"** everywhere, with no way to pay
+again, until the admin marks it handled. This is read from
+`users/{uid}/payments`, so it needs no extra fields on the profile.
+
+### Student area (`/student/*`)
+
+A sidebar on desktop; a header and bottom tabs (Home, Classes, Chat,
+Updates, More) on phones.
+
+- **Home**: the live or next class (Join from 15 minutes before; Add to
+  calendar otherwise), coming up, recordings to catch up on, this week's
+  resources, weeks unlocked, the latest mentor reply and updates. It has
+  three states: active, payment pending, and checking payment.
+- **Classes**: Upcoming, Recordings and All tabs, grouped by week, with
+  "Add classes to my calendar" (.ics, or Google Calendar on Android).
+- **Mentor chat**: questions can name the class they're about.
+- **Resources** (search and week filter), **Updates**, **Community**,
+  **Badges**.
+- **Payments & account**: weeks, payment history with printable receipts,
+  edit name and WhatsApp number, dark mode, sign out. **Add weeks** opens a
+  dialog and goes straight to Paystack.
+
+Locked weeks never show class titles: students can only read the weeks they
+paid for.
 
 ---
 
@@ -126,7 +143,7 @@ sidebar on desktop, bottom tabs plus a "More" sheet on phones.
 | **Inbox** | Student chats (app + website) and contact-form messages in one place |
 | **Classes** | The schedule per cohort (Upcoming, Past, Drafts), quick recording links, **Generate schedule** from the course syllabus, **Copy schedule** from another cohort |
 | **Cohorts** | The open intake per path and one-click **Start next intake** |
-| **Announcements** | Messages to a cohort (students see them under Notifications) |
+| **Announcements** | Messages to a cohort (students see them under Updates) |
 | **Courses & paths**, **Resources**, **Community** | What students can sign up for and the material around it |
 | **Settings** | Website content (next cohort date, APK link, contact page and the site-wide WhatsApp link, socials), Google Sheets, CSV export, delete-all (typed confirmation) |
 
@@ -235,11 +252,18 @@ src/
 │                           PageHeader, EmptyState, Skeleton, LoadingPanel
 ├── pages/                  HomePage, NotFound
 └── features/
+    ├── join/               sign-up and checkout (/register, /student/login,
+    │                       verify-email, register, payment)
+    ├── shared/             building blocks for join + student (Card, Notice,
+    │                       Dialog, Avatar, Progress)
     ├── learn/              student area (/student/*)
     │   ├── useStudentData.ts   all student data + listeners
-    │   ├── StudentArea.tsx     header, section nav, top-up dialog
-    │   └── sections/           Overview, Classes, Resources, Community,
-    │                           MentorChat, Notifications, Badges
+    │   ├── usePayments.ts      the student's payments (receipts, "being checked")
+    │   ├── StudentArea.tsx     sidebar, phone header and tabs, Add weeks dialog
+    │   ├── ui.tsx              class hero, session rows, weeks card, cards
+    │   ├── time.ts, calendar.ts  class times, add to calendar
+    │   └── sections/           Home, Classes, Resources, Community,
+    │                           MentorChat, Updates, Badges, Account, More
     └── admin/              admin area (/admin/*)
         ├── useAdminWorkspace.tsx  all admin data + actions
         ├── AdminArea.tsx          routes
@@ -251,7 +275,7 @@ src/
         ├── parts/                 class form, schedule dialogs, recording link
         └── ui.tsx                 admin building blocks (panels, dialogs, menus)
 
-components/                 public pages, auth, registration, payment
+components/                 public pages, admin login
 hooks/useAppLogic.ts        auth state, live profile, navigation bridge
 services/                   firebase, registrationStore (Firestore access), siteConfig
 utils/courseRoutes.ts       course slugs and URLs
@@ -444,11 +468,13 @@ npm run dev           # the site, against your Firebase project
 npm run preview:ui    # student + admin areas with mock data, no Firebase (port 5174)
 ```
 
-The preview harness is useful for UI work. Open
-`http://localhost:5174/student/dashboard?state=active` (or `state=locked`,
-`state=empty`) and `http://localhost:5174/admin/today`. Admin actions work
-against in-memory sample data, so you can try flows like generating a
-schedule without touching real data.
+The preview harness is useful for UI work. `http://localhost:5174/` lists
+every screen: the join pages, each checkout state (`?phase=success`,
+`verifying`, `failed&stage=verify`, `?state=checking`), and the student area
+in each state (`?state=active`, `locked`, `checking`, `empty`; add
+`&theme=dark`). `http://localhost:5174/admin/today` opens the admin area.
+Admin actions work against in-memory sample data, so you can try flows like
+generating a schedule without touching real data.
 
 # Checks
 

@@ -2,7 +2,7 @@
 // Reads come from sample data; writes change the in-memory copy so admin
 // flows (generate a schedule, start an intake, send an announcement) can be
 // tried end to end without Firebase.
-import { previewDb, previewResources, previewSessions, previewSpaces } from "./data";
+import { previewDb, previewProfile, previewResources, previewSessions, previewSpaces } from "./data";
 import { Timestamp } from "./timestamp";
 
 const wait = <T,>(value: T, ms = 250) => new Promise<T>((r) => setTimeout(() => r(value), ms));
@@ -158,6 +158,12 @@ export const registrationStore: any = {
     students.splice(0, students.length);
     return wait(undefined);
   },
+  // ---- join flow ----
+  createAuthOnly: async (email: string) => wait({ uid: "student_1", email }, 600),
+  resetPassword: async () => wait(undefined, 400),
+  completeStudentProfileAfterLogin: async () => wait(undefined, 600),
+  getUserProfile: async () => wait({ ...previewProfile }, 200),
+  setPendingPayment: async () => wait(undefined, 200),
   clearPendingPayment: async (uid: string) => {
     const s = students.find((x) => x.uid === uid);
     if (s) delete s.pendingPayment;

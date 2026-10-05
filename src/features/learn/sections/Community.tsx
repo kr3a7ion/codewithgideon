@@ -1,51 +1,43 @@
 import React from "react";
 import { ExternalLink, Users } from "lucide-react";
-import { Button, EmptyState, PageHeader, Skeleton } from "../../../ui";
+import { mbtn } from "../../../marketing/ui";
+import { Card, IconTile } from "../../shared/ui";
 import { useStudent } from "../StudentDataContext";
-import { openExternal } from "../lib";
+import { StudentPageHeader } from "../StudentPageHeader";
+import { EmptyCard } from "../ui";
 
 const Community: React.FC = () => {
   const s = useStudent();
   return (
-    <div className="space-y-6">
-      <PageHeader
-        level={2}
-        eyebrow="Community"
-        title="Your community spaces"
-        description="Cohort rooms, support groups and links for your course."
-      />
+    <div className="space-y-5 lg:space-y-6">
+      <StudentPageHeader title="Community" description="Cohort rooms, study groups and links for your course." />
       {s.communityLoading ? (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-2" aria-hidden>
           {[1, 2].map((i) => (
-            <Skeleton key={i} className="h-36" />
+            <div key={i} className="h-44 animate-pulse rounded-[20px] bg-white dark:bg-slate-900" />
           ))}
         </div>
       ) : s.communitySpaces.length === 0 ? (
-        <EmptyState
-          icon={<Users className="h-6 w-6" />}
-          title="No spaces yet"
-          description="Spaces appear here once they're published for your cohort or course."
-        />
+        <EmptyCard icon={Users} title="No spaces yet">
+          Cohort rooms and study groups show here once Gideon opens them for your course.
+        </EmptyCard>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {s.communitySpaces.map((space) => (
-            <article
-              key={space.id}
-              className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
-            >
-              <p className="text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-300">
-                {space.category || "Community"}
-              </p>
-              <h3 className="mt-2 text-base font-bold text-blue-900 dark:text-white">{space.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{space.description}</p>
+            <Card as="article" key={space.id} className="flex flex-col gap-3 p-5 sm:p-6">
+              <div className="flex items-center gap-3">
+                <IconTile icon={Users} size="sm" />
+                <p className="text-xs font-extrabold uppercase tracking-[0.1em] text-teal-700 dark:text-teal-300">{space.category || "Community"}</p>
+              </div>
+              <h2 className="font-display text-lg font-semibold leading-6 text-blue-900 dark:text-white">{space.title}</h2>
+              {space.description ? <p className="flex-1 text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{space.description}</p> : <div className="flex-1" />}
               {space.roomUrl ? (
-                <div className="mt-auto pt-4">
-                  <Button size="sm" onClick={() => openExternal(space.roomUrl)} rightIcon={<ExternalLink className="h-3.5 w-3.5" />}>
-                    {space.ctaLabel || "Open space"}
-                  </Button>
-                </div>
+                <a href={space.roomUrl} target="_blank" rel="noopener noreferrer" className={mbtn({ kind: "secondary", size: "sm", className: "self-start" })}>
+                  {space.ctaLabel || "Open space"} <ExternalLink className="h-4 w-4" aria-hidden />
+                  <span className="sr-only">: {space.title}</span>
+                </a>
               ) : null}
-            </article>
+            </Card>
           ))}
         </div>
       )}
