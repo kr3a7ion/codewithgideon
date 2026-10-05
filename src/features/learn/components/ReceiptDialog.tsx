@@ -39,7 +39,7 @@ export const ReceiptDialog: React.FC<{
     ["Status", statusLabel(payment.status)],
   ];
   return (
-    <Dialog open={!!payment} onClose={onClose} title="Receipt" size="md" className="print-area">
+    <Dialog open={!!payment} onClose={onClose} title="Receipt" size="md" className="print-area student-app">
       <div className="space-y-5">
         <div className="hidden items-center justify-between print:flex">
           <Lockup className="h-8" />

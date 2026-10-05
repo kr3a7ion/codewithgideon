@@ -66,17 +66,22 @@ export const SectionHead: React.FC<{ title: string; id?: string; action?: { labe
 );
 
 /** Bell button that opens Updates; shows an orange dot when something is new. */
-export const UpdatesBell: React.FC<{ unread: boolean; className?: string }> = ({ unread, className }) => (
+export const UpdatesBell: React.FC<{ unread: boolean; className?: string; onDark?: boolean }> = ({ unread, className, onDark }) => (
   <Link
     to={"/student/notifications"}
     aria-label={unread ? "Updates, new" : "Updates"}
     className={cn(
-      "relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-white text-blue-900 hover:border-line-strong dark:border-line-dark dark:bg-slate-900 dark:text-white",
+      "relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border",
+      onDark
+        ? "border-white/20 bg-white/10 text-white hover:border-white/40"
+        : "border-line bg-white text-blue-900 hover:border-line-strong dark:border-line-dark dark:bg-slate-900 dark:text-white",
       className,
     )}
   >
     <Bell className="h-5 w-5" aria-hidden />
-    {unread ? <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-orange-500 ring-2 ring-white dark:ring-slate-900" aria-hidden /> : null}
+    {unread ? (
+      <span className={cn("absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-orange-500 ring-2", onDark ? "ring-blue-900" : "ring-white dark:ring-slate-900")} aria-hidden />
+    ) : null}
   </Link>
 );
 
@@ -205,12 +210,17 @@ export const ClassHero: React.FC<{
 // Session rows
 // ---------------------------------------------------------------------------
 
-const WeekTile: React.FC<{ week: number; muted?: boolean; locked?: boolean }> = ({ week, muted, locked }) => (
+/** Week badge on a row: solid while the class is live, tinted when it's coming up, grey once it's over. */
+const WeekTile: React.FC<{ week: number; muted?: boolean; locked?: boolean; live?: boolean }> = ({ week, muted, locked, live }) => (
   <span
     aria-hidden
     className={cn(
       "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl font-display text-[15px] font-bold",
-      muted || locked ? "bg-paper text-slate-500 dark:bg-slate-800 dark:text-slate-400" : "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300",
+      live
+        ? "bg-teal-600 text-white dark:bg-teal-500 dark:text-blue-950"
+        : muted || locked
+          ? "bg-paper text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+          : "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300",
     )}
   >
     {locked ? <Lock className="h-[18px] w-[18px]" /> : week ? `W${week}` : <Video className="h-[18px] w-[18px]" />}
@@ -226,10 +236,10 @@ export const SessionRow: React.FC<{ session: SessionDoc; courseTitle: string; on
     <li
       className={cn(
         "flex items-center gap-3 rounded-2xl bg-white px-3 py-3.5 dark:bg-slate-900 sm:gap-4 sm:px-4",
-        live ? "border-[1.5px] border-teal-600 dark:border-teal-400" : "border border-line dark:border-line-dark",
+        live ? "border-[1.5px] border-teal-600 shadow-[0_8px_24px_rgba(18,128,138,0.14)] dark:border-teal-400" : "border border-line dark:border-line-dark",
       )}
     >
-      <WeekTile week={i.week} muted={ended} />
+      <WeekTile week={i.week} muted={ended} live={live} />
       <div className="min-w-0 flex-1">
         <p className="text-[15px] font-bold leading-[22px] text-blue-900 dark:text-white sm:text-base">{i.title}</p>
         <p className="text-[13px] font-medium leading-5 text-slate-500 dark:text-slate-400 sm:text-sm">{meta}</p>
@@ -398,8 +408,14 @@ export const RecordingCard: React.FC<{ session: SessionDoc; className?: string }
         className,
       )}
     >
-      <span className="relative flex h-[124px] items-center justify-center bg-gradient-to-br from-blue-900 to-teal-600 sm:h-[130px]">
-        <span className="flex h-[46px] w-[46px] items-center justify-center rounded-full bg-white/95 text-teal-700 transition-transform group-hover:scale-105">
+      <span className="relative flex h-[124px] items-center justify-center overflow-hidden bg-blue-900 sm:h-[130px]">
+        {/* The week number, set large, is the thumbnail's only graphic. */}
+        {i.week ? (
+          <span aria-hidden className="pointer-events-none absolute -bottom-3 left-3 select-none font-display text-[72px] font-bold leading-none tracking-[-0.05em] text-teal-400/20">
+            W{i.week}
+          </span>
+        ) : null}
+        <span className="relative flex h-[46px] w-[46px] items-center justify-center rounded-full bg-teal-400 text-blue-950 transition-transform group-hover:scale-105">
           <PlayCircle className="h-6 w-6" aria-hidden />
         </span>
         <span className="absolute bottom-2.5 right-2.5 rounded-lg bg-slate-950/75 px-2 py-0.5 text-xs font-bold text-white">{i.durationMins} min</span>
