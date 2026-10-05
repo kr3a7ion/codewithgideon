@@ -1,11 +1,11 @@
 import React from "react";
-import { BookOpen, Lock, MessageSquare, PlayCircle } from "lucide-react";
+import { BookOpen, Lock, MessageSquare, PlayCircle, Plus } from "lucide-react";
 import { mbtn, Tag, WhatsAppIcon } from "../../../marketing/ui";
 import { upcomingCohortLabel, useContactLinks } from "../../../marketing/useContactLinks";
 import { Avatar, Card, Notice, naira, plural } from "../../shared/ui";
 import { useStudent } from "../StudentDataContext";
-import { StudentPageHeader } from "../StudentPageHeader";
-import { ClassHero, EmptyCard, LockedRow, RecordingCard, ResourceRow, SectionHead, SessionRow, UpdateRow, WeeksCard } from "../ui";
+import { HomeHero } from "../HomeHero";
+import { EmptyCard, LockedRow, RecordingCard, ResourceRow, SectionHead, SessionRow, UpdateRow } from "../ui";
 import { ago, greeting } from "../time";
 import { toMs } from "../lib";
 
@@ -39,56 +39,46 @@ const Home: React.FC = () => {
   const lockedNote = state === "pending" ? "Unlocks after payment" : "Opens once confirmed";
 
   // ---- blocks ----
-  const notices = (
-    <>
-      {state === "pending" ? (
-        <Notice
-          tone="pending"
-          title={s.pendingPayment ? "Finish your payment to unlock your classes" : "Pay to unlock your classes"}
-          action={
-            <button type="button" onClick={s.continuePayment} className={mbtn({ kind: "learn" })}>
-              {s.weeklyRate > 0 ? `Pay ${naira(s.intendedWeeks * s.weeklyRate)}` : "Finish payment"}
-            </button>
-          }
-        >
-          You chose {plural(s.intendedWeeks, "week")} of {course}. Classes, recordings and mentor chat open as soon as it's paid.
-        </Notice>
-      ) : null}
-      {review ? (
-        <Notice
-          tone="review"
-          role="status"
-          title={state === "checking" ? "We're confirming your payment" : "We're confirming your top-up"}
-          action={
-            <a href={whatsapp} target="_blank" rel="noopener noreferrer" className={mbtn({ kind: "secondary" })}>
-              Message Gideon <WhatsAppIcon className="h-[18px] w-[18px]" />
-            </a>
-          }
-        >
-          Paystack received {naira(reviewAmount)}
-          {review.paidAtMs ? ` on ${shortDate(review.paidAtMs)}` : ""}. Your {state === "checking" ? "weeks unlock" : "new weeks unlock"} once it's confirmed,
-          usually within a few hours. You don't need to pay again.
-        </Notice>
-      ) : null}
-    </>
-  );
+  // Pending and checking are explained in the hero; a top-up being checked
+  // gets its own notice because the student can still use their classes.
+  const topUpNotice =
+    state === "active" && review ? (
+      <Notice
+        tone="review"
+        role="status"
+        title="We're confirming your top-up"
+        action={
+          <a href={whatsapp} target="_blank" rel="noopener noreferrer" className={mbtn({ kind: "secondary" })}>
+            Message Gideon <WhatsAppIcon className="h-[18px] w-[18px]" />
+          </a>
+        }
+      >
+        Paystack received {naira(reviewAmount)}
+        {review.paidAtMs ? ` on ${shortDate(review.paidAtMs)}` : ""}. Your new weeks unlock once it's confirmed, usually within a few hours. You don't need to pay
+        again.
+      </Notice>
+    ) : null;
 
-  const hero = locked ? (
-    <ClassHero
-      kind="locked"
-      lockedLabel={state === "pending" ? "Next live class · locked" : "Next live class · opens soon"}
-      lockedTitle="Your first live class is waiting"
-      lockedMeta={nextCohort ? `Classes start ${nextCohort}` : undefined}
-      lockedNote={state === "pending" ? "Classes open as soon as your first payment is confirmed." : "Your classes open as soon as we confirm your payment."}
+  const hero = (
+    <HomeHero
+      state={state}
+      greeting={`${greeting()}${s.firstName ? `, ${s.firstName}` : ""}`}
+      courseTitle={course}
+      session={heroSession}
+      loading={!locked && s.sessionsLoading}
+      totalWeeks={s.totalProgramWeeks}
+      paidWeeks={s.paidWeeks}
+      currentWeek={s.currentWeek}
+      intendedWeeks={state === "checking" ? review?.requestedWeeks || s.intendedWeeks : s.intendedWeeks}
+      weeklyRate={s.weeklyRate}
+      remainingWeeks={s.remainingWeeks}
+      hasPastClasses={s.pastSessions.length > 0}
+      nextCohort={nextCohort}
+      reviewAmount={reviewAmount}
+      whatsapp={whatsapp}
+      unreadUpdates={s.unreadNotificationCount > 0}
+      onPay={s.continuePayment}
     />
-  ) : s.sessionsLoading ? (
-    <div className="h-[230px] animate-pulse rounded-3xl bg-teal-600/15" aria-hidden />
-  ) : heroSession ? (
-    <ClassHero kind="class" session={heroSession} totalWeeks={s.totalProgramWeeks} courseTitle={course} />
-  ) : s.pastSessions.length && s.remainingWeeks > 0 ? (
-    <ClassHero kind="empty" emptyTitle="You're up to date" emptyNote="You've had every class in the weeks you paid for. Add weeks to unlock the next ones." />
-  ) : (
-    <ClassHero kind="empty" />
   );
 
   const comingUpBlock =
@@ -147,20 +137,28 @@ const Home: React.FC = () => {
       </section>
     ) : null;
 
-  const weeksCard = (
-    <WeeksCard
-      state={state}
-      paidWeeks={s.paidWeeks}
-      totalWeeks={s.totalProgramWeeks}
-      rate={s.weeklyRate}
-      intendedWeeks={state === "checking" ? review?.requestedWeeks || s.intendedWeeks : s.intendedWeeks}
-      currentWeek={s.currentWeek}
-      canTopUp={s.canTopUp && !s.topUpInReview}
-      onAddWeeks={s.openTopUp}
-      onPay={s.continuePayment}
-      checkingNote={review && state === "checking" ? `Paystack received ${naira(reviewAmount)}.` : undefined}
-    />
-  );
+  // The hero already shows the weeks; this card is the way to add more.
+  const weeksCard =
+    state === "active" ? (
+      <Card as="section" aria-labelledby="home-weeks" className="p-5 sm:p-6">
+        <div className="flex items-center justify-between gap-3">
+          <h2 id="home-weeks" className="font-display text-lg font-semibold leading-6 text-blue-900 dark:text-white">
+            Your weeks
+          </h2>
+          <Tag tone="learn">{s.remainingWeeks ? "Active" : "Full course"}</Tag>
+        </div>
+        <p className="mt-2 text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">
+          {s.remainingWeeks
+            ? `${plural(s.remainingWeeks, "week")} left to unlock.${s.weeklyRate ? ` ${naira(s.remainingWeeks * s.weeklyRate)} unlocks the rest of the course.` : ""}`
+            : "You've unlocked every week of the course."}
+        </p>
+        {s.canTopUp && !s.topUpInReview ? (
+          <button type="button" onClick={s.openTopUp} className={mbtn({ kind: "learn", full: true, className: "mt-4" })}>
+            Add weeks <Plus className="h-[18px] w-[18px]" aria-hidden />
+          </button>
+        ) : null}
+      </Card>
+    ) : null;
 
   const mentorCard = (
     <Card as="section" aria-labelledby="home-mentor" className="space-y-4 p-5 sm:p-6">
@@ -226,26 +224,21 @@ const Home: React.FC = () => {
   );
 
   return (
-    <div className="space-y-5 lg:space-y-7">
-      <StudentPageHeader
-        phoneTitle
-        title={`${greeting()}${s.firstName ? `, ${s.firstName}` : ""}`}
-        description={[course, s.cohortLabel].filter(Boolean).join(" · ")}
-      />
-      {notices}
-      {/* Phones: one column with the weeks card under the class. Desktop:
-          the main column on the left, weeks, mentor and updates on the right. */}
+    <div className="space-y-6 lg:space-y-7">
+      {hero}
+      {topUpNotice}
+      {/* Phones: one column, with the weeks card after Coming up. Desktop:
+          classes on the left; weeks, mentor and updates on the right. */}
       <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start lg:gap-7">
         <div className="contents lg:flex lg:flex-col lg:gap-8">
-          <div className="order-1">{hero}</div>
-          {comingUpBlock ? <div className="order-3">{comingUpBlock}</div> : null}
-          {catchUpBlock ? <div className="order-4">{catchUpBlock}</div> : null}
-          {resourcesBlock ? <div className="order-5">{resourcesBlock}</div> : null}
+          {comingUpBlock ? <div className="order-1">{comingUpBlock}</div> : null}
+          {catchUpBlock ? <div className="order-3">{catchUpBlock}</div> : null}
+          {resourcesBlock ? <div className="order-4">{resourcesBlock}</div> : null}
         </div>
         <div className="contents lg:flex lg:flex-col lg:gap-6">
-          <div className="order-2">{weeksCard}</div>
-          <div className="order-6">{mentorCard}</div>
-          <div className="order-7">{updatesBlock}</div>
+          {weeksCard ? <div className="order-2">{weeksCard}</div> : null}
+          <div className="order-5">{mentorCard}</div>
+          <div className="order-6">{updatesBlock}</div>
         </div>
       </div>
     </div>

@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ChevronRight, LogOut, Moon, Plus, ReceiptText, Sun } from "lucide-react";
 import { mbtn, Tag } from "../../../marketing/ui";
 import { cn } from "../../../ui";
-import { Avatar, Card, Notice, naira, plural, Progress, Spinner } from "../../shared/ui";
+import { Avatar, Card, Notice, naira, plural, Spinner } from "../../shared/ui";
 import { TextField } from "../../join/ui";
 import { useStudent } from "../StudentDataContext";
+import { WeekTrack } from "../HomeHero";
 import { StudentPageHeader } from "../StudentPageHeader";
 import { ReceiptDialog, statusLabel } from "../components/ReceiptDialog";
 import { channelLabel, type PaymentRecord } from "../usePayments";
@@ -113,7 +114,7 @@ const Account: React.FC = () => {
                 </span>
                 <span className="text-sm font-medium text-slate-500 dark:text-slate-400">unlocked</span>
               </p>
-              <Progress value={s.paidWeeks} max={s.totalProgramWeeks} label="Weeks unlocked" size="md" />
+              <WeekTrack tone="light" total={s.totalProgramWeeks} paid={s.paidWeeks} current={s.currentWeek} chosen={state === "active" ? 0 : s.intendedWeeks} />
             </div>
             <div className="grid grid-cols-3 gap-2 sm:gap-3">
               <StatTile label="Paid so far" value={naira(s.paidSoFar)} />

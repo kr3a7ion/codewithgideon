@@ -93,14 +93,18 @@ const Sidebar: React.FC<{
           cn(
             "flex h-11 items-center gap-3 rounded-xl px-3 text-[15px] transition-colors",
             isActive
-              ? "bg-teal-50 font-bold text-teal-700 dark:bg-teal-950 dark:text-teal-200"
+              ? "bg-blue-900 font-bold text-white shadow-[0_6px_16px_rgba(15,43,91,0.18)] dark:bg-white/10"
               : "font-semibold text-slate-600 hover:bg-paper hover:text-blue-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white",
           )
         }
       >
-        <item.icon className="h-5 w-5 shrink-0" aria-hidden />
-        <span className="truncate">{item.label}</span>
-        <CountPill count={item.count} dot={item.dot} label={item.key === "chat" ? "new reply" : "unread"} />
+        {({ isActive }) => (
+          <>
+            <item.icon className={cn("h-5 w-5 shrink-0", isActive && "text-teal-300")} aria-hidden />
+            <span className="truncate">{item.label}</span>
+            <CountPill count={item.count} dot={item.dot} label={item.key === "chat" ? "new reply" : "unread"} />
+          </>
+        )}
       </NavLink>
     </li>
   );
@@ -335,7 +339,7 @@ const StudentArea: React.FC<Props> = ({ profile, onNavigate, onLogout, isDark, o
 
   return (
     <StudentDataProvider value={{ ...data, ...actions }}>
-      <div className="min-h-screen bg-paper dark:bg-paper-dark">
+      <div className="student-app min-h-screen bg-mist dark:bg-paper-dark">
         <Sidebar main={mainNav} account={accountNav} name={profile.fullName} status={status} apk={apk} onLogout={onLogout} />
 
         {/* Phone header */}
@@ -354,7 +358,7 @@ const StudentArea: React.FC<Props> = ({ profile, onNavigate, onLogout, isDark, o
           <div
             className={cn(
               "mx-auto w-full max-w-[1180px] px-4 sm:px-6 lg:px-10",
-              isChat ? "pb-16 pt-0 sm:pt-6 lg:pb-8 lg:pt-8" : "pb-28 pt-5 sm:pt-6 lg:pb-16 lg:pt-8",
+              isChat ? "pb-16 pt-0 sm:pt-6 lg:pb-8 lg:pt-8" : activeSection === "dashboard" ? "pb-28 pt-0 sm:pt-6 lg:pb-16 lg:pt-8" : "pb-28 pt-5 sm:pt-6 lg:pb-16 lg:pt-8",
             )}
           >
             <Suspense

@@ -24,6 +24,13 @@
   }
 }
 
+/* Student app: cool greys for paper and line (see tailwind.config). */
+.student-app {
+  --cwg-paper: 242 246 250;
+  --cwg-line: 219 227 238;
+  --cwg-line-strong: 194 205 220;
+}
+
 .text-gradient {
   background: linear-gradient(to right, #0f2b5b, #1698a0);
   background-clip: text;
