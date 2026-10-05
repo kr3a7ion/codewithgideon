@@ -95,15 +95,21 @@ export default {
         // Rebrand neutrals for the public site (Figma: "CodeWithGideon —
         // Rebrand"). Paper is the warm section background; line is the
         // matching border. Teal = Learn, orange = Hire, navy = the brand.
+        //
+        // Paper and line read CSS variables so an area can retune them: the
+        // student app (.student-app in index.css) uses cool greys instead of
+        // the warm marketing tones. Defaults are the marketing values.
         paper: {
-          DEFAULT: "#F7F4EE",
+          DEFAULT: "rgb(var(--cwg-paper, 247 244 238) / <alpha-value>)",
           dark: "#0D1728",
         },
         line: {
-          DEFAULT: "#E4DFD5",
-          strong: "#C9C2B4",
+          DEFAULT: "rgb(var(--cwg-line, 228 223 213) / <alpha-value>)",
+          strong: "rgb(var(--cwg-line-strong, 201 194 180) / <alpha-value>)",
           dark: "#1B2940",
         },
+        // Student app canvas: a cool, light blue-grey so white cards stand out.
+        mist: "#EAF0F6",
       },
       fontFamily: {
         sans: ["Manrope", "ui-sans-serif", "system-ui", "sans-serif"],
@@ -112,6 +118,21 @@ export default {
       boxShadow: {
         card: "0 1px 2px rgba(15, 43, 91, 0.04), 0 8px 24px rgba(15, 43, 91, 0.06)",
         lift: "0 20px 50px rgba(8, 21, 46, 0.14)",
+      },
+      keyframes: {
+        // Week blocks on the student home hero fill in one after another.
+        "week-in": {
+          "0%": { opacity: "0", transform: "scaleY(0.4)" },
+          "100%": { opacity: "1", transform: "scaleY(1)" },
+        },
+        "week-glow": {
+          "0%, 100%": { boxShadow: "0 0 0 3px rgba(63, 188, 190, 0.35)" },
+          "50%": { boxShadow: "0 0 0 6px rgba(63, 188, 190, 0.12)" },
+        },
+      },
+      animation: {
+        "week-in": "week-in 420ms cubic-bezier(.2,.7,.3,1) both",
+        "week-glow": "week-glow 2.4s ease-in-out infinite",
       },
     },
   },

@@ -26,6 +26,7 @@ export const AddWeeksDialog: React.FC<{
     <Dialog
       open={open}
       onClose={onClose}
+      className="student-app"
       title="Add weeks"
       description={`You've unlocked ${paidWeeks} of ${totalWeeks} weeks. Choose how many more to add.`}
     >
