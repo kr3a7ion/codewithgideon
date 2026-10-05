@@ -6,6 +6,7 @@ import { cn } from "../../../ui";
 import { Avatar, Card, Notice, naira, Spinner } from "../../shared/ui";
 import { useStudent } from "../StudentDataContext";
 import { StudentPageHeader } from "../StudentPageHeader";
+import { ChatBone } from "../Skeleton";
 import { toMs } from "../lib";
 import { dayLabel, sessionInfo, timeFmt } from "../time";
 import type { MentorChatMessage } from "../useStudentData";
@@ -140,9 +141,12 @@ const MentorChat: React.FC = () => {
           <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto bg-paper/60 px-4 py-4 dark:bg-slate-950/40 sm:px-5" aria-live="polite" aria-relevant="additions">
             {s.mentorError ? <Notice tone="error">{s.mentorError}</Notice> : null}
             {s.mentorLoading ? (
-              <div className="flex justify-center py-10 text-slate-500">
-                <Spinner label="Loading messages" className="text-teal-600" />
-              </div>
+              <>
+                <p className="sr-only" role="status">
+                  Loading messages…
+                </p>
+                <ChatBone />
+              </>
             ) : rows.length === 0 ? (
               <div className="mx-auto max-w-sm py-10 text-center">
                 <p className="font-display text-lg font-semibold text-blue-900 dark:text-white">Ask your first question</p>

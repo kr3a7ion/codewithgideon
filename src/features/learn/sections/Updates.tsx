@@ -5,6 +5,7 @@ import { mbtn } from "../../../marketing/ui";
 import { Avatar, GroupLabel, Notice } from "../../shared/ui";
 import { useStudent } from "../StudentDataContext";
 import { StudentPageHeader } from "../StudentPageHeader";
+import { RowsBone } from "../Skeleton";
 import { ago } from "../time";
 import { EmptyCard, UpdateRow } from "../ui";
 
@@ -84,11 +85,7 @@ const Updates: React.FC = () => {
         ) : null}
 
         {s.cohortMessagesLoading ? (
-          <div className="space-y-2.5" aria-hidden>
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 animate-pulse rounded-2xl bg-white dark:bg-slate-900" />
-            ))}
-          </div>
+          <RowsBone count={3} kind="item" />
         ) : !s.cohortMessages.length ? (
           <EmptyCard icon={Bell} title="You're all caught up">
             Announcements from Gideon and class reminders show here and in the app.

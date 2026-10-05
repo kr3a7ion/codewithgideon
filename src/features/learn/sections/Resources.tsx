@@ -6,6 +6,7 @@ import { cn } from "../../../ui";
 import { GroupLabel, naira } from "../../shared/ui";
 import { useStudent } from "../StudentDataContext";
 import { StudentPageHeader } from "../StudentPageHeader";
+import { ItemBone } from "../Skeleton";
 import { EmptyCard, ResourceRow } from "../ui";
 
 const weekOf = (r: ResourceDoc) => {
@@ -87,7 +88,7 @@ const Resources: React.FC = () => {
       ) : s.resourcesLoading ? (
         <div className="grid gap-3 lg:grid-cols-2" aria-hidden>
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-[72px] animate-pulse rounded-[14px] bg-white dark:bg-slate-900" />
+            <ItemBone key={i} />
           ))}
         </div>
       ) : !s.resources.length ? (

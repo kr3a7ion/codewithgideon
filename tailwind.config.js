@@ -129,10 +129,28 @@ export default {
           "0%, 100%": { boxShadow: "0 0 0 3px rgba(63, 188, 190, 0.35)" },
           "50%": { boxShadow: "0 0 0 6px rgba(63, 188, 190, 0.12)" },
         },
+        // A band of light sweeping across loading placeholders.
+        shimmer: {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(100%)" },
+        },
+        // The thin bar at the top of the page while a section loads.
+        "load-bar": {
+          "0%": { transform: "translateX(-100%) scaleX(0.4)" },
+          "50%": { transform: "translateX(30%) scaleX(0.6)" },
+          "100%": { transform: "translateX(100%) scaleX(0.4)" },
+        },
+        "fade-in": {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
+        },
       },
       animation: {
         "week-in": "week-in 420ms cubic-bezier(.2,.7,.3,1) both",
         "week-glow": "week-glow 2.4s ease-in-out infinite",
+        shimmer: "shimmer 1.6s ease-in-out infinite",
+        "load-bar": "load-bar 1.2s ease-in-out infinite",
+        "fade-in": "fade-in 200ms ease-out both",
       },
     },
   },

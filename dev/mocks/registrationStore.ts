@@ -5,7 +5,9 @@
 import { previewDb, previewProfile, previewResources, previewSessions, previewSpaces } from "./data";
 import { Timestamp } from "./timestamp";
 
-const wait = <T,>(value: T, ms = 250) => new Promise<T>((r) => setTimeout(() => r(value), ms));
+// ?slow=3000 adds that many ms to every call, to check loading states.
+const slow = Number(new URLSearchParams(window.location.search).get("slow") || 0);
+const wait = <T,>(value: T, ms = 250) => new Promise<T>((r) => setTimeout(() => r(value), ms + slow));
 const clone = <T,>(v: T): T => (Array.isArray(v) ? (v.map((x: any) => ({ ...x })) as any) : v);
 
 const now = Date.now();

@@ -7,6 +7,7 @@ import { cn } from "../../../ui";
 import { GroupLabel, Notice, naira } from "../../shared/ui";
 import { useStudent } from "../StudentDataContext";
 import { StudentPageHeader } from "../StudentPageHeader";
+import { RowsBone } from "../Skeleton";
 import { addToCalendar } from "../calendar";
 import { sessionInfo } from "../time";
 import { EmptyCard, LockedRow, RecordingCard, SessionRow } from "../ui";
@@ -175,11 +176,7 @@ const Classes: React.FC = () => {
           </section>
         </div>
       ) : s.sessionsLoading ? (
-        <div className="space-y-2.5" aria-hidden>
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-[76px] animate-pulse rounded-2xl bg-white dark:bg-slate-900" />
-          ))}
-        </div>
+        <RowsBone count={3} />
       ) : !s.sessions.length ? (
         <>
           <EmptyCard icon={CalendarDays} title="No classes scheduled yet">
