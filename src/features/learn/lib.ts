@@ -177,7 +177,14 @@ const allJourneyBadges: Omit<JourneyBadge, "week">[] = [
 export const getBadgesForLength = (totalWeeks: number): JourneyBadge[] => {
   const safeWeeks = Math.max(1, Math.floor(Number(totalWeeks || 1)));
   if (safeWeeks === 1) return [{ ...allJourneyBadges[11], week: 1 }];
-  if (safeWeeks >= 12) return allJourneyBadges.map((b, i) => ({ ...b, week: i + 1 }));
+  if (safeWeeks === 12) return allJourneyBadges.map((b, i) => ({ ...b, week: i + 1 }));
+  // Longer courses spread the 12 designs across every week, like the app.
+  if (safeWeeks > 12) {
+    return Array.from({ length: Math.min(safeWeeks, 52) }, (_, i) => {
+      const idx = Math.min(11, Math.max(0, Math.round((i / (Math.min(safeWeeks, 52) - 1)) * 11)));
+      return { ...allJourneyBadges[idx], week: i + 1 };
+    });
+  }
 
   const indices = [0];
   const middleCount = safeWeeks - 2;

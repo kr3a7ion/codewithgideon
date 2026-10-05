@@ -232,29 +232,40 @@ const UpdatesSkeleton = () => (
   </div>
 );
 
-const BadgesSkeleton = () => (
-  <div className="space-y-5 lg:space-y-6">
-    <HeaderBone />
-    <div className="rounded-3xl p-6 sm:p-8" style={{ background: "linear-gradient(135deg, #0F2B5B, #136B72)" }}>
-      <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <Bone onDark className="h-14 w-14 rounded-2xl" />
-          <Bone onDark className="mt-5 h-8 w-56 max-w-full rounded-lg" />
+/** The Badges page below its title, while classes or the course load. */
+export const BadgesBodyBone: React.FC = () => (
+  <div className="space-y-6 lg:space-y-7" aria-hidden>
+    <div className="rounded-[28px] bg-blue-900 p-5 sm:p-8">
+      <div className="flex flex-col items-center gap-5 sm:flex-row sm:gap-8">
+        <Bone onDark className="h-[148px] w-[148px] rounded-full sm:h-[168px] sm:w-[168px]" />
+        <div className="flex w-full min-w-0 flex-1 flex-col items-center sm:items-start">
+          <Bone onDark className="h-3.5 w-36" />
+          <Bone onDark className="mt-3 h-9 w-56 max-w-full rounded-lg" />
           <Bone onDark className="mt-3 h-4 w-72 max-w-full" />
+          <Bone onDark className="mt-6 h-2.5 w-full max-w-md rounded-full" />
         </div>
-        <Bone onDark className="h-[104px] w-full rounded-2xl sm:w-[200px]" />
+      </div>
+      <Bone onDark className="mt-6 h-[72px] w-full rounded-2xl" />
+    </div>
+    <div className="space-y-3">
+      <Bone onCanvas className="h-6 w-36 rounded-lg" />
+      <div className="grid grid-cols-2 gap-y-10 rounded-[20px] border border-line bg-white px-2 py-8 dark:border-line-dark dark:bg-slate-900 sm:grid-cols-3 sm:px-6 lg:grid-cols-4">
+        {Array.from({ length: 8 }, (_, i) => (
+          <div key={i} className="flex flex-col items-center">
+            <Bone className="h-[78px] w-[78px] rounded-full sm:h-[84px] sm:w-[84px]" />
+            <Bone className="mt-3 h-3 w-14" />
+            <Bone className="mt-2 h-4 w-24" />
+          </div>
+        ))}
       </div>
     </div>
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4" aria-hidden>
-      {Array.from({ length: 8 }, (_, i) => (
-        <div key={i} className="rounded-[18px] border border-line bg-white p-4 dark:border-line-dark dark:bg-slate-900">
-          <Bone className="h-9 w-9 rounded-xl" />
-          <Bone className="mt-4 h-3 w-16" />
-          <Bone className="mt-2 h-4 w-[75%]" />
-          <Bone className="mt-2 h-3 w-12" />
-        </div>
-      ))}
-    </div>
+  </div>
+);
+
+const BadgesSkeleton = () => (
+  <div className="space-y-6 lg:space-y-7">
+    <HeaderBone />
+    <BadgesBodyBone />
   </div>
 );
 

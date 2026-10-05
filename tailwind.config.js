@@ -144,6 +144,33 @@ export default {
           "0%": { opacity: "0" },
           "100%": { opacity: "1" },
         },
+        // Badges: a band of light across a medal, the latest badge's glow,
+        // sparkles, and the pop when a badge opens.
+        "badge-shine": {
+          "0%": { transform: "translateX(0)" },
+          "100%": { transform: "translateX(175px)" },
+        },
+        "badge-shine-loop": {
+          "0%, 62%": { transform: "translateX(0)" },
+          "100%": { transform: "translateX(175px)" },
+        },
+        "badge-glow": {
+          "0%, 100%": { filter: "drop-shadow(0 4px 10px var(--badge-glow, rgba(22,152,160,.35)))" },
+          "50%": { filter: "drop-shadow(0 6px 22px var(--badge-glow, rgba(22,152,160,.6)))" },
+        },
+        twinkle: {
+          "0%, 100%": { opacity: "0", transform: "scale(0.4) rotate(0deg)" },
+          "50%": { opacity: "1", transform: "scale(1) rotate(45deg)" },
+        },
+        "badge-pop": {
+          "0%": { opacity: "0", transform: "scale(0.6) rotate(-8deg)" },
+          "60%": { opacity: "1", transform: "scale(1.06) rotate(2deg)" },
+          "100%": { opacity: "1", transform: "scale(1) rotate(0deg)" },
+        },
+        bob: {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-3px)" },
+        },
       },
       animation: {
         "week-in": "week-in 420ms cubic-bezier(.2,.7,.3,1) both",
@@ -151,6 +178,12 @@ export default {
         shimmer: "shimmer 1.6s ease-in-out infinite",
         "load-bar": "load-bar 1.2s ease-in-out infinite",
         "fade-in": "fade-in 200ms ease-out both",
+        "badge-shine": "badge-shine 1.1s cubic-bezier(.4,0,.2,1) both",
+        "badge-shine-loop": "badge-shine-loop 5s cubic-bezier(.4,0,.2,1) infinite",
+        "badge-glow": "badge-glow 3s ease-in-out infinite",
+        twinkle: "twinkle 2.6s ease-in-out infinite",
+        "badge-pop": "badge-pop 520ms cubic-bezier(.2,.8,.3,1.2) both",
+        bob: "bob 2.4s ease-in-out infinite",
       },
     },
   },

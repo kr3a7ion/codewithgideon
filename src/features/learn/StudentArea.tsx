@@ -374,7 +374,7 @@ const StudentArea: React.FC<Props> = ({ profile, onNavigate, onLogout, isDark, o
     community: data.communityLoading,
     chat: data.mentorLoading,
     notifications: data.cohortMessagesLoading,
-    badges: data.courseLoading,
+    badges: data.courseLoading || (data.paymentState === "active" && data.sessionsLoading),
     account: data.paymentsLoading,
     more: false,
   };

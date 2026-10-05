@@ -12,6 +12,36 @@ import VerifyEmailPage from "../src/features/join/VerifyEmailPage";
 import DetailsPage from "../src/features/join/DetailsPage";
 import PaymentPage from "../src/features/join/PaymentPage";
 import { previewProfile } from "./mocks/data";
+import { BadgeMedal, type MedalState } from "../src/features/learn/BadgeMedal";
+import { getBadgesForLength } from "../src/features/learn/lib";
+
+/** Every badge medal in every state, for checking the artwork. */
+const BadgeGallery = () => {
+  const badges = getBadgesForLength(12);
+  const states: MedalState[] = ["latest", "earned", "next", "locked"];
+  return (
+    <div className="student-app min-h-screen bg-mist p-8 dark:bg-paper-dark">
+      {states.map((st) => (
+        <section key={st} className="mb-8">
+          <p className="mb-3 font-bold text-blue-900 dark:text-white">{st}</p>
+          <div className={st === "latest" ? "flex flex-wrap gap-6 rounded-3xl bg-blue-900 p-6" : "flex flex-wrap gap-6 rounded-3xl bg-white p-6 dark:bg-slate-900"}>
+            {badges.map((b) => (
+              <div key={b.week} className="flex w-[120px] flex-col items-center gap-2" data-medal={`${b.week}-${st}`}>
+                <BadgeMedal badge={b} state={st} size={120} />
+                <span className={st === "latest" ? "text-xs font-bold text-white" : "text-xs font-bold text-slate-600 dark:text-slate-300"}>{b.title}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-blue-900 p-4">
+        {badges.map((b) => (
+          <BadgeMedal key={b.week} badge={b} size={26} />
+        ))}
+      </div>
+    </div>
+  );
+};
 
 const params = new URLSearchParams(window.location.search);
 const log = (name: string) => (...args: unknown[]) => console.log(name, ...args);
@@ -74,6 +104,7 @@ const screens = [
   ["/student/dashboard", "Home (active)"],
   ["/student/dashboard?state=locked", "Home (pending)"],
   ["/student/dashboard?state=checking", "Home (checking)"],
+  ["/badges-gallery", "Badge medals (every state)"],
   ["/student/classes", "Classes"],
   ["/student/chat", "Mentor chat"],
   ["/student/resources", "Resources"],
@@ -105,6 +136,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         />
         <Route path="/student/register" element={<DetailsPage onNavigate={log("navigate")} selectedPath="" onGoogleAuth={noGoogle} />} />
         <Route path="/student/payment" element={<Payment />} />
+        <Route path="/badges-gallery" element={<BadgeGallery />} />
         <Route path="/student/*" element={<Student />} />
         <Route
           path="/admin/*"
