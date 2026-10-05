@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { CalendarDays, CalendarPlus, Clock3, Lock, Video } from "lucide-react";
+import { CalendarDays, CalendarPlus, Check, Clock3, Lock, Video } from "lucide-react";
 import type { SessionDoc } from "../../../services/registrationStore";
 import { WhatsAppIcon } from "../../marketing/ui";
 import { cn } from "../../ui";
@@ -9,6 +9,7 @@ import { addToCalendar } from "./calendar";
 import { getBadgesForLength, studentSectionRoutes } from "./lib";
 import { sessionInfo, startsIn } from "./time";
 import { UpdatesBell } from "./ui";
+import { Bone, TrackBone } from "./Skeleton";
 
 // ---------------------------------------------------------------------------
 // Week track: the whole course as a row of weeks
@@ -17,9 +18,11 @@ import { UpdatesBell } from "./ui";
 type BlockState = "done" | "current" | "ready" | "chosen" | "locked";
 
 /**
- * The course as one block per week. Paid weeks are teal, the week the
- * student is on glows, weeks they chose but haven't paid for are outlined,
- * and the rest are locked. The blocks fill in once when the page loads.
+ * The course as one block per week. Finished weeks are teal with a white
+ * tick, the week the student is on is deeper teal with its number in white
+ * and a soft glow, paid weeks still to come are pale teal, weeks they chose
+ * but haven't paid for are outlined, and the rest are locked. The blocks
+ * fill in once when the page loads.
  */
 export const WeekTrack: React.FC<{
   total: number;
@@ -56,9 +59,14 @@ export const WeekTrack: React.FC<{
               aria-hidden
               style={{ animationDelay: `${120 + i * 45}ms` }}
               className={cn(
-                "flex h-8 min-w-0 flex-1 origin-bottom animate-week-in items-center justify-center rounded-[7px] text-[11px] font-bold motion-reduce:animate-none sm:h-10 sm:rounded-lg sm:text-xs",
-                st === "done" && (light ? "bg-teal-600" : "bg-teal-500"),
-                st === "current" && (light ? "bg-teal-400 text-blue-950" : "bg-teal-300 text-blue-950"),
+                "flex h-8 min-w-0 flex-1 origin-bottom animate-week-in items-center justify-center rounded-[7px] text-[11px] font-bold leading-none motion-reduce:animate-none sm:h-10 sm:rounded-lg sm:text-xs",
+                st === "done" && "bg-teal-500 text-white",
+                // White on teal-600/700 passes 4.5:1 for the small week number.
+                // A bright inner edge marks it as "you are here" on dark backgrounds.
+                st === "current" &&
+                  (light
+                    ? "bg-teal-700 text-white dark:bg-teal-600 dark:ring-2 dark:ring-inset dark:ring-teal-300"
+                    : "bg-teal-600 text-white ring-2 ring-inset ring-teal-300"),
                 st === "ready" && (light ? "border border-teal-300 bg-teal-50 dark:border-teal-700 dark:bg-teal-950" : "border border-teal-300/60 bg-teal-400/25"),
                 st === "chosen" && (light ? "border border-dashed border-slate-400 bg-white dark:bg-slate-900" : "border border-dashed border-white/50 bg-white/[0.06]"),
                 st === "locked" && (light ? "bg-paper text-slate-400 dark:bg-slate-800 dark:text-slate-500" : "bg-white/[0.08] text-white/35"),
@@ -66,8 +74,12 @@ export const WeekTrack: React.FC<{
             >
               {st === "current" ? (
                 <span className="flex h-full w-full items-center justify-center rounded-[inherit] animate-week-glow motion-reduce:animate-none">
-                  <span className="hidden sm:inline">W{w}</span>
+                  {/* Long courses leave little room on phones: number only. */}
+                  <span className={total > 12 ? "sm:hidden" : "hidden"}>{w}</span>
+                  <span className={total > 12 ? "hidden sm:inline" : undefined}>W{w}</span>
                 </span>
+              ) : st === "done" && total <= 16 ? (
+                <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={3} />
               ) : st === "locked" && total <= 16 ? (
                 <Lock className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
               ) : null}
@@ -115,10 +127,13 @@ export const HomeHero: React.FC<{
   reviewAmount?: number;
   whatsapp: string;
   unreadUpdates: boolean;
+  /** The course length isn't known yet: show placeholder weeks. */
+  progressLoading?: boolean;
   onPay: () => void;
 }> = (p) => {
   const badges = getBadgesForLength(p.totalWeeks);
-  const badge = p.state === "active" && p.paidWeeks ? badges[Math.max(0, Math.min(p.currentWeek || 1, badges.length) - 1)] : null;
+  // The badge depends on the current week, which needs the classes.
+  const badge = p.state === "active" && p.paidWeeks && !p.loading ? badges[Math.max(0, Math.min(p.currentWeek || 1, badges.length) - 1)] : null;
   const i = p.session ? sessionInfo(p.session) : null;
   const live = i?.phase === "live";
 
@@ -232,36 +247,47 @@ export const HomeHero: React.FC<{
               {title}
             </h2>
           ) : (
-            <div className="mt-3 h-10 w-2/3 animate-pulse rounded-lg bg-white/10" aria-hidden />
+            <div className="mt-3 space-y-2">
+              <Bone onDark className="h-8 w-[80%] max-w-[460px] rounded-lg sm:h-9" />
+              <Bone onDark className="h-8 w-[50%] max-w-[300px] rounded-lg sm:h-9" />
+            </div>
           )}
           {body ? <div className="mt-3 max-w-[60ch] text-[15px] font-semibold leading-6 text-white/85">{body}</div> : null}
           {actions ? <div className="mt-5 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:gap-4">{actions}</div> : null}
         </div>
 
-        <div className="mt-7 border-t border-white/10 pt-5 sm:mt-9">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <p className="text-sm font-bold text-white">
-              {p.state === "active"
-                ? `${p.paidWeeks} of ${p.totalWeeks} weeks unlocked`
-                : p.state === "checking"
-                  ? `${plural(p.intendedWeeks, "week")} waiting to unlock`
-                  : `${plural(p.intendedWeeks, "week")} chosen, not paid yet`}
-            </p>
-            {badge ? (
-              <Link
-                to={studentSectionRoutes.badges}
-                className="inline-flex items-center gap-2 rounded-full bg-white/10 py-1 pl-1.5 pr-3 text-[13px] font-bold text-white hover:bg-white/15"
-              >
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/15 text-sm" aria-hidden>
-                  {badge.badge}
-                </span>
-                {badge.title}
-                <span className="sr-only">: your week {badge.week} badge</span>
-              </Link>
-            ) : null}
+        {p.progressLoading ? (
+          <div className="mt-7 border-t border-white/10 pt-5 sm:mt-9" aria-hidden>
+            <Bone onDark className="mb-3 h-5 w-40" />
+            <TrackBone onDark />
+            <div className="mt-2 h-4" />
           </div>
-          <WeekTrack total={p.totalWeeks} paid={p.state === "active" ? p.paidWeeks : 0} current={p.state === "active" ? p.currentWeek : 0} chosen={p.state === "active" ? 0 : p.intendedWeeks} />
-        </div>
+        ) : (
+          <div className="mt-7 border-t border-white/10 pt-5 sm:mt-9">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              <p className="text-sm font-bold text-white">
+                {p.state === "active"
+                  ? `${p.paidWeeks} of ${p.totalWeeks} weeks unlocked`
+                  : p.state === "checking"
+                    ? `${plural(p.intendedWeeks, "week")} waiting to unlock`
+                    : `${plural(p.intendedWeeks, "week")} chosen, not paid yet`}
+              </p>
+              {badge ? (
+                <Link
+                  to={studentSectionRoutes.badges}
+                  className="inline-flex items-center gap-2 rounded-full bg-white/10 py-1 pl-1.5 pr-3 text-[13px] font-bold text-white hover:bg-white/15"
+                >
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/15 text-sm" aria-hidden>
+                    {badge.badge}
+                  </span>
+                  {badge.title}
+                  <span className="sr-only">: your week {badge.week} badge</span>
+                </Link>
+              ) : null}
+            </div>
+            <WeekTrack total={p.totalWeeks} paid={p.state === "active" ? p.paidWeeks : 0} current={p.state === "active" ? p.currentWeek : 0} chosen={p.state === "active" ? 0 : p.intendedWeeks} />
+          </div>
+        )}
       </div>
     </section>
   );

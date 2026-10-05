@@ -193,7 +193,12 @@ export const useStudentData = (
   // student intends to buy, so nothing counts as paid yet.
   const intendedWeeks = Math.max(1, Number(profile?.weeksToCommit || 1));
   const paidWeeks = isEnrolled ? Math.max(0, Number(profile?.weeksToCommit || 0)) : 0;
-  const totalProgramWeeks = Math.max(1, Number(courseMaxWeeks || 1));
+  // Until the course loads, fall back to the length saved on the profile, and
+  // never show fewer weeks than the student has paid for.
+  const profileWeeks = Number(profile?.courseDurationWeeks || 0);
+  const totalProgramWeeks = Math.max(1, paidWeeks, Number(courseMaxWeeks || profileWeeks || 1));
+  /** True while we don't know how long the course is yet. */
+  const courseWeeksLoading = courseLoading && !(courseMaxWeeks > 0 || profileWeeks > 0);
   const hasCoursePricing = courseMaxWeeks > 0 && weeklyRate > 0 && !courseError;
   const progressPercent = clamp((paidWeeks / totalProgramWeeks) * 100, 0, 100);
   const remainingWeeks = Math.max(0, totalProgramWeeks - paidWeeks);
@@ -636,6 +641,7 @@ export const useStudentData = (
     courseCadence,
     weeklyRate,
     totalProgramWeeks,
+    courseWeeksLoading,
     hasCoursePricing,
     isEnrolled,
     isLocked,

@@ -7,6 +7,7 @@ import { TextField } from "../../join/ui";
 import { useStudent } from "../StudentDataContext";
 import { WeekTrack } from "../HomeHero";
 import { StudentPageHeader } from "../StudentPageHeader";
+import { CourseCardBone, PaymentRowsBone } from "../Skeleton";
 import { ReceiptDialog, statusLabel } from "../components/ReceiptDialog";
 import { channelLabel, type PaymentRecord } from "../usePayments";
 import { dateLabel } from "../time";
@@ -95,52 +96,57 @@ const Account: React.FC = () => {
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start lg:gap-6">
         <div className="space-y-5 lg:space-y-6">
           {/* Weeks */}
-          <Card as="section" aria-labelledby="account-course" className="space-y-5 p-5 sm:p-6">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h2 id="account-course" className="font-display text-xl font-semibold leading-7 text-blue-900 dark:text-white">
-                  {s.courseTitle || "Your course"}
-                </h2>
-                <p className="mt-0.5 text-sm font-medium text-slate-500 dark:text-slate-400">
-                  {[s.cohortLabel, s.weeklyRate ? `${naira(s.weeklyRate)} a week` : ""].filter(Boolean).join(" · ")}
+          {/* Wait for the course so the price and weeks are right. */}
+          {s.courseLoading ? (
+            <CourseCardBone />
+          ) : (
+            <Card as="section" aria-labelledby="account-course" className="space-y-5 p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 id="account-course" className="font-display text-xl font-semibold leading-7 text-blue-900 dark:text-white">
+                    {s.courseTitle || "Your course"}
+                  </h2>
+                  <p className="mt-0.5 text-sm font-medium text-slate-500 dark:text-slate-400">
+                    {[s.cohortLabel, s.weeklyRate ? `${naira(s.weeklyRate)} a week` : ""].filter(Boolean).join(" · ")}
+                  </p>
+                </div>
+                {state === "active" ? <Tag tone="learn">{remaining ? "Active" : "Full course"}</Tag> : state === "pending" ? <Tag tone="hire">Payment pending</Tag> : <Tag tone="neutral">Checking payment</Tag>}
+              </div>
+              <div className="space-y-3">
+                <p className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="font-display text-[28px] font-bold leading-9 tracking-[-0.02em] text-blue-900 dark:text-white">
+                    {s.paidWeeks} of {plural(s.totalProgramWeeks, "week")}
+                  </span>
+                  <span className="text-sm font-medium text-slate-500 dark:text-slate-400">unlocked</span>
                 </p>
+                <WeekTrack tone="light" total={s.totalProgramWeeks} paid={s.paidWeeks} current={s.currentWeek} chosen={state === "active" ? 0 : s.intendedWeeks} />
               </div>
-              {state === "active" ? <Tag tone="learn">{remaining ? "Active" : "Full course"}</Tag> : state === "pending" ? <Tag tone="hire">Payment pending</Tag> : <Tag tone="neutral">Checking payment</Tag>}
-            </div>
-            <div className="space-y-3">
-              <p className="flex flex-wrap items-baseline gap-x-2">
-                <span className="font-display text-[28px] font-bold leading-9 tracking-[-0.02em] text-blue-900 dark:text-white">
-                  {s.paidWeeks} of {plural(s.totalProgramWeeks, "week")}
-                </span>
-                <span className="text-sm font-medium text-slate-500 dark:text-slate-400">unlocked</span>
-              </p>
-              <WeekTrack tone="light" total={s.totalProgramWeeks} paid={s.paidWeeks} current={s.currentWeek} chosen={state === "active" ? 0 : s.intendedWeeks} />
-            </div>
-            <div className="grid grid-cols-3 gap-2 sm:gap-3">
-              <StatTile label="Paid so far" value={naira(s.paidSoFar)} />
-              <StatTile label="To finish the course" value={naira(remaining * s.weeklyRate)} />
-              <StatTile label="Weeks left" value={String(remaining)} />
-            </div>
-            {state === "active" && s.canTopUp && !s.topUpInReview ? (
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-                <button type="button" onClick={s.openTopUp} className={mbtn({ kind: "learn", size: "lg" })}>
-                  Add weeks <Plus className="h-5 w-5" aria-hidden />
-                </button>
-                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Pay for as many weeks as you like, whenever you're ready.</p>
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                <StatTile label="Paid so far" value={naira(s.paidSoFar)} />
+                <StatTile label="To finish the course" value={naira(remaining * s.weeklyRate)} />
+                <StatTile label="Weeks left" value={String(remaining)} />
               </div>
-            ) : state === "pending" ? (
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-                <button type="button" onClick={s.continuePayment} className={mbtn({ kind: "learn", size: "lg" })}>
-                  {s.weeklyRate ? `Pay ${naira(s.intendedWeeks * s.weeklyRate)}` : "Finish payment"}
-                </button>
-                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">For the {plural(s.intendedWeeks, "week")} you chose.</p>
-              </div>
-            ) : s.reviewPayment ? (
-              <Notice tone="review" role="status" title="We're confirming a payment">
-                Paystack received {naira(s.reviewPayment.amountKobo / 100)}. You don't need to pay again.
-              </Notice>
-            ) : null}
-          </Card>
+              {state === "active" && s.canTopUp && !s.topUpInReview ? (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+                  <button type="button" onClick={s.openTopUp} className={mbtn({ kind: "learn", size: "lg" })}>
+                    Add weeks <Plus className="h-5 w-5" aria-hidden />
+                  </button>
+                  <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Pay for as many weeks as you like, whenever you're ready.</p>
+                </div>
+              ) : state === "pending" ? (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+                  <button type="button" onClick={s.continuePayment} className={mbtn({ kind: "learn", size: "lg" })}>
+                    {s.weeklyRate ? `Pay ${naira(s.intendedWeeks * s.weeklyRate)}` : "Finish payment"}
+                  </button>
+                  <p className="text-sm font-medium text-slate-500 dark:text-slate-400">For the {plural(s.intendedWeeks, "week")} you chose.</p>
+                </div>
+              ) : s.reviewPayment ? (
+                <Notice tone="review" role="status" title="We're confirming a payment">
+                  Paystack received {naira(s.reviewPayment.amountKobo / 100)}. You don't need to pay again.
+                </Notice>
+              ) : null}
+            </Card>
+          )}
 
           {/* History */}
           <Card as="section" aria-labelledby="account-history" className="overflow-hidden">
@@ -148,8 +154,11 @@ const Account: React.FC = () => {
               Payment history
             </h2>
             {s.paymentsLoading ? (
-              <div className="flex justify-center px-5 py-8">
-                <Spinner label="Loading payments" className="text-teal-600" />
+              <div className="px-5 pb-3 sm:px-6">
+                <p className="sr-only" role="status">
+                  Loading payments…
+                </p>
+                <PaymentRowsBone />
               </div>
             ) : s.paymentsError ? (
               <div className="px-5 pb-5 sm:px-6">

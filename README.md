@@ -472,7 +472,9 @@ The preview harness is useful for UI work. `http://localhost:5174/` lists
 every screen: the join pages, each checkout state (`?phase=success`,
 `verifying`, `failed&stage=verify`, `?state=checking`), and the student area
 in each state (`?state=active`, `locked`, `checking`, `empty`; add
-`&theme=dark`). `http://localhost:5174/admin/today` opens the admin area.
+`&theme=dark`). Add `&slow=3000` to delay every mock call by that many
+milliseconds and check the loading states. `http://localhost:5174/admin/today`
+opens the admin area.
 Admin actions work against in-memory sample data, so you can try flows like
 generating a schedule without touching real data.
 

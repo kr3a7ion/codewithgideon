@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useMemo, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Award,
@@ -21,33 +21,59 @@ import type { RegistrationEntry } from "../../../services/registrationStore";
 import { BrandMark, Lockup, mbtn } from "../../marketing/ui";
 import { useContactLinks } from "../../marketing/useContactLinks";
 import { cn } from "../../ui";
-import { Avatar, Card, IconTile, Spinner } from "../shared/ui";
+import { Avatar, Card, IconTile } from "../shared/ui";
 import { useStudentData, type MentorContext } from "./useStudentData";
 import { StudentDataProvider, type StudentActions } from "./StudentDataContext";
 import { AddWeeksDialog } from "./components/AddWeeksDialog";
 import { UpdatesBell } from "./ui";
+import { SectionSkeleton, TopLoadingBar } from "./Skeleton";
 import { sectionFromPathname, studentSectionRoutes, type StudentSection } from "./lib";
 
-const Home = lazy(() => import("./sections/Home"));
-const Classes = lazy(() => import("./sections/Classes"));
-const Resources = lazy(() => import("./sections/Resources"));
-const Community = lazy(() => import("./sections/Community"));
-const MentorChat = lazy(() => import("./sections/MentorChat"));
-const Updates = lazy(() => import("./sections/Updates"));
-const Badges = lazy(() => import("./sections/Badges"));
-const Account = lazy(() => import("./sections/Account"));
-const More = lazy(() => import("./sections/More"));
+// Each section's code downloads on its own. `preloadSection` starts a
+// download early (once the app is idle, or when a tab is hovered or
+// touched) so switching tabs is instant even on a slow connection.
+const loaders: Record<StudentSection, () => Promise<{ default: React.ComponentType }>> = {
+  dashboard: () => import("./sections/Home"),
+  classes: () => import("./sections/Classes"),
+  resources: () => import("./sections/Resources"),
+  community: () => import("./sections/Community"),
+  chat: () => import("./sections/MentorChat"),
+  notifications: () => import("./sections/Updates"),
+  badges: () => import("./sections/Badges"),
+  account: () => import("./sections/Account"),
+  more: () => import("./sections/More"),
+};
 
-const sectionComponents: Record<StudentSection, React.ComponentType> = {
-  dashboard: Home,
-  classes: Classes,
-  resources: Resources,
-  community: Community,
-  chat: MentorChat,
-  notifications: Updates,
-  badges: Badges,
-  account: Account,
-  more: More,
+const started = new Map<StudentSection, Promise<unknown>>();
+const preloadSection = (section: StudentSection) => {
+  if (!started.has(section)) started.set(section, loaders[section]().catch(() => started.delete(section)));
+};
+
+const sectionComponents = Object.fromEntries(
+  (Object.keys(loaders) as StudentSection[]).map((key) => [
+    key,
+    lazy(() => {
+      preloadSection(key);
+      return loaders[key]();
+    }),
+  ]),
+) as unknown as Record<StudentSection, React.ComponentType>;
+
+/** Fetch every section in the background, unless the device asks to save data. */
+const usePreloadSections = (enabled: boolean) => {
+  useEffect(() => {
+    if (!enabled) return;
+    const saveData = Boolean((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData);
+    if (saveData) return;
+    const run = () => (Object.keys(loaders) as StudentSection[]).forEach(preloadSection);
+    const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
+    if (w.requestIdleCallback) {
+      const id = w.requestIdleCallback(run, { timeout: 2500 });
+      return () => w.cancelIdleCallback?.(id);
+    }
+    const t = window.setTimeout(run, 1200);
+    return () => window.clearTimeout(t);
+  }, [enabled]);
 };
 
 export const sectionTitles: Record<StudentSection, string> = {
@@ -89,6 +115,8 @@ const Sidebar: React.FC<{
     <li key={item.key}>
       <NavLink
         to={studentSectionRoutes[item.key]}
+        onMouseEnter={() => preloadSection(item.key)}
+        onFocus={() => preloadSection(item.key)}
         className={({ isActive }) =>
           cn(
             "flex h-11 items-center gap-3 rounded-xl px-3 text-[15px] transition-colors",
@@ -158,6 +186,8 @@ const TabBar: React.FC<{ items: NavItem[] }> = ({ items }) => (
         <li key={item.key}>
           <NavLink
             to={studentSectionRoutes[item.key]}
+            onTouchStart={() => preloadSection(item.key)}
+            onMouseEnter={() => preloadSection(item.key)}
             className={({ isActive }) =>
               cn("flex h-full flex-col items-center justify-center gap-1 text-[11px]", isActive ? "font-bold text-teal-700 dark:text-teal-300" : "font-semibold text-slate-500 dark:text-slate-400")
             }
@@ -202,6 +232,8 @@ const StudentArea: React.FC<Props> = ({ profile, onNavigate, onLogout, isDark, o
   const { apk } = useContactLinks();
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [chatContext, setChatContext] = useState<MentorContext | null>(null);
+  const [chunkLoading, setChunkLoading] = useState(false);
+  usePreloadSections(Boolean(profile));
 
   const paymentBase = useMemo(
     () =>
@@ -334,12 +366,26 @@ const StudentArea: React.FC<Props> = ({ profile, onNavigate, onLogout, isDark, o
     { key: "more", label: "More", icon: MoreHorizontal },
   ];
 
+  // What each section is still waiting for, for the top loading bar.
+  const sectionBusy: Record<StudentSection, boolean> = {
+    dashboard: data.paymentsLoading || data.courseLoading || (data.paymentState === "active" && data.sessionsLoading),
+    classes: data.paymentState === "active" && data.sessionsLoading,
+    resources: data.paymentState === "active" && data.resourcesLoading,
+    community: data.communityLoading,
+    chat: data.mentorLoading,
+    notifications: data.cohortMessagesLoading,
+    badges: data.courseLoading,
+    account: data.paymentsLoading,
+    more: false,
+  };
+
   const Section = sectionComponents[activeSection];
   const isChat = activeSection === "chat";
 
   return (
     <StudentDataProvider value={{ ...data, ...actions }}>
       <div className="student-app min-h-screen bg-mist dark:bg-paper-dark">
+        <TopLoadingBar active={chunkLoading || sectionBusy[activeSection]} />
         <Sidebar main={mainNav} account={accountNav} name={profile.fullName} status={status} apk={apk} onLogout={onLogout} />
 
         {/* Phone header */}
@@ -361,13 +407,9 @@ const StudentArea: React.FC<Props> = ({ profile, onNavigate, onLogout, isDark, o
               isChat ? "pb-16 pt-0 sm:pt-6 lg:pb-8 lg:pt-8" : activeSection === "dashboard" ? "pb-28 pt-0 sm:pt-6 lg:pb-16 lg:pt-8" : "pb-28 pt-5 sm:pt-6 lg:pb-16 lg:pt-8",
             )}
           >
-            <Suspense
-              fallback={
-                <div className="flex items-center justify-center gap-3 py-24 text-sm font-semibold text-slate-500">
-                  <Spinner className="text-teal-600" /> Loading…
-                </div>
-              }
-            >
+            {/* Keyed by section: a new boundary shows its outline straight
+                away instead of leaving the old page up while code downloads. */}
+            <Suspense key={activeSection} fallback={<SectionSkeleton section={activeSection} label={sectionTitles[activeSection]} onShow={setChunkLoading} />}>
               <Section />
             </Suspense>
           </div>

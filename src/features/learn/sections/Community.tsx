@@ -4,6 +4,7 @@ import { mbtn } from "../../../marketing/ui";
 import { Card, IconTile } from "../../shared/ui";
 import { useStudent } from "../StudentDataContext";
 import { StudentPageHeader } from "../StudentPageHeader";
+import { SpaceCardsBone } from "../Skeleton";
 import { EmptyCard } from "../ui";
 
 const Community: React.FC = () => {
@@ -12,11 +13,7 @@ const Community: React.FC = () => {
     <div className="space-y-5 lg:space-y-6">
       <StudentPageHeader title="Community" description="Cohort rooms, study groups and links for your course." />
       {s.communityLoading ? (
-        <div className="grid gap-4 md:grid-cols-2" aria-hidden>
-          {[1, 2].map((i) => (
-            <div key={i} className="h-44 animate-pulse rounded-[20px] bg-white dark:bg-slate-900" />
-          ))}
-        </div>
+        <SpaceCardsBone />
       ) : s.communitySpaces.length === 0 ? (
         <EmptyCard icon={Users} title="No spaces yet">
           Cohort rooms and study groups show here once Gideon opens them for your course.

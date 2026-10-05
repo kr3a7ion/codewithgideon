@@ -5,6 +5,7 @@ import { upcomingCohortLabel, useContactLinks } from "../../../marketing/useCont
 import { Avatar, Card, Notice, naira, plural } from "../../shared/ui";
 import { useStudent } from "../StudentDataContext";
 import { HomeHero } from "../HomeHero";
+import { RowsBone } from "../Skeleton";
 import { EmptyCard, LockedRow, RecordingCard, ResourceRow, SectionHead, SessionRow, UpdateRow } from "../ui";
 import { ago, greeting } from "../time";
 import { toMs } from "../lib";
@@ -77,6 +78,7 @@ const Home: React.FC = () => {
       reviewAmount={reviewAmount}
       whatsapp={whatsapp}
       unreadUpdates={s.unreadNotificationCount > 0}
+      progressLoading={s.courseWeeksLoading}
       onPay={s.continuePayment}
     />
   );
@@ -139,7 +141,7 @@ const Home: React.FC = () => {
 
   // The hero already shows the weeks; this card is the way to add more.
   const weeksCard =
-    state === "active" ? (
+    state === "active" && !s.courseWeeksLoading ? (
       <Card as="section" aria-labelledby="home-weeks" className="p-5 sm:p-6">
         <div className="flex items-center justify-between gap-3">
           <h2 id="home-weeks" className="font-display text-lg font-semibold leading-6 text-blue-900 dark:text-white">
@@ -208,7 +210,7 @@ const Home: React.FC = () => {
     <section aria-labelledby="home-updates" className="space-y-3">
       <SectionHead title="Updates" id="home-updates" action={{ label: "See all", onClick: () => s.goTo("notifications") }} />
       {s.cohortMessagesLoading ? (
-        <div className="h-24 animate-pulse rounded-2xl bg-white dark:bg-slate-900" aria-hidden />
+        <RowsBone count={2} kind="item" />
       ) : updates.length ? (
         <ul className="space-y-2.5">
           {updates.map((m) => (
