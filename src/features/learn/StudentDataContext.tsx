@@ -1,11 +1,21 @@
-import React, { createContext, useContext } from "react";
-import type { StudentData } from "./useStudentData";
+import { createContext, useContext } from "react";
+import type { MentorContext, StudentData } from "./useStudentData";
 import type { StudentSection } from "./lib";
 
 export type StudentActions = {
   goTo: (section: StudentSection) => void;
+  /** First payment (or an unfinished checkout). */
   continuePayment: () => void;
+  /** Opens the Add weeks dialog. */
   openTopUp: () => void;
+  logout: () => void;
+  /** Opens Mentor chat with a class attached to the next message. */
+  askAbout: (context: MentorContext) => void;
+  chatContext: MentorContext | null;
+  setChatContext: (context: MentorContext | null) => void;
+  firstName: string;
+  isDark?: boolean;
+  onToggleTheme?: () => void;
 };
 
 const StudentDataContext = createContext<(StudentData & StudentActions) | null>(null);

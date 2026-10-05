@@ -14,6 +14,11 @@ export default defineConfig({
   plugins: [react()],
   server: { port: 5174, host: "0.0.0.0" },
   appType: "spa",
+  // Checkout needs these to show the pay button; nothing is charged in the preview.
+  define: {
+    "import.meta.env.VITE_PAYSTACK_PUBLIC_KEY": JSON.stringify("pk_test_preview"),
+    "import.meta.env.VITE_VERIFY_PAYSTACK_URL": JSON.stringify("https://example.invalid/verify"),
+  },
   resolve: {
     alias: [
       { find: /^firebase\/firestore$/, replacement: mock("firestore.ts") },
@@ -21,6 +26,7 @@ export default defineConfig({
       { find: /.*\/services\/firebase$/, replacement: mock("firebase.ts") },
       { find: /^\.\/firebase$/, replacement: mock("firebase.ts") },
       { find: /.*\/services\/registrationStore$/, replacement: mock("registrationStore.ts") },
+      { find: /.*\/app\/AppContext$/, replacement: mock("appContext.tsx") },
       { find: "@", replacement: root },
     ],
   },

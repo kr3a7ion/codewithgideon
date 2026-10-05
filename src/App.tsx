@@ -199,12 +199,14 @@ const PaymentPage = () => {
 };
 
 const StudentDashboardPage = () => {
-  const { studentProfile, navigateTo, logoutStudent } = useApp();
+  const { studentProfile, navigateTo, logoutStudent, isDark, toggleTheme } = useApp();
   return (
     <StudentDashboard
       profile={studentProfile}
       onNavigate={navigateTo}
       onLogout={logoutStudent}
+      isDark={isDark}
+      onToggleTheme={toggleTheme}
     />
   );
 };

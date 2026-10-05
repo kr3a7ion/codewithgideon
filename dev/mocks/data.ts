@@ -3,7 +3,12 @@ import { Timestamp } from "./timestamp";
 const now = Date.now();
 const day = 86_400_000;
 const params = new URLSearchParams(window.location.search);
-export const previewState = params.get("state") || "active"; // active | locked | empty
+export const previewState = params.get("state") || "active"; // active | locked | checking | empty
+const unpaid = previewState === "locked" || previewState === "checking";
+const ymd = (ms: number) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 const sessions = [1, 2, 3, 4, 5].map((week) => ({
   id: `W0${week}`,
@@ -33,8 +38,8 @@ export const previewProfile: any = {
   path: "Flutter & Mobile App Development",
   pathId: "path_flutter",
   courseId: "course_flutter",
-  status: previewState === "locked" ? "Pending" : "Complete",
-  weeksToCommit: previewState === "locked" ? 4 : 5,
+  status: unpaid ? "Pending" : "Complete",
+  weeksToCommit: unpaid ? 4 : 5,
   totalPrice: 50000,
   cohortId: "FLUTTER",
   cohortKey: "FLUTTER-2026-09",
@@ -68,7 +73,22 @@ export const previewSpaces = empty
     ];
 
 export const previewDb: Record<string, any> = {
-  "config/app": null,
+  "config/app": {
+    apkDownloadUrl: "https://example.com/codewithgideon.apk",
+    nextCohortDate: ymd(now + 9 * day),
+    responseTime: "Within a few hours",
+  },
+  "users/student_1/payments":
+    previewState === "checking"
+      ? [
+          { id: "CWG_R1", reference: "CWG_MFX9Q_4K2", status: "needs_review", reviewReason: "amount_mismatch", kind: "initial", weeks: 0, requestedWeeks: 4, weeklyRate: 10000, baseAmount: 0, amountKobo: 4000000, email: "ada@example.com", path: "Flutter & Mobile App Development", timestamp: now - 5 * 3600_000, paystack: { channel: "bank_transfer", paidAt: new Date(now - 5 * 3600_000).toISOString() } },
+        ]
+      : previewState === "locked"
+        ? []
+        : [
+            { id: "CWG_A1", reference: "CWG_MD3K1_7Q", status: "success", kind: "initial", weeks: 3, weeklyRate: 10000, baseAmount: 30000, amountKobo: 3045000, email: "ada@example.com", path: "Flutter & Mobile App Development", cohortLabel: "September 2026 Cohort", timestamp: now - 30 * day, paystack: { channel: "card", paidAt: new Date(now - 30 * day).toISOString() } },
+            { id: "CWG_A2", reference: "CWG_ME8Z2_1M", status: "success", kind: "topup", weeks: 2, weeklyRate: 10000, baseAmount: 20000, amountKobo: 2030000, email: "ada@example.com", path: "Flutter & Mobile App Development", cohortLabel: "September 2026 Cohort", timestamp: now - 9 * day, paystack: { channel: "bank_transfer", paidAt: new Date(now - 9 * day).toISOString() } },
+          ],
   mentorThreads: [
     { id: "mentor_u1", studentUid: "u1", studentName: "Ada Okafor", studentEmail: "ada@example.com", status: "new", channel: "web_chat", threadType: "student_mentor_chat", sessionTitle: "State management with Riverpod", lastMessage: "My ListView throws an unbounded height error.", lastMessageAt: Timestamp.fromMillis(now - 3600_000), lastMessageSenderType: "user", updatedAt: Timestamp.fromMillis(now - 3600_000), createdAt: Timestamp.fromMillis(now - 7200_000) },
     { id: "mentor_u3", studentUid: "u3", studentName: "Chioma Eze", studentEmail: "chioma@example.com", status: "resolved", channel: "mobile_chat", threadType: "student_mentor_chat", lastMessage: "Thanks, it works now!", lastMessageAt: Timestamp.fromMillis(now - 2 * day), lastMessageSenderType: "user", updatedAt: Timestamp.fromMillis(now - 2 * day), createdAt: Timestamp.fromMillis(now - 3 * day) },
@@ -108,7 +128,7 @@ export const previewDb: Record<string, any> = {
   "mentorThreads/mentor_student_1/messages": empty
     ? []
     : [
-        { id: "a", body: "My ListView throws 'Vertical viewport was given unbounded height'. What am I doing wrong?", senderType: "user", createdAt: Timestamp.fromMillis(now - 3600_000) },
+        { id: "a", body: "My ListView throws 'Vertical viewport was given unbounded height'. What am I doing wrong?", senderType: "user", sessionId: "W03", sessionTitle: "Week 3 · State management with Riverpod", createdAt: Timestamp.fromMillis(now - 3600_000) },
         { id: "b", body: "It's inside a Column, right? Try wrapping the ListView in Expanded so it gets a bounded height.", senderType: "admin", senderName: "Gideon", createdAt: Timestamp.fromMillis(now - 600_000) },
       ],
 };

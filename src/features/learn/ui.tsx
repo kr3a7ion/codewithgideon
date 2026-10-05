@@ -13,11 +13,13 @@ import {
   FileText,
   Link2,
   Lock,
+  MessageSquare,
   PlayCircle,
   Plus,
   Video,
   type LucideIcon,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { ResourceDoc, SessionDoc } from "../../../services/registrationStore";
 import { mbtn, Tag } from "../../marketing/ui";
 import { cn } from "../../ui";
@@ -61,6 +63,21 @@ export const SectionHead: React.FC<{ title: string; id?: string; action?: { labe
       </button>
     ) : null}
   </div>
+);
+
+/** Bell button that opens Updates; shows an orange dot when something is new. */
+export const UpdatesBell: React.FC<{ unread: boolean; className?: string }> = ({ unread, className }) => (
+  <Link
+    to={"/student/notifications"}
+    aria-label={unread ? "Updates, new" : "Updates"}
+    className={cn(
+      "relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-white text-blue-900 hover:border-line-strong dark:border-line-dark dark:bg-slate-900 dark:text-white",
+      className,
+    )}
+  >
+    <Bell className="h-5 w-5" aria-hidden />
+    {unread ? <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-orange-500 ring-2 ring-white dark:ring-slate-900" aria-hidden /> : null}
+  </Link>
 );
 
 // ---------------------------------------------------------------------------
@@ -200,7 +217,7 @@ const WeekTile: React.FC<{ week: number; muted?: boolean; locked?: boolean }> = 
   </span>
 );
 
-export const SessionRow: React.FC<{ session: SessionDoc; courseTitle: string }> = ({ session, courseTitle }) => {
+export const SessionRow: React.FC<{ session: SessionDoc; courseTitle: string; onAsk?: () => void }> = ({ session, courseTitle, onAsk }) => {
   const i = sessionInfo(session);
   const ended = i.phase === "ended";
   const live = i.phase === "live";
@@ -251,6 +268,17 @@ export const SessionRow: React.FC<{ session: SessionDoc; courseTitle: string }> 
           </a>
         ) : null}
         {ended && i.recordingSoon ? <Tag tone="neutral">Recording soon</Tag> : null}
+        {onAsk ? (
+          <button
+            type="button"
+            onClick={onAsk}
+            title="Ask Gideon about this class"
+            className="hidden h-11 w-11 items-center justify-center rounded-xl text-slate-500 hover:bg-paper hover:text-blue-900 dark:hover:bg-slate-800 dark:hover:text-white sm:flex"
+          >
+            <MessageSquare className="h-[18px] w-[18px]" aria-hidden />
+            <span className="sr-only">Ask Gideon about {i.title}</span>
+          </button>
+        ) : null}
       </div>
     </li>
   );
@@ -272,6 +300,8 @@ export const LockedRow: React.FC<{ title: string; meta: string; note?: string }>
 // Weeks card
 // ---------------------------------------------------------------------------
 
+const weekSpan = (n: number) => (n === 1 ? "Week 1" : `Weeks 1 to ${n}`);
+
 export const WeeksCard: React.FC<{
   state: "active" | "pending" | "checking";
   paidWeeks: number;
@@ -283,7 +313,9 @@ export const WeeksCard: React.FC<{
   onAddWeeks: () => void;
   onPay: () => void;
   className?: string;
-}> = ({ state, paidWeeks, totalWeeks, rate, intendedWeeks, currentWeek, canTopUp, onAddWeeks, onPay, className }) => {
+  /** Extra line while a payment is being checked (e.g. what Paystack received). */
+  checkingNote?: string;
+}> = ({ state, paidWeeks, totalWeeks, rate, intendedWeeks, currentWeek, canTopUp, onAddWeeks, onPay, className, checkingNote }) => {
   const remaining = Math.max(0, totalWeeks - paidWeeks);
   const done = state === "active" && remaining === 0;
   return (
@@ -329,7 +361,12 @@ export const WeeksCard: React.FC<{
             <p className="text-slate-500 dark:text-slate-400">Pay to unlock {intendedWeeks === 1 ? "week 1" : `weeks 1 to ${intendedWeeks}`}.</p>
           </>
         ) : (
-          <p className="text-slate-600 dark:text-slate-300">Your weeks unlock as soon as the payment is confirmed.</p>
+          <>
+            {checkingNote ? <p className="text-slate-600 dark:text-slate-300">{checkingNote}</p> : null}
+            <p className={checkingNote ? "text-slate-500 dark:text-slate-400" : "text-slate-600 dark:text-slate-300"}>
+              {intendedWeeks > 0 ? `${weekSpan(intendedWeeks)} ${intendedWeeks === 1 ? "unlocks" : "unlock"} once it's confirmed.` : "Your weeks unlock as soon as the payment is confirmed."}
+            </p>
+          </>
         )}
       </div>
       {state === "active" && canTopUp ? (
@@ -395,7 +432,7 @@ export const ResourceRow: React.FC<{ resource: ResourceDoc }> = ({ resource: r }
       <span className="min-w-0 flex-1">
         <span className="block text-[15px] font-bold leading-5 text-blue-900 dark:text-white">{anyR.name || "Resource"}</span>
         {meta ? <span className="mt-0.5 block text-sm font-medium text-slate-500 dark:text-slate-400">{meta}</span> : null}
-        {anyR.description ? <span className="mt-1 block text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{anyR.description}</span> : null}
+        {anyR.description ? <span className="mt-1 line-clamp-2 text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{anyR.description}</span> : null}
       </span>
     </>
   );

@@ -41,7 +41,13 @@ export type PaymentHandoff = {
   cohortKey?: string;
   courseDurationWeeks?: number;
   weeklyRate?: number;
+  /** Set by the Add weeks dialog: open Paystack as soon as the page is ready. */
+  autoStart?: string;
 };
+
+// Auto-start tokens already used, so going back to this page doesn't open
+// Paystack a second time.
+const autoStarted = new Set<string>();
 
 type Incoming = PaymentHandoff | { selectedPath?: string; userData?: PaymentHandoff } | null | undefined;
 
@@ -143,7 +149,7 @@ const StatusFrame: React.FC<{
   body?: React.ReactNode;
 }> = ({ icon, title, children, focusRef, body }) => (
   <JoinLayout width="medium">
-    <div ref={focusRef} tabIndex={-1} className="space-y-6 outline-none sm:space-y-8">
+    <div ref={focusRef} tabIndex={-1} className="space-y-6 outline-none focus-visible:ring-0 focus-visible:ring-offset-0 sm:space-y-8">
       <div className="space-y-4 text-center sm:space-y-5">
         <div className="flex justify-center">{icon}</div>
         <JoinTitle title={title} center>
@@ -172,7 +178,9 @@ const PaymentPage: React.FC<{
   selectedPath: string;
   userData: Incoming;
   onPaymentSuccess?: (newTotalWeeks: number) => void;
-}> = ({ onNavigate, selectedPath, userData, onPaymentSuccess }) => {
+  /** UI preview only (npm run preview:ui): start on a given screen. */
+  preview?: { phase: Phase; failedStage?: "start" | "verify"; reference?: string };
+}> = ({ onNavigate, selectedPath, userData, onPaymentSuccess, preview }) => {
   const navigate = useNavigate();
   const { studentProfile } = useApp();
   const { whatsapp, apk, nextCohortDate } = useContactLinks();
@@ -191,12 +199,12 @@ const PaymentPage: React.FC<{
   const authUid = auth.currentUser?.uid || "";
   const isTopUp = !!u.isTopUp;
 
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [phase, setPhase] = useState<Phase>(preview?.phase || "idle");
   // "start": checkout never opened, safe to try again.
   // "verify": the student may already have paid, so we re-check instead of
   // letting them pay twice.
-  const [failedStage, setFailedStage] = useState<"start" | "verify">("start");
-  const [lastReference, setLastReference] = useState("");
+  const [failedStage, setFailedStage] = useState<"start" | "verify">(preview?.failedStage || "start");
+  const [lastReference, setLastReference] = useState(preview?.reference || "");
   const [errorMsg, setErrorMsg] = useState("");
   const [done, setDone] = useState<{ kind: "initial" | "topup"; fromWeek: number; toWeek: number; courseTitle: string } | null>(null);
   const [firstClass, setFirstClass] = useState<{ loading: boolean; session: SessionDoc | null }>({ loading: true, session: null });
@@ -505,6 +513,15 @@ const PaymentPage: React.FC<{
     }
   };
 
+  // Coming from the Add weeks dialog: the student already pressed "Pay".
+  useEffect(() => {
+    const token = String(u.autoStart || "");
+    if (!token || autoStarted.has(token) || disablePay || phase !== "idle") return;
+    autoStarted.add(token);
+    void handlePayment();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [u.autoStart, disablePay, phase]);
+
   // Move focus and scroll to the top when the screen changes, so screen
   // readers and phone users land on the new message.
   const screen = phase === "processing" ? "idle" : phase === "failed" && failedStage === "start" ? "idle" : phase;
@@ -568,7 +585,13 @@ const PaymentPage: React.FC<{
   // -------------------------------------------------------------------------
   // Success
   // -------------------------------------------------------------------------
-  if (phase === "success" && done) {
+  const doneView =
+    done ||
+    (preview?.phase === "success"
+      ? { kind: isTopUp ? ("topup" as const) : ("initial" as const), fromWeek: isTopUp ? originalWeeks + 1 : 1, toWeek: newTotalWeeks, courseTitle: displayCourse }
+      : null);
+  if (phase === "success" && doneView) {
+    const done = doneView;
     const paidNow = profileComplete ? Math.max(done.toWeek, Number(studentProfile?.weeksToCommit) || 0) : done.toWeek;
     const total = courseMaxWeeks || Number(studentProfile?.courseDurationWeeks) || paidNow;
     const receipt = <p className="text-center text-sm font-medium text-slate-500 dark:text-slate-400">Your receipt is saved under Payments.</p>;
@@ -881,7 +904,7 @@ const PaymentPage: React.FC<{
               onChange={setTopUpChoice}
               startWeek={originalWeeks + 1}
               totalWeeks={courseMaxWeeks}
-              quickPicks={[1, 4, maxAllowedWeeks]}
+              quickPicks={[1, 2, maxAllowedWeeks]}
             />
           )}
         </FormCard>

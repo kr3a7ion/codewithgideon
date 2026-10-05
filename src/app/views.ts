@@ -29,4 +29,6 @@ export const STUDENT_SECTIONS = [
   "chat",
   "notifications",
   "badges",
+  "account",
+  "more",
 ] as const;

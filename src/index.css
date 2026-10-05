@@ -43,3 +43,40 @@
   background: #334158;
   border-radius: 4px;
 }
+
+/* Printing a receipt: while the receipt is open (body.receipt-open), print
+   only the receipt, in light colours. Other pages print normally. */
+@media print {
+  body.receipt-open #root {
+    display: none !important;
+  }
+  body.receipt-open .print-backdrop {
+    position: static !important;
+    display: block !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+  }
+  body.receipt-open .print-area,
+  body.receipt-open .print-area * {
+    color: #0f2b5b !important;
+    border-color: #e5e0d6 !important;
+  }
+  body.receipt-open .print-area {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    padding: 0 !important;
+  }
+  body.receipt-open .print-area .bg-paper,
+  body.receipt-open .print-area .dark\:bg-slate-800 {
+    background: #f7f4ee !important;
+  }
+  body.receipt-open .no-print {
+    display: none !important;
+  }
+}

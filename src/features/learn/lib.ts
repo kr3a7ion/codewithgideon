@@ -10,7 +10,9 @@ export type StudentSection =
   | "community"
   | "chat"
   | "notifications"
-  | "badges";
+  | "badges"
+  | "account"
+  | "more";
 
 export const studentSectionRoutes: Record<StudentSection, string> = {
   dashboard: "/student/dashboard",
@@ -20,6 +22,8 @@ export const studentSectionRoutes: Record<StudentSection, string> = {
   chat: "/student/chat",
   notifications: "/student/notifications",
   badges: "/student/badges",
+  account: "/student/account",
+  more: "/student/more",
 };
 
 export const sectionFromPathname = (pathname: string): StudentSection => {

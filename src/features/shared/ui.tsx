@@ -25,7 +25,10 @@ export const Card: React.FC<{
 }> = ({ as: Tag = "div", className, children, ...rest }) => (
   <Tag
     className={cn(
-      "rounded-[20px] border border-line bg-white dark:border-line-dark dark:bg-slate-900",
+      // cn doesn't merge classes, so only add the default radius when the
+      // caller hasn't set one.
+      /(^|\s)rounded-/.test(className || "") ? "" : "rounded-[20px]",
+      "border border-line bg-white dark:border-line-dark dark:bg-slate-900",
       className,
     )}
     {...rest}
@@ -91,12 +94,13 @@ export const Avatar: React.FC<{ name: string; size?: number; className?: string;
 );
 
 /** Thin rounded progress bar. */
-export const Progress: React.FC<{ value: number; max: number; label: string; className?: string; size?: "sm" | "md" }> = ({
+export const Progress: React.FC<{ value: number; max: number; label: string; className?: string; size?: "sm" | "md"; track?: string }> = ({
   value,
   max,
   label,
   className,
   size = "sm",
+  track = "bg-paper dark:bg-slate-800",
 }) => {
   const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
   return (
@@ -106,7 +110,7 @@ export const Progress: React.FC<{ value: number; max: number; label: string; cla
       aria-valuemin={0}
       aria-valuemax={max}
       aria-valuenow={value}
-      className={cn("w-full overflow-hidden rounded-full bg-paper dark:bg-slate-800", size === "md" ? "h-2.5" : "h-2", className)}
+      className={cn("w-full overflow-hidden rounded-full", track, size === "md" ? "h-2.5" : "h-2", className)}
     >
       <div className="h-full rounded-full bg-teal-600 transition-[width] duration-500 dark:bg-teal-400" style={{ width: `${pct}%` }} />
     </div>
