@@ -325,6 +325,10 @@ export const Spinner: React.FC<{ label?: string; className?: string }> = ({ labe
 
 const useOverlay = (open: boolean, onClose: () => void) => {
   const panelRef = useRef<HTMLDivElement>(null);
+  // Callers often pass a new onClose each render; reading it from a ref keeps
+  // the effect below from re-running (and stealing focus) while typing.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
@@ -337,7 +341,11 @@ const useOverlay = (open: boolean, onClose: () => void) => {
       (el || panelRef.current)?.focus();
     }, 20);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // Only the top-most overlay closes (a dialog opened from a drawer).
+      const layers = document.querySelectorAll("[data-overlay-layer]");
+      if (layers.length && layers[layers.length - 1] !== panelRef.current) return;
+      closeRef.current();
     };
     document.addEventListener("keydown", onKey);
     return () => {
@@ -346,7 +354,7 @@ const useOverlay = (open: boolean, onClose: () => void) => {
       document.removeEventListener("keydown", onKey);
       previous?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
   return panelRef;
 };
 
@@ -367,6 +375,7 @@ export const Dialog: React.FC<{
       <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={onClose} aria-hidden />
       <div
         ref={panelRef}
+        data-overlay-layer
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -414,6 +423,7 @@ export const Drawer: React.FC<{
       <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
       <div
         ref={panelRef}
+        data-overlay-layer
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

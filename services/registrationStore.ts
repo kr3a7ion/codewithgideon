@@ -159,6 +159,19 @@ export type SyllabusWeek = {
   topics: string[];
 };
 
+export type CreditCohort = { cohortId: string; cohortKey: string; label: string };
+export type CreditWeeksInput = {
+  weeks: number;
+  /** Naira actually received (0 for free weeks). Ignored when resolving a Paystack payment. */
+  amount: number;
+  method: "transfer" | "cash" | "paystack" | "free";
+  reference?: string;
+  resolveExisting?: boolean;
+  cohort?: CreditCohort | null;
+  note?: string;
+};
+export type CreditWeeksResult = { weeks: number; maxWeeks: number; cohortLabel: string };
+
 export type CohortDoc = {
   id: string;
   label: string;
@@ -2147,6 +2160,147 @@ export const registrationStore = {
         verifiedAt: serverTimestamp(),
         timestamp: Date.now(),
       });
+    });
+  },
+
+  /**
+   * Admin credit: give a student paid weeks and put them in a cohort, with a
+   * payment record so it shows in their history and the money totals.
+   *
+   * - `reference` + `resolveExisting`: settles a Paystack payment that was
+   *   flagged "needs review" (the record is updated, not duplicated).
+   * - `reference` alone: uses that id for the record (e.g. a checkout's
+   *   Paystack reference) and refuses if it was already credited, so the
+   *   webhook and the admin can't both credit the same payment.
+   */
+  async creditWeeks(uid: string, input: CreditWeeksInput): Promise<CreditWeeksResult> {
+    const weeks = Math.floor(Number(input.weeks || 0));
+    if (!(weeks >= 1)) throw new Error("Add at least 1 week.");
+    const amount = Math.max(0, Math.round(Number(input.amount || 0)));
+    const userRef = doc(db, "users", uid);
+    const before = await getDoc(userRef);
+    if (!before.exists()) throw new Error("This student's profile no longer exists.");
+    const u: any = before.data() || {};
+
+    // Course truth: the course doc, then what the student signed up with.
+    let course: any = null;
+    if (u.courseId) {
+      const c = await getDoc(doc(db, "courses", String(u.courseId)));
+      if (c.exists()) course = { id: c.id, ...c.data() };
+    }
+    if (!course && u.pathId) {
+      const list = await getDocs(query(collection(db, "courses"), where("pathId", "==", String(u.pathId))));
+      const first = list.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) }))
+        .filter((c) => c.isActive !== false)
+        .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0))[0];
+      if (first) course = first;
+    }
+    const maxWeeks = Math.min(52, Math.floor(Number(course?.weeks || u.courseDurationWeeks || 0))) || 0;
+    const weeklyRate = Math.max(0, Number(course?.pricePerWeek || u.weeklyRate || 0));
+
+    let fallbackCohort: CreditCohort | null = null;
+    if (!input.cohort && !u.cohortKey) {
+      try {
+        const active = u.pathId
+          ? await this.getActiveCohortForPathId(String(u.pathId))
+          : u.path
+            ? await this.getActiveCohortForPath(String(u.path))
+            : null;
+        if (active?.cohortKey) fallbackCohort = { cohortId: active.cohortId, cohortKey: active.cohortKey, label: active.label };
+      } catch {
+        fallbackCohort = null;
+      }
+    }
+
+    const ref = String(input.reference || "").trim();
+    const paymentId = ref || `manual_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const paymentRef = doc(db, "users", uid, "payments", paymentId);
+    const by = auth.currentUser?.email || "admin";
+
+    return runTransaction(db, async (tx) => {
+      const [uSnap, pSnap] = await Promise.all([tx.get(userRef), tx.get(paymentRef)]);
+      const cur: any = uSnap.data() || {};
+      const enrolled = cur.status === "Complete";
+      const currentWeeks = enrolled ? Math.max(0, Math.floor(Number(cur.weeksToCommit || 0))) : 0;
+      const left = maxWeeks ? maxWeeks - currentWeeks : 52 - currentWeeks;
+      if (left < 1) throw new Error("This student has already paid for the whole course.");
+      if (weeks > left) throw new Error(`Only ${left} week${left === 1 ? "" : "s"} left in this course.`);
+
+      if (input.resolveExisting) {
+        if (!pSnap.exists()) throw new Error("That payment record wasn't found.");
+        if ((pSnap.data() as any)?.status !== "needs_review") throw new Error("That payment has already been handled.");
+      } else if (pSnap.exists()) {
+        throw new Error("This payment reference has already been credited.");
+      }
+
+      const existing: CreditCohort | null = cur.cohortKey
+        ? { cohortId: String(cur.cohortId || cur.cohortKey), cohortKey: String(cur.cohortKey), label: String(cur.cohortLabel || cur.cohortKey) }
+        : null;
+      const cohort = input.cohort || existing || fallbackCohort;
+      const kind = enrolled ? "topup" : "initial";
+      const nowMs = Date.now();
+      const totalWeeks = currentWeeks + weeks;
+      const record: Record<string, any> = {
+        kind,
+        weeks,
+        weeklyRate,
+        maxWeeks: maxWeeks || null,
+        cohortId: cohort?.cohortId || null,
+        cohortKey: cohort?.cohortKey || null,
+        cohortLabel: cohort?.label || null,
+        resolvedBy: by,
+        note: String(input.note || "").trim().slice(0, 300) || null,
+      };
+      if (input.resolveExisting) {
+        tx.update(paymentRef, {
+          ...record,
+          status: "success",
+          baseAmount: Math.round(Number((pSnap.data() as any)?.amountKobo || 0) / 100),
+          resolution: "credited",
+          resolvedAt: serverTimestamp(),
+        });
+      } else {
+        tx.set(paymentRef, {
+          ...record,
+          reference: paymentId,
+          uid,
+          status: "success",
+          source: "admin",
+          method: input.method,
+          amount,
+          baseAmount: amount,
+          amountKobo: amount * 100,
+          chargedAmountKobo: amount * 100,
+          path: String(cur.path || course?.title || ""),
+          pathId: String(course?.pathId || cur.pathId || "") || null,
+          courseId: String(course?.id || cur.courseId || "") || null,
+          verifiedAt: serverTimestamp(),
+          timestamp: nowMs,
+        });
+      }
+
+      const paid = input.resolveExisting ? Math.round(Number((pSnap.data() as any)?.amountKobo || 0) / 100) : amount;
+      const updates: Record<string, any> = {
+        status: "Complete",
+        weeksToCommit: totalWeeks,
+        totalPrice: (enrolled ? Number(cur.totalPrice || 0) : 0) + paid,
+        updatedAt: nowMs,
+      };
+      if (weeklyRate > 0) updates.weeklyRate = weeklyRate;
+      if (maxWeeks > 0) updates.courseDurationWeeks = maxWeeks;
+      if (course?.id) updates.courseId = course.id;
+      if (course?.pathId) updates.pathId = course.pathId;
+      if (cohort) {
+        updates.cohortId = cohort.cohortId;
+        updates.cohortKey = cohort.cohortKey;
+        updates.cohortLabel = cohort.label;
+      }
+      // The admin has dealt with this student's payment, so an open checkout
+      // no longer needs chasing.
+      if (cur.pendingPayment) updates.pendingPayment = deleteField();
+      tx.update(userRef, updates);
+      return { weeks: totalWeeks, maxWeeks, cohortLabel: cohort?.label || "" };
     });
   },
 

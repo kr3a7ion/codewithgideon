@@ -36,6 +36,9 @@ const channelLabels: Record<string, string> = {
   qr: "QR",
   mobile_money: "Mobile money",
   apple_pay: "Apple Pay",
+  transfer: "Bank transfer",
+  cash: "Cash",
+  free: "Free weeks",
 };
 
 export const channelLabel = (c: string) => channelLabels[String(c || "").toLowerCase()] || (c ? c.replace(/_/g, " ") : "Paystack");
@@ -54,7 +57,7 @@ const toRecord = (id: string, d: any): PaymentRecord => {
     amountKobo: Number(d?.chargedAmountKobo ?? d?.amountKobo) || 0,
     path: String(d?.path || ""),
     cohortLabel: String(d?.cohortLabel || ""),
-    channel: String(d?.paystack?.channel || ""),
+    channel: String(d?.paystack?.channel || d?.method || ""),
     email: String(d?.email || ""),
     paidAtMs: paidAt,
   };

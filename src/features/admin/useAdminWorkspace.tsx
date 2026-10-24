@@ -333,19 +333,18 @@ export const useAdminWorkspace = ({
     return `₦${pricePerWeek.toLocaleString()}/wk`;
   };
 
+  // Keeps each week at its own number (a blank week 2 doesn't shift week 3),
+  // drops blank weeks and gives untitled weeks a "Week N" title.
   const normalizeSyllabus = (syllabus: SyllabusWeek[], weeks: number) => {
-    const clean = (syllabus || [])
-      .filter(Boolean)
-      .map((w, idx) => ({
-        week: idx + 1,
-        title: String((w as any)?.title || "").trim(),
-        topics: Array.isArray((w as any)?.topics)
-          ? (w as any).topics.map((t: any) => String(t).trim()).filter(Boolean)
-          : [],
-      }))
-      .filter((w) => w.title.length > 0 || w.topics.length > 0);
-
-    return clean.slice(0, Math.max(1, weeks));
+    const list = (syllabus || []).filter(Boolean);
+    return Array.from({ length: Math.max(1, weeks) }, (_, i) => {
+      const w: any = list.find((x: any) => Number(x?.week) === i + 1) || list[i] || {};
+      const topics: string[] = Array.isArray(w.topics)
+        ? w.topics.map((t: any) => String(t).trim()).filter(Boolean).slice(0, 50)
+        : [];
+      const title = String(w.title || "").trim();
+      return { week: i + 1, title: title || (topics.length ? `Week ${i + 1}` : ""), topics };
+    }).filter((w) => w.title.length > 0);
   };
 
   const closeCourseModal = () => {
@@ -2378,21 +2377,22 @@ export const useAdminWorkspace = ({
   const markPaymentReviewed = async (payment: PaymentRecordDoc) => {
     if (!payment?.userId || !payment?.id) return;
     const ok = await confirmAction({
-      title: "Mark as handled?",
+      title: "Mark as refunded?",
       message:
-        "Use this after you've credited the student yourself or refunded them in Paystack. It removes the payment from the review list.",
-      confirmLabel: "Mark as handled",
+        "Use this after refunding the student in Paystack. It takes the payment off the review list without adding any weeks.",
+      confirmLabel: "Mark as refunded",
       tone: "info",
     });
     if (!ok) return;
     try {
       await updateDoc(doc(db, "users", payment.userId, "payments", payment.id), {
         status: "reviewed",
+        resolution: "refunded",
         reviewedAt: serverTimestamp(),
         reviewedBy: auth.currentUser?.email || "admin",
       });
       await fetchPaymentRecords();
-      notify("success", "Payment marked as handled.");
+      notify("success", "Marked as refunded.");
     } catch (e: any) {
       notify("error", e?.message || "Couldn't update the payment.");
     }
