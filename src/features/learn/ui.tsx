@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Clock3,
   ExternalLink,
+  Eye,
   FileText,
   Link2,
   Lock,
@@ -27,7 +28,8 @@ import { cn } from "../../ui";
 import { Card, IconTile, naira, plural, Progress } from "../shared/ui";
 import { addToCalendar } from "./calendar";
 import { sessionInfo, startsIn } from "./time";
-import { thumbFor } from "./video";
+import { thumbFor, viewFor } from "./video";
+import { ResourceViewer } from "./components/ResourceViewer";
 import type { WatchProgress } from "./useStudentData";
 
 const classPath = (id: string) => `/student/classes/${encodeURIComponent(id)}`;
@@ -469,8 +471,10 @@ const resourceIcon = (r: ResourceDoc): LucideIcon => {
   return FileText;
 };
 
-export const ResourceRow: React.FC<{ resource: ResourceDoc }> = ({ resource: r }) => {
+export const ResourceRow: React.FC<{ resource: ResourceDoc; classLink?: { to: string; title: string } | null }> = ({ resource: r, classLink }) => {
   const anyR = r as any;
+  const [viewing, setViewing] = React.useState(false);
+  const viewable = Boolean(viewFor(anyR.url));
   const meta = [Number(anyR.sessionWeek) > 0 ? `Week ${anyR.sessionWeek}` : anyR.folder, anyR.type, anyR.size].filter(Boolean).join(" · ");
   const Icon = resourceIcon(r);
   const body = (
@@ -480,9 +484,27 @@ export const ResourceRow: React.FC<{ resource: ResourceDoc }> = ({ resource: r }
         <span className="block text-[15px] font-bold leading-5 text-blue-900 dark:text-white">{anyR.name || "Resource"}</span>
         {meta ? <span className="mt-0.5 block text-sm font-medium text-slate-500 dark:text-slate-400">{meta}</span> : null}
         {anyR.description ? <span className="mt-1 line-clamp-2 text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{anyR.description}</span> : null}
+        {classLink ? <span className="mt-1 block truncate text-[13px] font-semibold text-teal-700 dark:text-teal-300">From: {classLink.title}</span> : null}
       </span>
     </>
   );
+  if (viewable) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setViewing(true)}
+          className="flex w-full items-center gap-3.5 rounded-[14px] border border-line bg-white px-3.5 py-3 text-left transition-colors hover:border-line-strong dark:border-line-dark dark:bg-slate-900"
+        >
+          {body}
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-bold text-teal-700 dark:text-teal-300">
+            View <Eye className="h-4 w-4" aria-hidden />
+          </span>
+        </button>
+        <ResourceViewer resource={viewing ? r : null} onClose={() => setViewing(false)} classLink={classLink} />
+      </>
+    );
+  }
   return anyR.url ? (
     <a
       href={anyR.url}

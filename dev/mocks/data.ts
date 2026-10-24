@@ -69,6 +69,7 @@ export const previewResources = empty
   : [
       { id: "r1", name: "Week 1 slides", type: "PDF", size: "2.4 MB", folder: "Week 1", url: "https://example.com", description: "Dart basics, variables, functions and classes.", sessionWeek: 1, isPublished: true, updatedAt: now },
       { id: "r2", name: "Riverpod cheat sheet", type: "Link", size: "", folder: "References", url: "https://example.com", description: "Providers, notifiers and when to use each.", isPublished: true, updatedAt: now },
+      { id: "r4", name: "Layouts slides", type: "Slides", size: "", folder: "Week 2", url: "https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOp/edit", description: "Rows, columns, Expanded and LayoutBuilder.", sessionId: "W02", sessionWeek: 2, isPublished: true, updatedAt: now },
       { id: "r3", name: "Starter project", type: "GitHub", size: "", folder: "Week 3", url: "https://example.com", sessionWeek: 3, isPublished: true, updatedAt: now },
     ];
 export const previewSpaces = empty

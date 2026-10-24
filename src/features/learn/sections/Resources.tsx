@@ -20,6 +20,15 @@ const Resources: React.FC = () => {
   const [week, setWeek] = useState<number | "all">("all");
   const locked = s.paymentState !== "active";
 
+  // Resources picked for a class link back to that class.
+  const classLinks = useMemo(() => {
+    const out: Record<string, { to: string; title: string }> = {};
+    s.sessions.forEach((x: any) => {
+      out[String(x.id)] = { to: `/student/classes/${encodeURIComponent(String(x.id))}`, title: `${x.week ? `Week ${x.week} · ` : ""}${x.title || "Class"}` };
+    });
+    return out;
+  }, [s.sessions]);
+
   const weeks = useMemo(() => {
     const set = new Set(s.resources.map(weekOf));
     return [...set].sort((a, b) => (a === 0 ? 1 : b === 0 ? -1 : b - a));
@@ -124,7 +133,7 @@ const Resources: React.FC = () => {
                   <GroupLabel as="h2">{w ? `Week ${w}` : "General"}</GroupLabel>
                   <div className="grid gap-3 lg:grid-cols-2">
                     {list.map((r) => (
-                      <ResourceRow key={r.id} resource={r} />
+                      <ResourceRow key={r.id} resource={r} classLink={classLinks[String((r as any).sessionId || "")] || null} />
                     ))}
                   </div>
                 </section>

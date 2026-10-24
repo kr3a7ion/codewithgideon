@@ -65,3 +65,38 @@ export const clock = (seconds: number) => {
   const sec = String(s % 60).padStart(2, "0");
   return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 };
+
+// ---------------------------------------------------------------------------
+// Resources that can be viewed inside the app
+// ---------------------------------------------------------------------------
+
+export type ViewSource =
+  | { kind: "video"; video: VideoSource }
+  | { kind: "frame"; src: string }
+  | { kind: "image"; src: string };
+
+/** How to show a resource in the app, or null to open it in a new tab. */
+export const viewFor = (raw: string | undefined | null): ViewSource | null => {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.replace(/^www\./, "").toLowerCase();
+  const parts = url.pathname.split("/").filter(Boolean);
+  const video = parseVideo(text);
+  if (video && (video.kind === "youtube" || video.kind === "file")) return { kind: "video", video };
+  if (host === "docs.google.com" && ["document", "presentation", "spreadsheets", "forms"].includes(parts[0]) && parts[1] === "d" && parts[2]) {
+    return { kind: "frame", src: `https://docs.google.com/${parts[0]}/d/${parts[2]}/${parts[0] === "forms" ? "viewform?embedded=true" : "preview"}` };
+  }
+  if (host === "drive.google.com") {
+    const id = parts[0] === "file" && parts[1] === "d" ? parts[2] : url.searchParams.get("id");
+    if (id) return { kind: "frame", src: `https://drive.google.com/file/d/${id}/preview` };
+  }
+  if (/\.pdf$/i.test(url.pathname)) return { kind: "frame", src: `https://docs.google.com/viewer?embedded=true&url=${encodeURIComponent(text)}` };
+  if (/\.(png|jpe?g|gif|webp|svg)$/i.test(url.pathname)) return { kind: "image", src: text };
+  return null;
+};
