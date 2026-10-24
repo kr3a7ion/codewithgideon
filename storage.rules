@@ -1,0 +1,32 @@
+rules_version = '2';
+
+// Firebase Storage rules. Deploy with: firebase deploy --only storage
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAdmin() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+    }
+
+    // Screenshots students attach to mentor chat: each student writes only
+    // into their own folder, images up to 5 MB. Gideon can read them all.
+    match /mentor-uploads/{uid}/{file} {
+      allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(png|jpeg|gif|webp)');
+      allow delete: if isAdmin();
+    }
+
+    // Files Gideon uploads for resources: anyone signed in can read them.
+    match /resources/{file=**} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin() && request.resource.size < 50 * 1024 * 1024;
+    }
+
+    match /{everything=**} {
+      allow read, write: if false;
+    }
+  }
+}
