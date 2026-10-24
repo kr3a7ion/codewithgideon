@@ -133,6 +133,8 @@ export const HomeHero: React.FC<{
   /** The course length isn't known yet: show placeholder weeks. */
   progressLoading?: boolean;
   onPay: () => void;
+  /** Shown when the student has had every class they paid for. */
+  onAddWeeks?: () => void;
 }> = (p) => {
   const badges = getBadgesForLength(p.totalWeeks);
   // The latest badge earned: one per week with a finished class (the same
@@ -218,10 +220,33 @@ export const HomeHero: React.FC<{
         </span>
       </>
     );
+  } else if (p.hasPastClasses && p.remainingWeeks <= 0) {
+    pill = (
+      <>
+        <Check className="h-3.5 w-3.5" strokeWidth={3} aria-hidden /> Course complete
+      </>
+    );
+    title = `You finished ${p.courseTitle || "the course"}`;
+    body = "Every class stays here for you to rewatch whenever you like. Well done.";
+    actions = (
+      <>
+        <Link to={studentSectionRoutes.badges} className={solidBtn}>
+          See your badges
+        </Link>
+        <Link to={studentSectionRoutes.classes} className={ghostBtn}>
+          Rewatch classes
+        </Link>
+      </>
+    );
   } else if (p.hasPastClasses && p.remainingWeeks > 0) {
     pill = <>Up to date</>;
     title = "You've had every class you paid for";
     body = "Add weeks to unlock the next classes. Recordings of past classes are below.";
+    actions = p.onAddWeeks ? (
+      <button type="button" onClick={p.onAddWeeks} className={solidBtn}>
+        Add weeks{p.weeklyRate ? ` · ${naira(p.weeklyRate)} a week` : ""}
+      </button>
+    ) : null;
   } else {
     pill = <>Classes</>;
     title = "Your classes are being scheduled";

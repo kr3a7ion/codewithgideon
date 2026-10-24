@@ -211,6 +211,19 @@ test("pending student cannot mark themselves Complete via the form", async () =>
   await assertFails(setDoc(doc(db("pending"), "users/pending"), student("pending")));
 });
 
+test("student saves own watch progress; others can't read or fake it", async () => {
+  const mine = doc(db("paid"), "users/paid/progress/W01");
+  await assertSucceeds(setDoc(mine, {sessionId: "W01", position: 600, duration: 5400, completed: false, updatedAt: serverTimestamp()}));
+  await assertSucceeds(getDoc(mine));
+  await assertSucceeds(getDoc(doc(db("admin1"), "users/paid/progress/W01")));
+  await assertFails(getDoc(doc(db("pending"), "users/paid/progress/W01")));
+  await assertFails(setDoc(doc(db("pending"), "users/paid/progress/W02"), {sessionId: "W02", position: 1, duration: 2, completed: true, updatedAt: serverTimestamp()}));
+  // Wrong id, extra fields and client clocks are refused.
+  await assertFails(setDoc(doc(db("paid"), "users/paid/progress/W03"), {sessionId: "W04", position: 1, duration: 2, completed: true, updatedAt: serverTimestamp()}));
+  await assertFails(setDoc(doc(db("paid"), "users/paid/progress/W03"), {sessionId: "W03", position: 1, duration: 2, completed: true, updatedAt: serverTimestamp(), weeksToCommit: 12}));
+  await assertFails(setDoc(doc(db("paid"), "users/paid/progress/W03"), {sessionId: "W03", position: 1, duration: 2, completed: true, updatedAt: Date.now()}));
+});
+
 test("students can't read other students", async () => {
   await assertFails(getDoc(doc(db("paid"), "users/pending")));
 });

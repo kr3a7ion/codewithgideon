@@ -137,6 +137,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route path="/student/register" element={<DetailsPage onNavigate={log("navigate")} selectedPath="" onGoogleAuth={noGoogle} />} />
         <Route path="/student/payment" element={<Payment />} />
         <Route path="/badges-gallery" element={<BadgeGallery />} />
+        <Route path="/student/classes/:sessionId" element={<Student />} />
         <Route path="/student/*" element={<Student />} />
         <Route
           path="/admin/*"

@@ -425,6 +425,15 @@ service cloud.firestore {
         allow create, update, delete: if isAdmin();
       }
 
+      // How much of each class recording the student has watched. Written
+      // by the student's own player; admins can read it for support.
+      match /progress/{sessionId} {
+        allow read: if ownsUserDoc(userId) || isAdmin();
+        allow create, update: if ownsUserDoc(userId)
+          && validProgress(request.resource.data, sessionId);
+        allow delete: if ownsUserDoc(userId) || isAdmin();
+      }
+
       match /notificationReads/{readId} {
         allow read: if ownsUserDoc(userId) || isAdmin();
         allow create, update: if ownsUserDoc(userId)
@@ -435,6 +444,16 @@ service cloud.firestore {
           );
         allow delete: if ownsUserDoc(userId) || isAdmin();
       }
+    }
+
+    function validProgress(p, sessionId) {
+      return p is map
+        && p.keys().hasOnly(["sessionId", "position", "duration", "completed", "updatedAt"])
+        && p.sessionId == sessionId
+        && p.position is number && p.position >= 0 && p.position <= 86400
+        && p.duration is number && p.duration >= 0 && p.duration <= 86400
+        && p.completed is bool
+        && p.updatedAt == request.time;
     }
 
     function validSession(s) {
