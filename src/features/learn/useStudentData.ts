@@ -752,6 +752,9 @@ export const useStudentData = (
     pastSessions,
     currentWeek,
     completedWeeks,
+    /** Paid, but not placed in an intake yet (e.g. credited by hand), so
+     *  the classes can't load. Gideon has to place them. */
+    notPlaced: profile?.status === "Complete" && !String(profile?.cohortKey || "").trim() && !String(profile?.cohortId || "").trim(),
     // watch progress
     progress,
     saveProgress,

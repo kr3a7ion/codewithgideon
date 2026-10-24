@@ -89,6 +89,21 @@ const Home: React.FC = () => {
   // ---- blocks ----
   // Pending and checking are explained in the hero; a top-up being checked
   // gets its own notice because the student can still use their classes.
+  const notPlacedNotice = s.notPlaced ? (
+    <Notice
+      tone="review"
+      role="status"
+      title="Gideon is adding you to your class group"
+      action={
+        <a href={whatsapp} target="_blank" rel="noopener noreferrer" className={mbtn({ kind: "secondary" })}>
+          Message Gideon <WhatsAppIcon className="h-[18px] w-[18px]" />
+        </a>
+      }
+    >
+      Your payment is in, but you haven't been placed in an intake yet, so your classes can't show. This is usually sorted the same day.
+    </Notice>
+  ) : null;
+
   const topUpNotice =
     state === "active" && review ? (
       <Notice
@@ -281,6 +296,7 @@ const Home: React.FC = () => {
   return (
     <div className="space-y-6 lg:space-y-7">
       {hero}
+      {notPlacedNotice}
       {topUpNotice}
       {/* Phones: one column, with the weeks card after Coming up. Desktop:
           classes on the left; weeks, mentor and updates on the right. */}

@@ -191,6 +191,10 @@ const ClassList: React.FC = () => {
             </ul>
           </section>
         </div>
+      ) : s.notPlaced ? (
+        <Notice tone="review" title="Gideon is adding you to your class group" role="status">
+          Your payment is in, but you haven't been placed in an intake yet. Your classes show here as soon as you are.
+        </Notice>
       ) : s.sessionsLoading ? (
         <RowsBone count={3} />
       ) : !s.sessions.length ? (

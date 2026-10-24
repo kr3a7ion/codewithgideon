@@ -486,8 +486,10 @@ export const sendClassReminders = onSchedule(
                 cohortLabel,
                 title,
                 body,
-                ctaLabel: "",
-                ctaUrl: "",
+                // Opens the class page on the website (join link, notes,
+                // and the recording afterwards).
+                ctaLabel: "Open class",
+                ctaUrl: `https://codewithgideon.com/student/classes/${encodeURIComponent(sessionDoc.id)}`,
                 sentBy: "automation",
                 sentAt: FieldValue.serverTimestamp(),
                 createdAt: Date.now(),
