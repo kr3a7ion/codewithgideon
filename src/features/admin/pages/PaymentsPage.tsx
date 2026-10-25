@@ -5,6 +5,7 @@ import { AlertTriangle, BadgeCheck, CreditCard, Eraser, HandCoins, Zap } from "l
 import { Button, cn } from "../../../ui";
 import { useAdmin } from "../AdminWorkspaceContext";
 import { useAdminInsights } from "../insights";
+import { CreditWeeksDialog, type CreditPreset } from "../parts/CreditWeeksDialog";
 import { paymentRecordAmount, toDateMs } from "../lib";
 import {
   AdminPage,
@@ -24,9 +25,12 @@ const reviewReasonText: Record<string, string> = {
   course_already_paid: "Student had already paid for the whole course",
   amount_below_one_week: "Amount was less than one week's fee",
   missing_course: "The student's course couldn't be found",
+  course_not_configured: "The course has no weekly price or length set",
+  no_weeks_credited: "No weeks could be matched to the amount",
 };
 
 const PaymentsPage: React.FC = () => {
+  const [credit, setCredit] = useState<{ uid: string; preset: CreditPreset } | null>(null);
   const {
     paymentRecords,
     paymentRecordsLoading,
@@ -36,7 +40,6 @@ const PaymentsPage: React.FC = () => {
     checkAllPending,
     checkingRefs,
     paymentChecks,
-    approvePending,
     clearPending,
     busy,
     automationStatus,
@@ -145,7 +148,17 @@ const PaymentsPage: React.FC = () => {
                         {
                           label: "Credit manually",
                           icon: <HandCoins className="h-4 w-4" />,
-                          onSelect: () => approvePending(c.reg),
+                          onSelect: () =>
+                            setCredit({
+                              uid: c.reg.uid,
+                              preset: {
+                                weeks: c.weeks,
+                                amount: c.amount,
+                                method: "paystack",
+                                reference: c.reference,
+                                context: "Only do this after you've seen the payment succeed in your Paystack dashboard.",
+                              },
+                            }),
                         },
                         {
                           label: "Clear checkout",
@@ -166,7 +179,7 @@ const PaymentsPage: React.FC = () => {
       {i.needsReview.length ? (
         <Panel
           title="Needs review"
-          description="Paystack took the money but it couldn't be matched to weeks automatically. Credit the student yourself (Students → Mark as paid) or refund in Paystack, then mark it as handled."
+          description="Paystack took the money but couldn't match it to weeks. Credit the weeks here, or refund in Paystack and mark it as refunded."
           padded={false}
         >
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -191,8 +204,28 @@ const PaymentsPage: React.FC = () => {
                     >
                       Open student
                     </Link>
+                    {reg ? (
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          setCredit({
+                            uid: p.userId,
+                            preset: {
+                              amount: paymentRecordAmount(p),
+                              weeks: Math.max(1, Number(p.affordableWeeks || 0) || 1),
+                              method: "paystack",
+                              reference: p.id,
+                              resolveExisting: true,
+                              context: reviewReasonText[p.reviewReason] || "The amount didn't match the course price.",
+                            },
+                          })
+                        }
+                      >
+                        Credit weeks
+                      </Button>
+                    ) : null}
                     <Button size="sm" variant="secondary" onClick={() => markPaymentReviewed(p)}>
-                      Mark as handled
+                      Refunded
                     </Button>
                   </div>
                 </li>
@@ -226,7 +259,7 @@ const PaymentsPage: React.FC = () => {
                     </p>
                     <p className="truncate text-xs text-slate-500">
                       {p.kind === "topup" ? "Top-up" : "First payment"} · {Number(p.weeks || 0)} wk{Number(p.weeks) === 1 ? "" : "s"}
-                      {p.paystack?.channel ? ` · ${p.paystack.channel}` : ""} · {relativeTime(toDateMs(p.verifiedAt) || Number(p.timestamp || 0))}
+                      {p.paystack?.channel || p.method ? ` · ${String(p.paystack?.channel || p.method).replace(/_/g, " ")}` : ""} · {relativeTime(toDateMs(p.verifiedAt) || Number(p.timestamp || 0))}
                     </p>
                   </div>
                   <p className="shrink-0 text-sm font-bold tabular-nums text-slate-900 dark:text-white">{naira(paymentRecordAmount(p))}</p>
@@ -236,6 +269,12 @@ const PaymentsPage: React.FC = () => {
           </ul>
         )}
       </Panel>
+      <CreditWeeksDialog
+        open={!!credit}
+        onClose={() => setCredit(null)}
+        reg={credit ? registrationsByUid.get(credit.uid) || null : null}
+        preset={credit?.preset}
+      />
     </AdminPage>
   );
 };

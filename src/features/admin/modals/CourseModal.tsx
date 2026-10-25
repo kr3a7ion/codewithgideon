@@ -1,263 +1,297 @@
-/* Extracted from AdminDashboard.tsx; state comes from useAdmin(). */
-import React from "react";
-import { Edit } from "lucide-react";
-import { BusyButton } from "../components";
+/* Add or edit a course: what it is, what it costs per week, and the week-by-week plan. */
+import React, { useState } from "react";
+import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import { Button, Field, inputClass } from "../../../ui";
 import { useAdmin } from "../AdminWorkspaceContext";
+import { Dialog, Toggle, naira } from "../ui";
+
+const LEVELS = ["Beginner", "Intermediate", "Advanced", "All levels"];
+
+type Week = { week: number; title: string; topics: string[] };
+
+/** Keep one entry per week so week 3 stays week 3 even if week 2 is blank. */
+const padWeeks = (list: Week[] | undefined, weeks: number): Week[] =>
+  Array.from({ length: Math.max(1, weeks) }, (_, i) => {
+    const found = (list || []).find((w) => Number(w?.week) === i + 1) || (list || [])[i];
+    return { week: i + 1, title: found?.title || "", topics: Array.isArray(found?.topics) ? found!.topics : [] };
+  });
 
 const CourseModal: React.FC = () => {
-  const {
-    paths,
-    courseModalOpen,
-    editingCourse,
-    courseForm,
-    setCourseForm,
-    courseError,
-    sessions,
-    courseBusyId,
-    busy,
-    parseWeeks,
-    normalizeSyllabus,
-    closeCourseModal,
-    saveCourse,
-  } = useAdmin();
+  const { paths, courseModalOpen, editingCourse, courseForm, setCourseForm, courseError, closeCourseModal, saveCourse } =
+    useAdmin();
+  const [saving, setSaving] = useState(false);
+  const [openWeek, setOpenWeek] = useState<number | null>(1);
+
+  const set = (patch: Partial<typeof courseForm>) => setCourseForm((p) => ({ ...p, ...patch }));
+  const weeks = Math.min(52, Math.max(1, Math.floor(Number(courseForm.weeks) || 1)));
+  const price = Math.max(0, Math.floor(Number(courseForm.pricePerWeek) || 0));
+  const plan = padWeeks(courseForm.syllabus as Week[], weeks);
+  const planned = plan.filter((w) => w.title.trim() || w.topics.length).length;
+
+  const setWeeks = (n: number) => {
+    const w = Math.min(52, Math.max(1, Math.floor(n) || 1));
+    setCourseForm((p) => ({ ...p, weeks: w, duration: `${w} Weeks`, syllabus: padWeeks(p.syllabus as Week[], w) }));
+  };
+  const setWeek = (i: number, patch: Partial<Week>) =>
+    setCourseForm((p) => {
+      const next = padWeeks(p.syllabus as Week[], weeks);
+      next[i] = { ...next[i], ...patch };
+      return { ...p, syllabus: next };
+    });
+
+  const submit = async (e: React.FormEvent) => {
+    setSaving(true);
+    try {
+      await saveCourse(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <>
-      {/* Course Modal */}
-      {courseModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 max-w-2xl w-full p-8 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 relative">
-            <button
-              onClick={closeCourseModal}
-              className="absolute top-6 right-6 text-slate-400 hover:text-blue-900 dark:hover:text-slate-200 transition"
-              aria-label="Close"
-            >
-              <svg
-                className="w-6 h-6"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+    <Dialog
+      open={courseModalOpen}
+      onClose={closeCourseModal}
+      title={editingCourse ? "Edit course" : "Add a course"}
+      description="Students see this on the course page and pay the weekly price when they sign up."
+      size="lg"
+      footer={
+        <>
+          <Button variant="secondary" onClick={closeCourseModal}>Cancel</Button>
+          <Button type="submit" form="course-form" loading={saving}>
+            {editingCourse ? "Save changes" : "Create course"}
+          </Button>
+        </>
+      }
+    >
+      <form id="course-form" onSubmit={submit} className="space-y-6">
+        <section className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-[1fr_12rem]">
+            <Field label="Title" htmlFor="course-title">
+              <input
+                id="course-title"
+                value={courseForm.title}
+                onChange={(e) => set({ title: e.target.value })}
+                placeholder="e.g. Flutter for beginners"
+                className={inputClass}
+                data-autofocus
+                required
+                minLength={3}
+              />
+            </Field>
+            <Field label="Path" htmlFor="course-path">
+              <select
+                id="course-path"
+                value={courseForm.pathId}
+                onChange={(e) => set({ pathId: e.target.value })}
+                className={inputClass}
+                required
               >
-                <path
-                  d="M6 18L18 6M6 6l12 12"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-
-            <h3 className="text-xl font-black text-blue-900 dark:text-white mb-2">
-              {editingCourse ? "Edit Course" : "Add New Course"}
-            </h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-              This updates what students see across your site.
-            </p>
-
-            <form onSubmit={saveCourse} className="space-y-4">
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                  Image URL (optional)
-                </label>
-                <input
-                  value={courseForm.imageUrl}
-                  onChange={(e) =>
-                    setCourseForm((p) => ({
-                      ...p,
-                      imageUrl: e.target.value,
-                    }))
-                  }
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                  placeholder="https://... (jpeg/png/webp)"
-                />
-
-                {/* Optional preview (safe) */}
-                {courseForm.imageUrl?.trim() ? (
-                  <div className="mt-3 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700">
-                    <img
-                      src={courseForm.imageUrl.trim()}
-                      alt="Course preview"
-                      className="w-full h-40 object-cover"
-                      onError={(e) => {
-                        (
-                          e.currentTarget as HTMLImageElement
-                        ).style.display = "none";
-                      }}
-                    />
-                  </div>
-                ) : null}
-              </div>
-              {courseError && (
-                <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
-                  {courseError}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                  Path
-                </label>
-                <select
-                  value={courseForm.pathId}
-                  onChange={(e) =>
-                    setCourseForm((p) => ({ ...p, pathId: e.target.value }))
-                  }
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                  required
-                >
-                  <option value="" disabled>
-                    Select a path…
-                  </option>
-                  {paths.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                  Title
-                </label>
-                <input
-                  value={courseForm.title}
-                  onChange={(e) =>
-                    setCourseForm((p) => ({ ...p, title: e.target.value }))
-                  }
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                  placeholder="e.g. UI/UX for Developers"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                    Duration
-                  </label>
-                  <input
-                    onBlur={() => {
-                      const w = parseWeeks(courseForm.duration);
-                      setCourseForm((p) => ({
-                        ...p,
-                        weeks: w,
-                        duration: `${w} Weeks`,
-                        syllabus: normalizeSyllabus(p.syllabus, w),
-                      }));
-                    }}
-                    value={courseForm.duration}
-                    onChange={(e) =>
-                      setCourseForm((p) => ({
-                        ...p,
-                        duration: e.target.value,
-                      }))
-                    }
-                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                    placeholder="e.g. 6 Weeks"
-                    required
-                  />
-                  <p className="text-[11px] text-slate-400 mt-2 font-bold">
-                    Weeks (truth): {courseForm.weeks}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                    Sessions
-                  </label>
-                  <input
-                    value={courseForm.sessions}
-                    onChange={(e) =>
-                      setCourseForm((p) => ({
-                        ...p,
-                        sessions: e.target.value,
-                      }))
-                    }
-                    className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none"
-                    placeholder="e.g. 2× Weekly"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">
-                  Description
-                </label>
-                <textarea
-                  value={courseForm.description}
-                  onChange={(e) =>
-                    setCourseForm((p) => ({
-                      ...p,
-                      description: e.target.value,
-                    }))
-                  }
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-blue-900 dark:text-white outline-none min-h-[120px]"
-                  placeholder="Short course overview…"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4 bg-gray-50 dark:bg-slate-800/40 rounded-2xl border border-gray-100 dark:border-slate-800">
-                <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={courseForm.isActive}
-                    onChange={(e) =>
-                      setCourseForm((p) => ({
-                        ...p,
-                        isActive: e.target.checked,
-                      }))
-                    }
-                    className="h-4 w-4"
-                  />
-                  Active
-                </label>
-
-                <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={courseForm.showOnLanding}
-                    onChange={(e) =>
-                      setCourseForm((p) => ({
-                        ...p,
-                        showOnLanding: e.target.checked,
-                      }))
-                    }
-                    className="h-4 w-4"
-                  />
-                  Show on Landing
-                </label>
-
-                <label className="flex items-center gap-3 text-sm font-bold text-slate-600 dark:text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={courseForm.showInExplore}
-                    onChange={(e) =>
-                      setCourseForm((p) => ({
-                        ...p,
-                        showInExplore: e.target.checked,
-                      }))
-                    }
-                    className="h-4 w-4"
-                  />
-                  Show in Explore
-                </label>
-              </div>
-
-              <BusyButton
-                type="submit"
-                busy={courseBusyId === (editingCourse?.id || "create")}
-                className="w-full bg-blue-900 dark:bg-teal-600 hover:bg-blue-800 dark:hover:bg-teal-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all"
-                busyText={editingCourse ? "Saving..." : "Creating..."}
-              >
-                {editingCourse ? "Save Changes" : "Create Course"}
-              </BusyButton>
-            </form>
+                <option value="" disabled>Choose a path</option>
+                {paths.map((p) => (
+                  <option key={p.id} value={p.id}>{p.title}</option>
+                ))}
+              </select>
+            </Field>
           </div>
-        </div>
-      )}
-    </>
+
+          <Field label="Description" htmlFor="course-desc" hint="Two or three sentences on what students will build.">
+            <textarea
+              id="course-desc"
+              rows={3}
+              value={courseForm.description}
+              onChange={(e) => set({ description: e.target.value })}
+              className={inputClass}
+              required
+              minLength={3}
+            />
+          </Field>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Level" htmlFor="course-level">
+              <select id="course-level" value={courseForm.level || "Beginner"} onChange={(e) => set({ level: e.target.value })} className={inputClass}>
+                {[...new Set([...LEVELS, courseForm.level || "Beginner"])].map((l) => (
+                  <option key={l} value={l}>{l}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Classes" htmlFor="course-sessions" hint="How often classes run.">
+              <input
+                id="course-sessions"
+                value={courseForm.sessions}
+                onChange={(e) => set({ sessions: e.target.value })}
+                placeholder="e.g. 2× weekly"
+                className={inputClass}
+                required
+              />
+            </Field>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+          <h3 className="text-sm font-bold text-blue-900 dark:text-white">Length and price</h3>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <Field label="Number of weeks" htmlFor="course-weeks">
+              <input
+                id="course-weeks"
+                type="number"
+                min={1}
+                max={52}
+                value={weeks}
+                onChange={(e) => setWeeks(Number(e.target.value))}
+                className={inputClass}
+                required
+              />
+            </Field>
+            <Field label="Price per week (₦)" htmlFor="course-price" hint="Students pay week by week.">
+              <input
+                id="course-price"
+                type="number"
+                inputMode="numeric"
+                min={100}
+                step={100}
+                value={price || ""}
+                onChange={(e) => set({ pricePerWeek: Number(e.target.value) })}
+                placeholder="e.g. 10000"
+                className={inputClass}
+                required
+              />
+            </Field>
+          </div>
+          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+            {price >= 100 ? (
+              <>
+                Whole course: <strong className="text-blue-900 dark:text-white">{naira(price * weeks)}</strong> ({weeks} × {naira(price)})
+              </>
+            ) : (
+              "Enter a weekly price to see the total."
+            )}
+          </p>
+        </section>
+
+        <section>
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-blue-900 dark:text-white">Week-by-week plan</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {planned} of {weeks} weeks planned. Shown on the course page and to students.
+              </p>
+            </div>
+          </div>
+          <ol className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+            {plan.map((w, i) => {
+              const open = openWeek === w.week;
+              const filled = !!(w.title.trim() || w.topics.length);
+              return (
+                <li key={w.week} className="bg-white dark:bg-slate-900">
+                  <button
+                    type="button"
+                    onClick={() => setOpenWeek(open ? null : w.week)}
+                    aria-expanded={open}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                  >
+                    <span
+                      className={
+                        filled
+                          ? "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-teal-500 text-xs font-bold text-white"
+                          : "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-500 dark:bg-slate-800"
+                      }
+                    >
+                      {w.week}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+                        {w.title.trim() || <span className="font-normal text-slate-400">Week {w.week}: not planned yet</span>}
+                      </span>
+                      {w.topics.length ? (
+                        <span className="block truncate text-xs text-slate-500">{w.topics.join(" · ")}</span>
+                      ) : null}
+                    </span>
+                    {open ? <ChevronUp className="h-4 w-4 text-slate-400" aria-hidden /> : <ChevronDown className="h-4 w-4 text-slate-400" aria-hidden />}
+                  </button>
+                  {open ? (
+                    <div className="space-y-3 px-4 pb-4">
+                      <Field label="Week title" htmlFor={`wk-title-${w.week}`}>
+                        <input
+                          id={`wk-title-${w.week}`}
+                          value={w.title}
+                          onChange={(e) => setWeek(i, { title: e.target.value })}
+                          placeholder="e.g. Layouts and widgets"
+                          className={inputClass}
+                        />
+                      </Field>
+                      <Field label="Topics" htmlFor={`wk-topics-${w.week}`} hint="One per line.">
+                        <textarea
+                          id={`wk-topics-${w.week}`}
+                          rows={4}
+                          value={w.topics.join("\n")}
+                          onChange={(e) => setWeek(i, { topics: e.target.value.split("\n") })}
+                          placeholder={"Rows and columns\nStack and positioned\nResponsive layouts"}
+                          className={inputClass}
+                        />
+                      </Field>
+                      {filled ? (
+                        <button
+                          type="button"
+                          onClick={() => setWeek(i, { title: "", topics: [] })}
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-600 hover:underline"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden /> Clear week {w.week}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ol>
+          {weeks < 52 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setWeeks(weeks + 1);
+                setOpenWeek(weeks + 1);
+              }}
+              className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-teal-700 hover:underline dark:text-teal-300"
+            >
+              <Plus className="h-4 w-4" aria-hidden /> Add a week
+            </button>
+          ) : null}
+        </section>
+
+        <section className="space-y-4">
+          <Field label="Cover image link (optional)" htmlFor="course-img">
+            <input
+              id="course-img"
+              type="url"
+              value={courseForm.imageUrl}
+              onChange={(e) => set({ imageUrl: e.target.value })}
+              placeholder="https://..."
+              className={inputClass}
+            />
+          </Field>
+          {courseForm.imageUrl?.trim() ? (
+            <img
+              src={courseForm.imageUrl.trim()}
+              alt=""
+              className="h-36 w-full rounded-2xl border border-slate-200 object-cover dark:border-slate-800"
+              onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+            />
+          ) : null}
+          <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+            <Toggle checked={courseForm.isActive} onChange={(v) => set({ isActive: v })} label="Open for sign-ups" description="Turn off to stop new students choosing it." />
+            <Toggle checked={courseForm.showOnLanding} onChange={(v) => set({ showOnLanding: v })} label="Show on the home page" />
+            <Toggle checked={courseForm.showInExplore} onChange={(v) => set({ showInExplore: v })} label="Show in the course list" />
+          </div>
+        </section>
+
+        {courseError ? (
+          <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:bg-red-500/10 dark:text-red-300">
+            {courseError}
+          </p>
+        ) : null}
+      </form>
+    </Dialog>
   );
 };
 

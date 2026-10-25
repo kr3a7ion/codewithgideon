@@ -17,6 +17,7 @@ import {
 import type { RegistrationEntry } from "../../../../services/registrationStore";
 import { Button, cn } from "../../../ui";
 import { useAdmin } from "../AdminWorkspaceContext";
+import { CreditWeeksDialog, type CreditPreset } from "../parts/CreditWeeksDialog";
 import { toDateMs, paymentRecordAmount } from "../lib";
 import {
   AdminPage,
@@ -72,6 +73,7 @@ const StudentPanel: React.FC<{ reg: RegistrationEntry | null; onClose: () => voi
     notify,
   } = useAdmin();
   const navigate = useNavigate();
+  const [credit, setCredit] = useState<CreditPreset | null>(null);
 
   useEffect(() => {
     if (reg?.uid) fetchStudentPayments(reg.uid);
@@ -88,19 +90,16 @@ const StudentPanel: React.FC<{ reg: RegistrationEntry | null; onClose: () => voi
   const check = pending?.reference ? paymentChecks[pending.reference] : undefined;
   const wa = whatsappLink(reg.phone);
 
-  const toggleStatus = async () => {
-    const toPaid = reg.status !== "Complete";
+  const removeAccess = async () => {
     const ok = await confirmAction({
-      title: toPaid ? "Mark as paid without a payment?" : "Mark as not paid?",
-      message: toPaid
-        ? "This gives the student access to their paid weeks without a Paystack payment. Use it for cash or bank transfers you've confirmed yourself."
-        : "The student loses access to classes until they pay again.",
-      confirmLabel: toPaid ? "Mark as paid" : "Mark as not paid",
+      title: "Remove access?",
+      message: `${reg.fullName} will lose access to classes and recordings until they pay again. Their payment history is kept.`,
+      confirmLabel: "Remove access",
       tone: "warning",
     });
     if (!ok) return;
     await handleToggleStatus(reg.uid, reg.status as any);
-    notify("success", `${reg.fullName} updated.`);
+    notify("success", `${reg.fullName} no longer has access.`);
   };
 
   return (
@@ -127,9 +126,9 @@ const StudentPanel: React.FC<{ reg: RegistrationEntry | null; onClose: () => voi
           <div className="ml-auto">
             <OverflowMenu
               items={[
-                reg.status === "Complete"
-                  ? { label: "Mark as not paid", icon: <UserX className="h-4 w-4" />, onSelect: toggleStatus }
-                  : { label: "Mark as paid manually", icon: <UserCheck className="h-4 w-4" />, onSelect: toggleStatus },
+                ...(reg.status === "Complete"
+                  ? [{ label: "Remove access", icon: <UserX className="h-4 w-4" />, onSelect: removeAccess }]
+                  : []),
                 {
                   label: "Delete student",
                   icon: <Trash2 className="h-4 w-4" />,
@@ -165,7 +164,12 @@ const StudentPanel: React.FC<{ reg: RegistrationEntry | null; onClose: () => voi
         </section>
 
         <section>
-          <h3 className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Enrolment</h3>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Enrolment</h3>
+            <Button size="sm" variant={reg.status === "Complete" ? "secondary" : "primary"} leftIcon={<UserCheck className="h-4 w-4" />} onClick={() => setCredit({})}>
+              {reg.status === "Complete" ? "Add weeks" : "Confirm payment"}
+            </Button>
+          </div>
           <div className="divide-y divide-slate-100 dark:divide-slate-800">
             <InfoRow label="Course">{reg.path || "—"}</InfoRow>
             <InfoRow label="Cohort">{(reg as any).cohortLabel || "Not placed yet"}</InfoRow>
@@ -199,6 +203,22 @@ const StudentPanel: React.FC<{ reg: RegistrationEntry | null; onClose: () => voi
             >
               Check with Paystack
             </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="ml-2 mt-3"
+              onClick={() =>
+                setCredit({
+                  weeks: Number(pending.weeks || 1),
+                  amount: Number(pending.amount || 0),
+                  method: "paystack",
+                  reference: pending.reference,
+                  context: "Only do this after you've seen the payment succeed in your Paystack dashboard.",
+                })
+              }
+            >
+              Credit this checkout
+            </Button>
           </section>
         ) : null}
 
@@ -220,7 +240,25 @@ const StudentPanel: React.FC<{ reg: RegistrationEntry | null; onClose: () => voi
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-bold text-slate-900 dark:text-white">{naira(paymentRecordAmount(p))}</p>
-                    {p.status === "needs_review" ? <Pill tone="danger">Needs review</Pill> : null}
+                    {p.status === "needs_review" ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCredit({
+                            amount: paymentRecordAmount(p),
+                            weeks: Math.max(1, Number(p.affordableWeeks || 0) || 1),
+                            method: "paystack",
+                            reference: p.id,
+                            resolveExisting: true,
+                          })
+                        }
+                        className="mt-0.5 block text-xs font-semibold text-red-600 hover:underline"
+                      >
+                        Needs review · credit
+                      </button>
+                    ) : p.source === "admin" || p.source === "admin_override" ? (
+                      <Pill>{p.method === "free" ? "Free" : p.method === "cash" ? "Cash" : p.method === "transfer" ? "Transfer" : "Manual"}</Pill>
+                    ) : null}
                   </div>
                 </li>
               ))}
@@ -228,6 +266,7 @@ const StudentPanel: React.FC<{ reg: RegistrationEntry | null; onClose: () => voi
           )}
         </section>
       </div>
+      <CreditWeeksDialog open={!!credit} onClose={() => setCredit(null)} reg={reg} preset={credit || undefined} />
     </Drawer>
   );
 };

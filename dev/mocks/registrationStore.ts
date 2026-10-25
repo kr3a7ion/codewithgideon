@@ -179,6 +179,24 @@ export const registrationStore: any = {
     }
     return wait(undefined);
   },
+  creditWeeks: async (uid: string, input: any) => {
+    const s = students.find((x) => x.uid === uid);
+    if (!s) throw new Error("This student's profile no longer exists.");
+    const course = courses.find((c) => c.pathId === s.pathId);
+    const max = Number(course?.weeks || s.courseDurationWeeks || 0);
+    const current = s.status === "Complete" ? Number(s.weeksToCommit || 0) : 0;
+    const left = max - current;
+    if (left < 1) throw new Error("This student has already paid for the whole course.");
+    if (input.weeks > left) throw new Error(`Only ${left} week${left === 1 ? "" : "s"} left in this course.`);
+    const cohort = input.cohort || (s.cohortKey ? { cohortId: s.cohortKey, cohortKey: s.cohortKey, label: s.cohortLabel } : activeCohorts[s.pathId]);
+    s.totalPrice = (s.status === "Complete" ? Number(s.totalPrice || 0) : 0) + Number(input.amount || 0);
+    s.status = "Complete";
+    s.weeksToCommit = current + input.weeks;
+    s.courseDurationWeeks = max;
+    if (cohort) Object.assign(s, { cohortId: cohort.cohortId, cohortKey: cohort.cohortKey, cohortLabel: cohort.label });
+    delete s.pendingPayment;
+    return wait({ weeks: s.weeksToCommit, maxWeeks: max, cohortLabel: cohort?.label || "" }, 500);
+  },
   approveTopUpFromPending: async (uid: string, p: any) => {
     const s = students.find((x) => x.uid === uid);
     if (s) {
