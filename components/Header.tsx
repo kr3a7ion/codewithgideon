@@ -20,9 +20,9 @@ type Item = { label: string; to: string; caption: string; dot: string; underline
 
 const NAV: Item[] = [
   { label: "Learn", to: "/courses", caption: "Live cohort classes", dot: "bg-teal-500", underline: "bg-teal-500", match: (p) => p.startsWith("/courses") },
-  { label: "Work", to: "/work", caption: "Sample projects and case studies", dot: "bg-blue-900 dark:bg-white", underline: "bg-blue-900 dark:bg-white", match: (p) => p.startsWith("/work") },
-  { label: "Hire", to: "/hire", caption: "A website for your business", dot: "bg-orange-500", underline: "bg-orange-500", match: (p) => p.startsWith("/hire") },
-  { label: "About", to: "/#about", caption: "Who Gideon is", dot: "bg-blue-900 dark:bg-white", underline: "bg-blue-900 dark:bg-white", match: (p, h) => p === "/" && h === "#about" },
+  { label: "Hire", to: "/hire", caption: "A website or app for your business", dot: "bg-orange-500", underline: "bg-orange-500", match: (p) => p.startsWith("/hire") },
+  { label: "Portfolio", to: "/portfolio", caption: "Products, client work and demos", dot: "bg-blue-900 dark:bg-white", underline: "bg-blue-900 dark:bg-white", match: (p) => p.startsWith("/portfolio") },
+  { label: "About", to: "/about", caption: "Who Gideon is", dot: "bg-blue-900 dark:bg-white", underline: "bg-blue-900 dark:bg-white", match: (p) => p.startsWith("/about") },
 ];
 
 const Header: React.FC<HeaderProps> = ({ onNavigate, isDark, onToggleTheme, isStudentLoggedIn = false }) => {

@@ -1,8 +1,7 @@
 /**
- * Content for the public "Learn · Work · Hire" site.
- *
- * One brand, two doors: Learn (live cohorts) and Hire (websites for
- * businesses). Work is the proof for both. Designs live in Figma:
+ * Content for the public site: Learn (live cohorts), Hire (websites, apps and
+ * systems) and the Portfolio as proof for both. Portfolio projects and Hire
+ * packages live in Firestore (see catalog.ts); this file keeps the rest. Designs live in Figma:
  * https://www.figma.com/design/ANyVyXq9PfmTz1kxppwlJJ
  */
 
@@ -16,143 +15,8 @@ export const SITE_URL = "https://codewithgideon.com";
  */
 const env = import.meta.env as Record<string, string | undefined>;
 
-/**
- * Where the demo sites live. Point demos.codewithgideon.com at the Netlify
- * site (see DEPLOY_RUNBOOK.md), or set VITE_DEMOS_BASE_URL to another host.
- */
-export const DEMOS_BASE_URL = (env.VITE_DEMOS_BASE_URL || "https://demos.codewithgideon.com").replace(/\/+$/, "");
-
 /** Optional free-call link (Cal.com or Calendly). Falls back to WhatsApp. */
 export const BOOKING_URL = (env.VITE_BOOKING_URL || "").trim();
-
-export type WorkSlug = "itura" | "adire";
-
-export type WorkEntry = {
-  slug: WorkSlug;
-  name: string;
-  type: string;
-  result: string;
-  demoPath: string;
-  images: {
-    card: string;
-    cover: string;
-    cover960: string;
-    og: string;
-    desktop: string;
-    mobile: string;
-    alt: string;
-  };
-  brief: string;
-  features: string[];
-  stepsTitle: string;
-  steps: { title: string; body: string }[];
-  builtWith: string[];
-  pkg: {
-    name: string;
-    price: string;
-    timeline: string;
-    note?: string;
-    includes: string[];
-    need: HireNeed;
-  };
-  learn: { href: string; label: string };
-};
-
-const images = (slug: WorkSlug, alt: string) => ({
-  card: `/work/${slug}-card.webp`,
-  cover: `/work/${slug}-cover.webp`,
-  cover960: `/work/${slug}-cover-960.webp`,
-  og: `/work/${slug}-og.jpg`,
-  desktop: `/work/${slug}-desktop.webp`,
-  mobile: `/work/${slug}-mobile.webp`,
-  alt,
-});
-
-const WEB_COHORT = "/courses/web-development-wordpress";
-
-export const WORK: WorkEntry[] = [
-  {
-    slug: "itura",
-    name: "Ìtura Suites",
-    type: "Shortlet booking website",
-    result:
-      "Guests pick dates on a live calendar, pay a 30% deposit and get their door code on WhatsApp.",
-    demoPath: "itura/",
-    images: images("itura", "Ìtura Suites booking website on a laptop and a phone"),
-    brief:
-      "Abuja shortlet hosts lose bookings, and pay platform fees, when guests can only enquire by phone or through Airbnb. Ìtura shows how a host can take direct bookings with a deposit.",
-    features: [
-      "A homepage with the apartments, amenities, location and FAQs",
-      "A live availability calendar where booked nights can't be selected",
-      "A price that updates as you go: nights, cleaning fee, total and 30% deposit",
-      "Checkout by bank transfer, card or USSD (Paystack on a live site)",
-      "A WhatsApp confirmation with the booking reference",
-      "A layout that works as a phone app and as a desktop page",
-    ],
-    stepsTitle: "How a guest books",
-    steps: [
-      { title: "Pick dates", body: "Choose check-in and check-out on the live calendar. Booked nights can't be picked." },
-      { title: "Pay the 30% deposit", body: "By bank transfer, card or USSD. The total and the deposit update as you go." },
-      { title: "Get the door code on WhatsApp", body: "A WhatsApp message confirms the booking with its reference and the door code." },
-    ],
-    builtWith: ["React", "TypeScript", "Tailwind CSS", "Designed in Figma first"],
-    pkg: {
-      name: "Direct-booking website",
-      price: "₦180,000",
-      timeline: "10–14 days",
-      includes: [
-        "A site like this with your own apartments, photos and prices",
-        "Deposits by transfer, card or USSD through Paystack",
-        "The domain and hosting in your name",
-      ],
-      need: "booking",
-    },
-    learn: { href: WEB_COHORT, label: "Web development cohort" },
-  },
-  {
-    slug: "adire",
-    name: "Adire Hair Studio",
-    type: "Salon booking website",
-    result:
-      "Clients choose a style, stylist and time slot, then hold it with a ₦5,000 deposit or book on WhatsApp.",
-    demoPath: "adire/",
-    images: images("adire", "Adire Hair Studio booking website on a laptop and a phone"),
-    brief:
-      "Busy salons handle bookings in WhatsApp chats and lose slots to no-shows. Adire shows styles and prices up front, and uses a small deposit to hold each slot.",
-    features: [
-      "Styles and prices for 13 services",
-      "Multi-service booking, with the total time and price added up",
-      "A choice of stylist",
-      "Real time slots that respect opening hours and how long each style takes",
-      "A ₦5,000 deposit, or book on WhatsApp and pay at the salon",
-      "Hours and directions",
-    ],
-    stepsTitle: "How a client books",
-    steps: [
-      { title: "Choose a style", body: "Browse the services with prices and times. Add more than one and the totals add up." },
-      { title: "Pick a stylist and time", body: "Only real free slots show, based on opening hours and how long each style takes." },
-      { title: "Pay the deposit, or confirm on WhatsApp", body: "Hold the slot with ₦5,000, or send the booking on WhatsApp and pay at the salon." },
-    ],
-    builtWith: ["React", "TypeScript", "Tailwind CSS", "Designed in Figma first"],
-    pkg: {
-      name: "Booking website",
-      price: "₦180,000",
-      timeline: "10–14 days",
-      note: "A WhatsApp-first landing page without booking is ₦90,000.",
-      includes: [
-        "A site like this with your own services, stylists and prices",
-        "Deposits by transfer, card or USSD through Paystack",
-        "The domain and hosting in your name",
-      ],
-      need: "booking",
-    },
-    learn: { href: WEB_COHORT, label: "Web development cohort" },
-  },
-];
-
-export const findWork = (slug?: string) => WORK.find((w) => w.slug === slug);
-
-export const demoUrl = (w: WorkEntry) => `${DEMOS_BASE_URL}/${w.demoPath}`;
 
 // ---------------------------------------------------------------------------
 // Hire
@@ -175,63 +39,6 @@ export const HIRE_BUDGETS = [
   { value: "over-400k", label: "Over ₦400,000" },
   { value: "not-sure", label: "Not sure yet" },
 ] as const;
-
-export type Package = {
-  id: "landing" | "booking" | "care";
-  name: string;
-  description: string;
-  price: string;
-  priceNote: string;
-  timeline: string;
-  includes: string[];
-  featured?: boolean;
-  badge?: string;
-  cta: string;
-};
-
-export const PACKAGES: Package[] = [
-  {
-    id: "landing",
-    name: "WhatsApp-first landing page",
-    description: "One fast page that sends every visitor straight to your WhatsApp.",
-    price: "₦90,000",
-    priceNote: "one-off",
-    timeline: "5 days",
-    includes: [
-      "Your services, prices, photos and location",
-      "A WhatsApp button on every section",
-      "Built for phones first, quick on slow networks",
-    ],
-    cta: "Choose this",
-  },
-  {
-    id: "booking",
-    name: "Direct-booking website",
-    description: "Customers pick a date or slot, pay a deposit and get confirmed on WhatsApp.",
-    price: "₦180,000",
-    priceNote: "one-off",
-    timeline: "10–14 days",
-    includes: [
-      "Everything in the landing page",
-      "A live calendar or real time slots",
-      "Deposits by transfer, card or USSD (Paystack)",
-      "A WhatsApp confirmation with a booking reference",
-    ],
-    featured: true,
-    badge: "Like Ìtura and Adire",
-    cta: "Start a booking site",
-  },
-  {
-    id: "care",
-    name: "Care plan",
-    description: "I look after the site after launch so it keeps working and stays up to date.",
-    price: "₦15,000",
-    priceNote: "per month",
-    timeline: "Ongoing",
-    includes: ["Hosting and domain admin", "Updates to keep the site running", "Small edits to text, prices and photos"],
-    cta: "Add after launch",
-  },
-];
 
 export const HIRE_TERMS = [
   "60% to start, 40% before go-live",

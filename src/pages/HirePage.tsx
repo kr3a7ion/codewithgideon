@@ -5,7 +5,8 @@ import { ArrowRight, ArrowUpRight, CalendarDays, CheckCircle2 } from "lucide-rea
 import { functions } from "../../services/firebase";
 import { usePageMeta } from "../app/usePageMeta";
 import { SlotImage } from "../marketing/SlotImage";
-import { usePackages } from "../marketing/useCatalog";
+import { usePackages, usePortfolio } from "../marketing/useCatalog";
+import { ProjectCover, ProjectTags, primaryLink, projectHref, sortProjects } from "../marketing/portfolio";
 import { withLivePrices } from "../marketing/catalog";
 import {
   BOOKING_URL,
@@ -14,21 +15,18 @@ import {
   HIRE_NEEDS,
   HIRE_TERMS,
   PROCESS,
-  WORK,
   type HireNeed,
 } from "../marketing/content";
 import { getUtm, track, trackCta, trackWhatsApp } from "../marketing/analytics";
 import { copyText, useContactLinks } from "../marketing/useContactLinks";
 import {
   CheckItem,
-  DemoLink,
   Eyebrow,
   FaqList,
   PackageCard,
   Section,
   SectionHeader,
   StepCard,
-  Tag,
   WhatsAppIcon,
   container,
   mbtn,
@@ -329,12 +327,13 @@ const HirePage: React.FC = () => {
   const { items: packages } = usePackages();
   const { whatsapp, responseTime } = useContactLinks();
   usePageMeta({
-    title: "Hire Gideon: websites that take bookings",
+    title: "Hire Gideon: websites, apps and business systems",
     description:
-      "WhatsApp-first landing pages from ₦90,000 and booking websites for ₦180,000, designed in Figma first. The domain and hosting stay in your name.",
-    image: WORK[1].images.og,
+      "Booking websites, WhatsApp-first landing pages, Flutter mobile apps and business systems, designed in Figma first. You own the domain and the code.",
+    image: "/work/adire-og.jpg",
   });
-  const [, adire] = WORK;
+  const { items: projects } = usePortfolio();
+  const proof = sortProjects(projects).slice(0, 4);
 
   return (
     <>
@@ -347,10 +346,11 @@ const HirePage: React.FC = () => {
               id="hire-title"
               className="font-display text-[40px] font-bold leading-[44px] tracking-[-0.02em] text-blue-900 dark:text-white sm:text-[56px] sm:leading-[60px] lg:text-[64px] lg:leading-[68px] lg:tracking-[-0.025em]"
             >
-              Websites that take bookings for your business.
+              Websites and apps that work for your business.
             </h1>
             <p className="text-base leading-[26px] text-slate-600 dark:text-slate-300 sm:text-lg sm:leading-7">
-              I design it in Figma first so you see it before I build it. Fixed prices, and the domain and hosting stay in your name.
+              Booking websites, mobile apps and systems for your team. I design it in Figma first so you see it before I build it, and you own the domain and
+              the code.
             </p>
             <div className="flex flex-col gap-3 sm:flex-row">
               <a
@@ -368,7 +368,7 @@ const HirePage: React.FC = () => {
             </div>
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Reply time: {responseTime.toLowerCase()}.</p>
           </div>
-          <Link to={`/work/${adire.slug}`} className="block overflow-hidden rounded-[18px] shadow-lift sm:rounded-[20px]" aria-label={`${adire.name} case study`}>
+          <Link to="/portfolio" className="block overflow-hidden rounded-[18px] shadow-lift sm:rounded-[20px]" aria-label="See the portfolio">
             <SlotImage
               slot="hire.hero"
               sizes="(min-width: 1024px) 524px, calc(100vw - 40px)"
@@ -434,33 +434,42 @@ const HirePage: React.FC = () => {
       <Section tone="page" labelledBy="proof-title">
         <SectionHeader
           id="proof-title"
-          eyebrow="Work"
-          title="See it working."
-          description="Both demos are live. Book a room or a hairstyle and see exactly what your customers would see."
+          eyebrow="Portfolio"
+          title="See what I've built."
+          description="Real products, client work and live demos. Open a case study to see how each one works."
           action={
-            <Link to="/work" className="inline-flex items-center gap-1.5 text-[15px] font-bold text-blue-900 hover:underline dark:text-white">
-              See all work <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
+            <Link to="/portfolio" className="inline-flex items-center gap-1.5 text-[15px] font-bold text-blue-900 hover:underline dark:text-white">
+              Full portfolio <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
             </Link>
           }
         />
         <div className="mt-10 grid gap-4 sm:gap-6 lg:grid-cols-2">
-          {WORK.map((w) => (
-            <article key={w.slug} className="flex flex-col gap-4 rounded-[20px] border border-line bg-white p-4 dark:border-line-dark dark:bg-slate-900 sm:flex-row sm:items-center sm:gap-5 sm:pr-5">
-              <img src={w.images.card} alt="" width={800} height={500} loading="lazy" className="aspect-[16/10] w-full shrink-0 rounded-xl object-cover sm:w-60" />
-              <div className="space-y-2">
-                <Tag tone="sample">Sample project</Tag>
-                <h3 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">{w.name}</h3>
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{w.type}</p>
-                <div className="flex gap-5 pt-1 text-sm font-bold text-blue-900 dark:text-white">
-                  <DemoLink work={w} location="hire" className="inline-flex items-center gap-1.5 hover:underline" />
-                  <Link to={`/work/${w.slug}`} className="inline-flex items-center gap-1.5 hover:underline">
-                    Case study <ArrowRight className="h-4 w-4" aria-hidden />
-                    <span className="sr-only">: {w.name}</span>
-                  </Link>
+          {proof.map((p) => {
+            const out = primaryLink(p);
+            return (
+              <article key={p.id} className="flex flex-col gap-4 rounded-[20px] border border-line bg-white p-4 dark:border-line-dark dark:bg-slate-900 sm:flex-row sm:items-center sm:gap-5 sm:pr-5">
+                <span className="block aspect-[16/10] w-full shrink-0 overflow-hidden rounded-xl sm:w-60">
+                  <ProjectCover project={p} />
+                </span>
+                <div className="space-y-2">
+                  <ProjectTags project={p} />
+                  <h3 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">{p.title}</h3>
+                  <div className="flex flex-wrap gap-x-5 gap-y-1 pt-1 text-sm font-bold text-blue-900 dark:text-white">
+                    {out ? (
+                      <a href={out.href} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 hover:underline">
+                        {out.label} <ArrowUpRight className="h-4 w-4" aria-hidden />
+                        <span className="sr-only"> for {p.title} (opens in a new tab)</span>
+                      </a>
+                    ) : null}
+                    <Link to={projectHref(p)} className="inline-flex items-center gap-1.5 hover:underline">
+                      Case study <ArrowRight className="h-4 w-4" aria-hidden />
+                      <span className="sr-only">: {p.title}</span>
+                    </Link>
+                  </div>
                 </div>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       </Section>
 
