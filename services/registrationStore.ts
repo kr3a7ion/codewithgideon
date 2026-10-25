@@ -183,6 +183,13 @@ export type CohortDoc = {
   cohortId?: string;
   cohortKey?: string;
 
+  /** First class day, YYYY-MM-DD. Shown to students as their start date. */
+  startsOn?: string;
+  /** Last class day, YYYY-MM-DD. */
+  endsOn?: string;
+  /** "finished" once the intake has ended; otherwise running. */
+  status?: "running" | "finished";
+
   createdAt: number;
   updatedAt: number;
 };
@@ -2077,6 +2084,10 @@ export const registrationStore = {
     if (patch.label !== undefined)
       cleanPatch.label = String(patch.label).trim();
     if (patch.isActive !== undefined) cleanPatch.isActive = !!patch.isActive;
+    const ymd = (v: unknown) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : deleteField());
+    if (patch.startsOn !== undefined) cleanPatch.startsOn = ymd(patch.startsOn);
+    if (patch.endsOn !== undefined) cleanPatch.endsOn = ymd(patch.endsOn);
+    if (patch.status !== undefined) cleanPatch.status = patch.status === "finished" ? "finished" : "running";
     await updateDoc(doc(db, "cohorts", cohortId), stripUndefined(cleanPatch));
   },
 

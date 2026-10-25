@@ -21,6 +21,9 @@ export {
   sendClassReminders,
 } from "./automation.js";
 
+// Admin: add a student yourself, or delete one completely.
+export {adminCreateStudent, adminDeleteStudent} from "./adminStudents.js";
+
 // Website enquiries from the /hire page (no email: a WhatsApp number instead).
 export {sendHireEnquiry} from "./hire.js";
 

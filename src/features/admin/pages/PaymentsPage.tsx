@@ -104,7 +104,7 @@ const PaymentsPage: React.FC = () => {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <Link
-                        to={`/admin/students?student=${encodeURIComponent(c.reg.uid)}`}
+                        to={`/admin/students/${encodeURIComponent(c.reg.uid)}`}
                         className="font-semibold text-slate-900 hover:underline dark:text-white"
                       >
                         {c.reg.fullName}
@@ -199,7 +199,7 @@ const PaymentsPage: React.FC = () => {
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <Link
-                      to={`/admin/students?student=${encodeURIComponent(p.userId)}`}
+                      to={`/admin/students/${encodeURIComponent(p.userId)}`}
                       className="text-sm font-semibold text-teal-700 hover:underline dark:text-teal-400"
                     >
                       Open student

@@ -230,6 +230,14 @@ test("payment locks and webhook logs are server-only", async () => {
   await assertFails(getDoc(doc(db("paid"), "webhookEvents/1")));
 });
 
+test("admin notes: admins only, students can't read their own", async () => {
+  await assertSucceeds(setDoc(doc(db("admin1"), "adminNotes/paid"), {text: "Paid cash on Monday", updatedAt: 1, updatedBy: "admin"}));
+  await assertSucceeds(getDoc(doc(db("admin1"), "adminNotes/paid")));
+  await assertFails(getDoc(doc(db("paid"), "adminNotes/paid")));
+  await assertFails(setDoc(doc(db("paid"), "adminNotes/paid"), {text: "hi", updatedAt: 1, updatedBy: "me"}));
+  await assertFails(setDoc(doc(db("admin1"), "adminNotes/paid"), {text: "x", extra: true}));
+});
+
 // ---------------- sessions ----------------
 
 test("mobile v1.0.0: paid student lists all sessions in own cohort", async () => {

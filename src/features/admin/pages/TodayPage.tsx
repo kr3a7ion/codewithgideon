@@ -366,7 +366,7 @@ const TodayPage: React.FC = () => {
                 {i.newSignups.slice(0, 5).map((r) => (
                   <li key={r.uid}>
                     <Link
-                      to={`/admin/students?student=${encodeURIComponent(r.uid)}`}
+                      to={`/admin/students/${encodeURIComponent(r.uid)}`}
                       className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/60"
                     >
                       <span className="min-w-0">

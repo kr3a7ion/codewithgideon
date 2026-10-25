@@ -8,6 +8,12 @@ import { useAdmin } from "../AdminWorkspaceContext";
 import { useAdminInsights } from "../insights";
 import { currentSeasonKey, nextSeasonKey, seasonLabel } from "../automation";
 import { AdminPage, Dialog, EmptyHint, OverflowMenu, Panel, Pill, relativeTime } from "../ui";
+import { cohortStage } from "./CohortDetailPage";
+
+const startLabel = (ymd?: string) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ""));
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
+};
 
 const StartIntakeDialog: React.FC<{ path: PathDoc | null; onClose: () => void }> = ({ path, onClose }) => {
   const { activeByPath, startIntake, notify, cohorts, intakeCohortId, registrations } = useAdmin();
@@ -144,9 +150,22 @@ const CohortsPage: React.FC = () => {
                 <div className="space-y-4">
                   <div>
                     <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Open intake</p>
-                    <p className="mt-1 font-display text-xl font-bold text-blue-900 dark:text-white">
+                    <Link
+                      to={`/admin/cohorts/${encodeURIComponent(intake.cohortKey)}`}
+                      className="mt-1 block font-display text-xl font-bold text-blue-900 hover:underline dark:text-white"
+                    >
                       {intake.active?.label || intake.cohortKey}
-                    </p>
+                    </Link>
+                    {(() => {
+                      const c: any = cohorts.find((x) => x.id === intake.cohortKey);
+                      return c?.startsOn ? (
+                        <p className="mt-0.5 text-sm text-slate-500">First class {startLabel(c.startsOn)}</p>
+                      ) : (
+                        <Link to={`/admin/cohorts/${encodeURIComponent(intake.cohortKey)}`} className="mt-0.5 inline-block text-sm font-semibold text-orange-700 hover:underline dark:text-orange-300">
+                          Set the start date
+                        </Link>
+                      );
+                    })()}
                     <div className="mt-2 flex flex-wrap gap-2">
                       <Pill tone="navy">{students} paid student{students === 1 ? "" : "s"}</Pill>
                       {intake.upcomingCount ? (
@@ -184,7 +203,7 @@ const CohortsPage: React.FC = () => {
         })}
       </div>
 
-      <Panel title="All cohorts" description="Past and present. Open one to see or change its classes." padded={false}>
+      <Panel title="All cohorts" description="Past and present. Open one to see its students, dates and classes." padded={false}>
         {cohorts.length === 0 && !cohortsLoading ? (
           <EmptyHint icon={<UsersRound className="h-5 w-5" />} title="No cohorts yet" />
         ) : (
@@ -196,12 +215,15 @@ const CohortsPage: React.FC = () => {
                 <li key={c.id} className="flex items-center gap-3 px-4 py-3 sm:px-5">
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                      {c.label}
-                      {currentKeys.has(c.id) ? <Pill tone="teal">Open</Pill> : null}
+                      <Link to={`/admin/cohorts/${encodeURIComponent(c.id)}`} className="hover:underline">{c.label}</Link>
+                      {(() => {
+                        const st = cohortStage(c, currentKeys.has(c.id));
+                        return <Pill tone={st.tone}>{st.label}</Pill>;
+                      })()}
                     </p>
                     <p className="truncate text-xs text-slate-500">
                       {pathTitle} · {students} student{students === 1 ? "" : "s"} · {classCounts[c.id] || 0} classes
-                      {c.createdAt ? ` · started ${relativeTime(Number(c.createdAt))}` : ""}
+                      {c.startsOn ? ` · starts ${startLabel(c.startsOn)}` : c.createdAt ? ` · created ${relativeTime(Number(c.createdAt))}` : ""}
                     </p>
                   </div>
                   <Link

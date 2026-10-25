@@ -10,5 +10,15 @@ export const httpsCallable = (_fns: unknown, name?: string) => async (data?: any
         : { ok: true, outcome: "not_paid", message: "Not paid on Paystack (status: abandoned)." },
     };
   }
+  if (name === "adminCreateStudent") {
+    if (String(data?.email || "").includes("taken")) throw new Error("A student with this email already exists. Search for them on the Students page.");
+    const uid = `new_${Date.now()}`;
+    (globalThis as any).__previewAddStudent?.({ uid, ...data });
+    return { data: { uid, existingAccount: false, setPasswordLink: "https://codewithgideon.firebaseapp.com/__/auth/action?mode=resetPassword&oobCode=preview" } };
+  }
+  if (name === "adminDeleteStudent") {
+    (globalThis as any).__previewRemoveStudent?.(data?.uid);
+    return { data: { ok: true, removed: ["profile, payments and watch progress", "chat", "sign-in"] } };
+  }
   return { data: { success: true } };
 };

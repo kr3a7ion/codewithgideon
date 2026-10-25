@@ -113,6 +113,11 @@ export const previewDb: Record<string, any> = {
   "users/u1/payments": [
     { id: "CWG_PAID_1", reference: "CWG_PAID_1", status: "success", kind: "initial", weeks: 5, amountKobo: 5000000, verifiedAt: Timestamp.fromMillis(now - 20 * day) },
   ],
+  "users/u1/progress": [
+    { id: "W01", sessionId: "W01", position: 5100, duration: 5200, completed: true },
+    { id: "W02", sessionId: "W02", position: 1840, duration: 5320, completed: false },
+  ],
+  "adminNotes/u1": { text: "Prefers WhatsApp. Paid week 1 in cash.", updatedAt: now - 2 * day, updatedBy: "gideon@example.com" },
   "automation/payments": { lastRunAt: Timestamp.fromMillis(now - 12 * 60_000), checked: 2, credited: 1, cleared: 0, waiting: 1, errors: 0 },
   "automation/classReminders": { lastRunAt: Timestamp.fromMillis(now - 6 * 60_000), lastSent: 0, totalSent: 14 },
   "users/student_1/notificationReads": [{ id: "FLUTTER-2026-09_m2", readAt: new Date() }],

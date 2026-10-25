@@ -6,10 +6,12 @@ import AdminLayout from "./layout/AdminLayout";
 import { LEGACY_ADMIN_REDIRECTS } from "./nav";
 import TodayPage from "./pages/TodayPage";
 import StudentsPage from "./pages/StudentsPage";
+import StudentDetailPage from "./pages/StudentDetailPage";
 import PaymentsPage from "./pages/PaymentsPage";
 import InboxPage from "./pages/InboxPage";
 import ClassesPage from "./pages/ClassesPage";
 import CohortsPage from "./pages/CohortsPage";
+import CohortDetailPage from "./pages/CohortDetailPage";
 import AnnouncementsPage from "./pages/AnnouncementsPage";
 import CoursesPage from "./pages/CoursesPage";
 import ResourcesPage from "./pages/ResourcesPage";
@@ -34,10 +36,12 @@ const AdminArea: React.FC<Props> = ({ isDark, onToggleTheme, ...props }) => {
           <Route index element={<Navigate to="today" replace />} />
           <Route path="today" element={<TodayPage />} />
           <Route path="students" element={<StudentsPage />} />
+          <Route path="students/:uid" element={<StudentDetailPage />} />
           <Route path="payments" element={<PaymentsPage />} />
           <Route path="inbox" element={<InboxPage />} />
           <Route path="classes" element={<ClassesPage />} />
           <Route path="cohorts" element={<CohortsPage />} />
+          <Route path="cohorts/:id" element={<CohortDetailPage />} />
           <Route path="announcements" element={<AnnouncementsPage />} />
           <Route path="courses" element={<CoursesPage />} />
           <Route path="resources" element={<ResourcesPage />} />

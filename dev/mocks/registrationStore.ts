@@ -31,7 +31,7 @@ const courses = [
   { id: "course_web", pathId: "path_web", title: "Web Development & WordPress", duration: "8 Weeks", sessions: "2× Weekly", level: "Beginner", description: "HTML, CSS, JavaScript and WordPress sites.", weeks: 8, pricePerWeek: 10000, priceLabel: "₦10k/wk", isActive: true, showOnLanding: true, showInExplore: false, createdAt: 2, updatedAt: 2 },
 ];
 const cohorts: any[] = [
-  { id: "FLUTTER-2026-09", label: "September 2026 Cohort", isActive: true, pathId: "path_flutter", cohortId: "FLUTTER", cohortKey: "FLUTTER-2026-09", createdAt: now - 30 * day, updatedAt: 3 },
+  { id: "FLUTTER-2026-09", label: "September 2026 Cohort", startsOn: new Date(now - 14 * day).toISOString().slice(0, 10), isActive: true, pathId: "path_flutter", cohortId: "FLUTTER", cohortKey: "FLUTTER-2026-09", createdAt: now - 30 * day, updatedAt: 3 },
   { id: "WEB-2026-09", label: "September 2026 Cohort", isActive: true, pathId: "path_web", cohortId: "WEB", cohortKey: "WEB-2026-09", createdAt: now - 28 * day, updatedAt: 3 },
   { id: "FLUTTER-2026-06", label: "June 2026 Cohort", isActive: true, pathId: "path_flutter", cohortId: "FLUTTER", cohortKey: "FLUTTER-2026-06", createdAt: now - 110 * day, updatedAt: 3 },
 ];
@@ -58,6 +58,18 @@ const students: any[] = [
   { uid: "u4", fullName: "Emeka Obi", email: "emeka@example.com", phone: "", path: "Flutter & Mobile App Development", pathId: "path_flutter", status: "Pending", weeksToCommit: 2, totalPrice: 20000, role: "student", timestamp: now - 1 * day },
   { uid: "u5", fullName: "Funmi Adeyemi", email: "funmi@example.com", phone: "08120001111", path: "Flutter & Mobile App Development", pathId: "path_flutter", status: "Complete", weeksToCommit: 3, totalPrice: 30000, courseDurationWeeks: 12, role: "student", timestamp: now - 20 * day, cohortKey: "FLUTTER-2026-09", cohortLabel: "September 2026 Cohort", pendingPayment: { kind: "topup", status: "Pending", weeks: 2, amount: 20000, reference: "CWG_TOPUP_9", createdAt: now - 26 * 3600_000 } },
 ];
+(globalThis as any).__previewAddStudent = (d: any) => {
+  const p = paths.find((x) => x.id === d.pathId);
+  students.push({ uid: d.uid, fullName: d.fullName, email: d.email, phone: d.phone, path: p?.title || "", pathId: d.pathId, status: "Pending", weeksToCommit: 4, totalPrice: 40000, role: "student", timestamp: Date.now(), ageRange: "Not given", gender: "Not given" });
+};
+(globalThis as any).__previewPatchStudent = (uid: string, patch: any) => {
+  const s = students.find((x) => x.uid === uid);
+  if (s) Object.entries(patch).forEach(([k, v]) => (v === undefined ? delete s[k] : (s[k] = v)));
+};
+(globalThis as any).__previewRemoveStudent = (uid: string) => {
+  const i = students.findIndex((x) => x.uid === uid);
+  if (i >= 0) students.splice(i, 1);
+};
 const activeCohorts: Record<string, any> = {
   path_flutter: { pathId: "path_flutter", path: "Flutter & Mobile App Development", cohortId: "FLUTTER", seasonKey: "2026-09", cohortKey: "FLUTTER-2026-09", label: "September 2026 Cohort" },
   path_web: { pathId: "path_web", path: "Web Development & WordPress", cohortId: "WEB", seasonKey: "2026-09", cohortKey: "WEB-2026-09", label: "September 2026 Cohort" },
@@ -125,6 +137,11 @@ export const registrationStore: any = {
     else cohorts.push({ id: cohortKey, label: input.seasonLabel, isActive: true, pathId, path: p.title, cohortId, cohortKey, createdAt: Date.now(), updatedAt: Date.now() });
     sessionsByCohort[cohortKey] ||= [];
     return wait({ ...activeCohorts[pathId] }, 200);
+  },
+  updateCohort: async (id: string, patch: any) => {
+    const c = cohorts.find((x) => x.id === id);
+    if (c) Object.entries(patch).forEach(([k, v]) => (v === "" || v === undefined ? delete c[k] : (c[k] = v)));
+    return wait(undefined);
   },
   deleteCohort: async (id: string) => {
     const i = cohorts.findIndex((c) => c.id === id);

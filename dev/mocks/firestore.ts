@@ -53,7 +53,11 @@ export const onSnapshot = (ref: Ref, next: (s: any) => void) => {
 export const getDoc = async (ref: Ref) => snapFor(ref.path);
 export const getDocs = async (ref: Ref) => snapFor(ref.path);
 export const setDoc = async () => undefined;
-export const updateDoc = async () => undefined;
+// Profile edits made from the admin preview show up in the student list.
+export const updateDoc = async (ref: Ref, patch: any = {}) => {
+  const m = /^users\/([^/]+)$/.exec(ref.path);
+  if (m) (globalThis as any).__previewPatchStudent?.(m[1], patch);
+};
 export const addDoc = async () => ({ id: "new" });
 export const deleteDoc = async () => undefined;
 export const runTransaction = async (_db: unknown, fn: any) => fn({ get: getDoc, set() {}, update() {} });
