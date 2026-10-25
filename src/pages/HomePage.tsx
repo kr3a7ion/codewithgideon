@@ -6,7 +6,9 @@ import { SlotImage } from "../marketing/SlotImage";
 import { IntroVideoButton } from "../marketing/IntroVideo";
 import { useApp } from "../app/AppContext";
 import { usePageMeta } from "../app/usePageMeta";
-import { HIRE_FAQ, HIRE_TERMS, JOIN_FAQ, LEARN_FAQ, PACKAGES, WORK } from "../marketing/content";
+import { HIRE_FAQ, HIRE_TERMS, JOIN_FAQ, LEARN_FAQ, WORK } from "../marketing/content";
+import { usePackages } from "../marketing/useCatalog";
+import { withLivePrices } from "../marketing/catalog";
 import { trackCta, trackWhatsApp } from "../marketing/analytics";
 import { useContactLinks } from "../marketing/useContactLinks";
 import {
@@ -80,6 +82,7 @@ const PhoneMock: React.FC = () => (
  * Figma: "03 Home" in the rebrand file.
  */
 const HomePage: React.FC = () => {
+  const { items: packages } = usePackages();
   const { navigateTo } = useApp();
   const { whatsapp, email, apk } = useContactLinks();
   usePageMeta({
@@ -244,9 +247,12 @@ const HomePage: React.FC = () => {
           action={<ArrowLink to="/hire" tone="hire">How it works</ArrowLink>}
         />
         <div className="mt-10 grid items-start gap-4 sm:gap-6 lg:grid-cols-3">
-          {PACKAGES.map((p) => (
-            <PackageCard key={p.id} pkg={p} location="packages" />
-          ))}
+          {packages
+            .filter((p) => p.track === "website")
+            .slice(0, 3)
+            .map((p) => (
+              <PackageCard key={p.id} pkg={p} location="packages" />
+            ))}
         </div>
         <ul className="mt-6 flex flex-col gap-2.5 rounded-2xl border border-line bg-white px-5 py-4 text-sm font-medium text-blue-900 dark:border-line-dark dark:bg-slate-900 dark:text-white sm:flex-row sm:flex-wrap sm:gap-x-7">
           {HIRE_TERMS.map((t) => (
@@ -330,7 +336,7 @@ const HomePage: React.FC = () => {
             <h3 className="mb-4 flex items-center gap-2 font-display text-lg font-semibold text-blue-900 dark:text-white">
               <span className="h-2 w-2 rounded-full bg-orange-500" aria-hidden /> About websites
             </h3>
-            <FaqList items={WEBSITES_FAQ} headingLevel="h4" />
+            <FaqList items={withLivePrices(WEBSITES_FAQ, packages)} headingLevel="h4" />
           </div>
         </div>
       </Section>

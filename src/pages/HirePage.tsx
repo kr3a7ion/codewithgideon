@@ -5,13 +5,14 @@ import { ArrowRight, ArrowUpRight, CalendarDays, CheckCircle2 } from "lucide-rea
 import { functions } from "../../services/firebase";
 import { usePageMeta } from "../app/usePageMeta";
 import { SlotImage } from "../marketing/SlotImage";
+import { usePackages } from "../marketing/useCatalog";
+import { withLivePrices } from "../marketing/catalog";
 import {
   BOOKING_URL,
   HIRE_BUDGETS,
   HIRE_FAQ,
   HIRE_NEEDS,
   HIRE_TERMS,
-  PACKAGES,
   PROCESS,
   WORK,
   type HireNeed,
@@ -36,7 +37,7 @@ import {
 const inputClass =
   "h-[50px] w-full rounded-xl border-[1.5px] border-[#8592A8] bg-white px-4 text-base text-blue-900 placeholder:text-slate-500 focus:border-blue-900 focus:outline-none focus:ring-4 focus:ring-blue-900/10 aria-[invalid=true]:border-red-600 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:focus:border-slate-300";
 
-const isNeed = (v: string | null): v is HireNeed => v === "landing" || v === "booking" || v === "other";
+const isNeed = (v: string | null): v is HireNeed => HIRE_NEEDS.some((n) => n.value === v);
 
 /** Same rules as the server: Nigerian 0XXXXXXXXXX / +234… or any 10–15 digit international number. */
 export const normalizeWhatsApp = (raw: string): string | null => {
@@ -325,6 +326,7 @@ const EnquiryForm: React.FC = () => {
 
 /** /hire — packages, process and the enquiry form (brief §5). */
 const HirePage: React.FC = () => {
+  const { items: packages } = usePackages();
   const { whatsapp, responseTime } = useContactLinks();
   usePageMeta({
     title: "Hire Gideon: websites that take bookings",
@@ -385,13 +387,24 @@ const HirePage: React.FC = () => {
           eyebrow="Packages"
           tone="hire"
           title="Pick a starting point."
-          description="Every package is a fixed price. If you need something else, ask and you'll get a quote."
+          description="Websites have clear prices. Apps and business systems are quoted for what you need."
         />
-        <div className="mt-10 grid items-start gap-4 sm:gap-6 lg:grid-cols-3">
-          {PACKAGES.map((p) => (
-            <PackageCard key={p.id} pkg={p} location="hire" />
-          ))}
-        </div>
+        {(["website", "app"] as const).map((track) => {
+          const list = packages.filter((p) => p.track === track);
+          if (!list.length) return null;
+          return (
+            <div key={track} className="mt-10">
+              <h3 className="font-display text-xl font-semibold text-blue-900 dark:text-white">
+                {track === "website" ? "Websites" : "Apps and business systems"}
+              </h3>
+              <div className="mt-4 grid items-start gap-4 sm:gap-6 lg:grid-cols-3">
+                {list.map((p) => (
+                  <PackageCard key={p.id} pkg={p} location="hire" />
+                ))}
+              </div>
+            </div>
+          );
+        })}
         <ul className="mt-6 flex flex-col gap-2.5 rounded-2xl bg-paper px-5 py-4 text-sm font-medium text-blue-900 dark:bg-paper-dark dark:text-white sm:flex-row sm:flex-wrap sm:gap-x-7">
           {HIRE_TERMS.map((t) => (
             <CheckItem key={t} tone="hire">
@@ -493,8 +506,8 @@ const HirePage: React.FC = () => {
       <Section tone="page" labelledBy="hire-faq-title">
         <SectionHeader id="hire-faq-title" eyebrow="FAQ" title="Before you ask." description="Short answers to what business owners ask first." />
         <div className="mt-10 grid items-start gap-3 lg:grid-cols-2 lg:gap-6">
-          <FaqList items={HIRE_FAQ.slice(0, 3)} />
-          <FaqList items={HIRE_FAQ.slice(3)} defaultOpen={-1} />
+          <FaqList items={withLivePrices(HIRE_FAQ, packages).slice(0, 3)} />
+          <FaqList items={withLivePrices(HIRE_FAQ, packages).slice(3)} defaultOpen={-1} />
         </div>
       </Section>
     </>

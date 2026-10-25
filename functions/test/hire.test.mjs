@@ -44,6 +44,8 @@ test("missing or unknown fields are refused with a friendly message", () => {
   assert.throws(() => buildHireEnquiry({...valid, businessName: ""}), /business/);
   assert.throws(() => buildHireEnquiry({...valid, whatsapp: "123"}), /WhatsApp/);
   assert.throws(() => buildHireEnquiry({...valid, need: "app"}), /need/);
+  assert.equal(buildHireEnquiry({...valid, need: "mobile-app"}).needLabel, "Mobile app");
+  assert.equal(buildHireEnquiry({...valid, need: "web-app"}).needLabel, "Web app or business system");
   assert.throws(() => buildHireEnquiry({...valid, budget: "a lot"}), /budget/);
 });
 
