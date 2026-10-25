@@ -59,7 +59,7 @@ const Footer: React.FC<FooterProps> = ({ onNavigate, isAdminLoggedIn }) => {
             <Link to="/" aria-label="CodeWithGideon home" className="inline-block">
               <Lockup onDark className="h-9" />
             </Link>
-            <p className="text-base leading-[26px] text-slate-400">Live coding classes and websites for businesses, from Abuja.</p>
+            <p className="text-base leading-[26px] text-slate-400">Live coding classes, and websites and apps for businesses, from Abuja.</p>
             <div className="flex flex-col items-start gap-3">
               <a
                 href={whatsapp}
