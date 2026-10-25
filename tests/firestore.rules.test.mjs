@@ -251,6 +251,17 @@ test("admin notes: admins only, students can't read their own", async () => {
   await assertFails(setDoc(doc(db("admin1"), "adminNotes/paid"), {text: "x", extra: true}));
 });
 
+test("classes can be 'time to be announced'; spaces can target one intake", async () => {
+  await assertSucceeds(setDoc(doc(db("admin1"), "cohorts/FLUTTER-2026-09/sessions/tba"), session(9, {timeTba: true})));
+  await assertFails(setDoc(doc(db("admin1"), "cohorts/FLUTTER-2026-09/sessions/bad"), session(9, {timeTba: "yes"})));
+  const space = {
+    title: "September group", description: "Ask questions here.", cohortKey: "FLUTTER-2026-09", cohortId: "FLUTTER",
+    pathId: PATH_ID, isPublished: true, sortOrder: 0, createdAt: 1, updatedAt: 1,
+  };
+  await assertSucceeds(setDoc(doc(db("admin1"), "communitySpaces/sep"), space));
+  await assertFails(setDoc(doc(db("admin1"), "communitySpaces/bad"), {...space, cohortKey: 5}));
+});
+
 // ---------------- sessions ----------------
 
 test("mobile v1.0.0: paid student lists all sessions in own cohort", async () => {

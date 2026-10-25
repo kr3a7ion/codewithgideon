@@ -5,6 +5,7 @@ import { useAdmin } from "../AdminWorkspaceContext";
 import { sessionStart } from "../insights";
 import { Dialog, classWhen } from "../ui";
 import type { OverviewSession } from "../useAdminWorkspace";
+import { RecordingCheck } from "./RecordingCheck";
 
 export const RecordingLinkDialog: React.FC<{
   item: OverviewSession | null;
@@ -69,6 +70,7 @@ export const RecordingLinkDialog: React.FC<{
             data-autofocus
           />
         </Field>
+        <RecordingCheck url={url} />
       </form>
     </Dialog>
   );

@@ -329,8 +329,11 @@ export const useStudentData = (
             .filter((s: any) => s.isPublished !== false)
             .filter((s: any) => {
               const pathId = String(s.pathId || "").trim();
+              const spaceKey = String(s.cohortKey || "").trim();
               const spaceCohort = String(s.cohortId || "").trim();
               if (pathId && profile.pathId && pathId !== String(profile.pathId)) return false;
+              // One intake only: match the student's exact intake.
+              if (spaceKey) return spaceKey === String(profile.cohortKey || activeForPath?.cohortKey || "");
               if (spaceCohort && activeCohortId && spaceCohort !== String(activeCohortId)) return false;
               return true;
             }),

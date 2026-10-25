@@ -76,10 +76,12 @@ export const toMillis = (value: any): number => {
 export const REMINDER_LEAD_MS = 75 * MINUTE;
 
 export const isReminderDue = (
-  session: {isPublished?: boolean; startsAt?: any},
+  session: {isPublished?: boolean; startsAt?: any; timeTba?: boolean},
   nowMs: number,
 ): boolean => {
   if (session.isPublished === false) return false;
+  // No time yet, so no "starts in an hour" reminder.
+  if (session.timeTba === true) return false;
   const start = toMillis(session.startsAt);
   if (!start) return false;
   return start > nowMs && start - nowMs <= REMINDER_LEAD_MS;

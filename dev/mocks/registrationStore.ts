@@ -92,8 +92,8 @@ export const registrationStore: any = {
   getCohortSessions: async (cohortId: string) =>
     wait(clone([...(sessionsByCohort[cohortId] || [])].sort((a, b) => a.week - b.week || a.startsAt.toMillis() - b.startsAt.toMillis()))),
   getCohortMessages: async (cohortId: string) => wait(clone([...(messagesByCohort[cohortId] || [])].sort((a, b) => b.createdAt - a.createdAt))),
-  getResources: async () => wait(previewResources),
-  getCommunitySpaces: async () => wait(previewSpaces),
+  getResources: async () => wait(clone(previewResources as any[])),
+  getCommunitySpaces: async () => wait(clone(previewSpaces as any[])),
   computeCohortKey: (id: string, season: string) => `${id}-${season}`,
   computeCohortIdFromPath: (title: string) => cohortIdFromPath(title),
   pathKey: (t: string) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, "-"),
@@ -162,6 +162,39 @@ export const registrationStore: any = {
   deleteCohortMessage: async (cohortId: string, id: string) => {
     messagesByCohort[cohortId] = (messagesByCohort[cohortId] || []).filter((x) => x.id !== id);
     return wait(undefined);
+  },
+  // ---- resources and community spaces (in memory) ----
+  addResource: async (input: any) => {
+    const id = `r${Date.now()}`;
+    (previewResources as any[]).push({ id, ...input, createdAt: Date.now(), updatedAt: Date.now() });
+    return wait(id, 150);
+  },
+  updateResource: async (id: string, patch: any) => {
+    const r: any = (previewResources as any[]).find((x) => x.id === id);
+    if (r) Object.entries(patch).forEach(([k, v]) => (v === "" || v === null || v === undefined ? delete r[k] : (r[k] = v)));
+    return wait(undefined, 150);
+  },
+  deleteResource: async (id: string) => {
+    const list = previewResources as any[];
+    const i = list.findIndex((x) => x.id === id);
+    if (i >= 0) list.splice(i, 1);
+    return wait(undefined, 150);
+  },
+  addCommunitySpace: async (input: any) => {
+    const id = `sp${Date.now()}`;
+    (previewSpaces as any[]).push({ id, ...input, createdAt: Date.now(), updatedAt: Date.now() });
+    return wait(id, 150);
+  },
+  updateCommunitySpace: async (id: string, patch: any) => {
+    const r: any = (previewSpaces as any[]).find((x) => x.id === id);
+    if (r) Object.entries(patch).forEach(([k, v]) => (v === "" || v === undefined ? delete r[k] : (r[k] = v)));
+    return wait(undefined, 150);
+  },
+  deleteCommunitySpace: async (id: string) => {
+    const list = previewSpaces as any[];
+    const i = list.findIndex((x) => x.id === id);
+    if (i >= 0) list.splice(i, 1);
+    return wait(undefined, 150);
   },
   updateStatus: async (uid: string, status: string) => {
     const s = students.find((x) => x.uid === uid);
