@@ -36,6 +36,7 @@ test("reminder is due within 75 minutes of a published class", () => {
   const now = Date.UTC(2026, 8, 27, 16, 0);
   assert.equal(isReminderDue({isPublished: true, startsAt: now + 60 * MIN}, now), true);
   assert.equal(isReminderDue({isPublished: true, startsAt: now + REMINDER_LEAD_MS + MIN}, now), false);
+  assert.equal(isReminderDue({isPublished: true, timeTba: true, startsAt: now + 60 * MIN}, now), false);
   assert.equal(isReminderDue({isPublished: true, startsAt: now - MIN}, now), false);
   assert.equal(isReminderDue({isPublished: false, startsAt: now + 30 * MIN}, now), false);
   // Firestore Timestamp-like values work too.

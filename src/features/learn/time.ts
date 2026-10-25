@@ -42,19 +42,27 @@ const startOfDay = (ms: number) => {
 export type SessionPhase = "live" | "soon" | "upcoming" | "ended" | "unscheduled";
 
 export const sessionInfo = (s: SessionDoc, now = Date.now()) => {
-  const { startMs, endMs } = sessionWindow(s);
+  const win = sessionWindow(s);
+  // "Time to be announced": the day is known, the hour isn't. Treat it as
+  // upcoming for the whole day and never as live or starting soon.
+  const tba = (s as any).timeTba === true && Number.isFinite(win.startMs);
+  const startMs = tba ? startOfDay(win.startMs) : win.startMs;
+  const endMs = tba ? startOfDay(win.startMs) + DAY - 1 : win.endMs;
   const hasTime = Number.isFinite(startMs);
   const joinUrl = String((s as any).joinUrl || "").trim();
   const recordingUrl = String((s as any).recordingUrl || "").trim();
   const durationMins = Number.isFinite(endMs) && hasTime ? Math.round((endMs - startMs) / MIN) : Number((s as any).durationMins) || 60;
   let phase: SessionPhase = "unscheduled";
-  if (hasTime) {
+  if (tba) {
+    phase = now > endMs ? "ended" : "upcoming";
+  } else if (hasTime) {
     if (now >= startMs && now <= endMs) phase = "live";
     else if (now < startMs && startMs - now <= JOIN_EARLY_MS) phase = "soon";
     else if (now < startMs) phase = "upcoming";
     else phase = "ended";
   }
   const isToday = hasTime && startOfDay(startMs) === startOfDay(now);
+  const durationFromWindow = Number.isFinite(win.endMs) && Number.isFinite(win.startMs) ? Math.round((win.endMs - win.startMs) / MIN) : 0;
   return {
     startMs,
     endMs,
@@ -63,14 +71,15 @@ export const sessionInfo = (s: SessionDoc, now = Date.now()) => {
     joinUrl,
     recordingUrl,
     /** The join link works from 15 minutes before until the end. */
-    canJoin: !!joinUrl && (phase === "live" || phase === "soon"),
-    durationMins,
+    canJoin: !!joinUrl && (phase === "live" || phase === "soon" || (tba && isToday)),
+    durationMins: tba ? durationFromWindow || Number((s as any).durationMins) || 60 : durationMins,
+    timeTba: tba,
     week: Number((s as any).week) || 0,
     title: String((s as any).title || "Class").trim(),
     notes: String((s as any).notes || "").trim(),
     day: hasTime ? (isToday ? "Today" : dayLabel(startMs)) : "Time to be announced",
-    timeRange: hasTime ? timeRange(startMs, endMs) : "",
-    startTime: hasTime ? timeFmt(startMs) : "",
+    timeRange: tba ? "Time to be announced" : hasTime ? timeRange(startMs, endMs) : "",
+    startTime: tba ? "" : hasTime ? timeFmt(startMs) : "",
     /** Ended in the last two days without a recording yet. */
     recordingSoon: phase === "ended" && !recordingUrl && now - endMs <= 2 * DAY,
   };

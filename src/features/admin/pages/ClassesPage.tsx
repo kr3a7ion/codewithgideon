@@ -20,6 +20,7 @@ import { AdminPage, EmptyHint, OverflowMenu, Panel, Pill, Segmented, Spinner, us
 import { ClassFormDialog } from "../parts/ClassFormDialog";
 import { CopyScheduleDialog, GenerateScheduleDialog } from "../parts/ScheduleDialogs";
 import { RecordingLinkDialog } from "../parts/RecordingLinkDialog";
+import { BulkLinkDialog, ShiftScheduleDialog } from "../parts/BulkClassDialogs";
 import type { OverviewSession } from "../useAdminWorkspace";
 
 type View = "upcoming" | "past" | "drafts";
@@ -49,6 +50,8 @@ const ClassesPage: React.FC = () => {
   const [generateOpen, setGenerateOpen] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
   const [recordingFor, setRecordingFor] = useState<OverviewSession | null>(null);
+  const [bulkLinkOpen, setBulkLinkOpen] = useState(false);
+  const [shiftOpen, setShiftOpen] = useState(false);
 
   // ?cohort= deep link (from Today / Cohorts) picks the cohort.
   useEffect(() => {
@@ -137,6 +140,13 @@ const ClassesPage: React.FC = () => {
             <Button size="sm" leftIcon={<Plus className="h-4 w-4" />} onClick={addClass}>
               Add class
             </Button>
+            <OverflowMenu
+              label="More class tools"
+              items={[
+                { label: "Set class link for upcoming classes", icon: <Link2 className="h-4 w-4" />, onSelect: () => setBulkLinkOpen(true) },
+                { label: "Move upcoming classes", icon: <CalendarDays className="h-4 w-4" />, onSelect: () => setShiftOpen(true) },
+              ]}
+            />
           </>
         ) : null
       }
@@ -245,10 +255,11 @@ const ClassesPage: React.FC = () => {
                           {s.title}
                         </p>
                         <p className="mt-0.5 text-xs text-slate-500">
-                          {d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} · {Number(sAny.durationMins || 60)} min
+                          {sAny.timeTba ? "Time to be announced" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} · {Number(sAny.durationMins || 60)} min
                         </p>
                         <div className="mt-1.5 flex flex-wrap gap-1.5">
                           {live ? <Pill tone="danger">Live now</Pill> : null}
+                          {sAny.timeTba && !past ? <Pill tone="orange">Set the time</Pill> : null}
                           {sAny.isPublished === false ? <Pill>Draft</Pill> : null}
                           {!past && !sAny.joinUrl ? <Pill tone="orange">No class link</Pill> : null}
                           {past ? (
@@ -335,6 +346,8 @@ const ClassesPage: React.FC = () => {
       />
       <CopyScheduleDialog open={copyOpen} onClose={() => setCopyOpen(false)} cohort={cohort} pathId={cohortPathId} />
       <RecordingLinkDialog item={recordingFor} onClose={() => setRecordingFor(null)} />
+      <BulkLinkDialog open={bulkLinkOpen} onClose={() => setBulkLinkOpen(false)} cohortId={selectedCohortId} />
+      <ShiftScheduleDialog open={shiftOpen} onClose={() => setShiftOpen(false)} cohortId={selectedCohortId} />
     </AdminPage>
   );
 };

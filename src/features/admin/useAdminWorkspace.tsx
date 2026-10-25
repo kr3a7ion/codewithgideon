@@ -1652,6 +1652,7 @@ export const useAdminWorkspace = ({
       joinUrl: String((s as any).joinUrl || ""),
       recordingUrl: String((s as any).recordingUrl || ""),
       notes: String((s as any).notes || ""),
+      timeTba: (s as any).timeTba === true,
     });
 
     setSessionModalOpen(true);
@@ -1676,7 +1677,10 @@ export const useAdminWorkspace = ({
     const pathLabel = (p?.title || sessionForm.path || "").trim();
     if (!pathLabel) return setSessionError("Path title is missing.");
 
-    const startsAt = combineDateTimeToMs(sessionForm.date, sessionForm.time);
+    if (!sessionForm.date) return setSessionError("Pick the class date.");
+    const timeTba = !!sessionForm.timeTba;
+    // No time yet: park it at midday so it sorts on the right day.
+    const startsAt = combineDateTimeToMs(sessionForm.date, timeTba ? "12:00" : sessionForm.time);
     const durationMins = Math.max(
       15,
       Math.floor(Number(sessionForm.durationMins || 60)),
@@ -1693,6 +1697,9 @@ export const useAdminWorkspace = ({
       joinUrl: sessionForm.joinUrl.trim(),
       recordingUrl: sessionForm.recordingUrl.trim(),
       notes: sessionForm.notes.trim(),
+      timeTba,
+      // Always recompute, so changing the length or time never leaves an old end time behind.
+      endsAt: startsAt + durationMins * 60_000,
     };
 
     const key = editingSession ? "saveSession" : "createSession";

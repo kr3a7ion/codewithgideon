@@ -193,7 +193,7 @@ service cloud.firestore {
       return data is map
         && data.keys().hasOnly([
           "title", "description",
-          "cohortId", "cohortLabel",
+          "cohortId", "cohortLabel", "cohortKey",
           "pathId", "roomUrl", "ctaLabel",
           "category", "icon",
           "isPublished", "sortOrder",
@@ -208,6 +208,7 @@ service cloud.firestore {
         && isNumber(data.updatedAt)
         && (!("cohortId" in data) || data.cohortId is string)
         && (!("cohortLabel" in data) || data.cohortLabel is string)
+        && (!("cohortKey" in data) || data.cohortKey is string)
         && (!("pathId" in data) || data.pathId is string)
         && (!("roomUrl" in data) || data.roomUrl is string)
         && (!("ctaLabel" in data) || data.ctaLabel is string)
@@ -548,7 +549,7 @@ service cloud.firestore {
         && s.keys().hasOnly([
           "week", "path", "pathId",
           "isPublished", "title", "startsAt", "endsAt",
-          "joinUrl", "recordingUrl", "durationMins", "notes", "createdAt", "updatedAt"
+          "joinUrl", "recordingUrl", "durationMins", "notes", "timeTba", "createdAt", "updatedAt"
         ])
         && s.week is int && s.week >= 1 && s.week <= 52
         && s.path is string && s.path.size() >= 2
@@ -560,6 +561,7 @@ service cloud.firestore {
         && (!("joinUrl" in s) || s.joinUrl is string)
         && (!("recordingUrl" in s) || s.recordingUrl is string)
         && (!("notes" in s) || s.notes is string)
+        && (!("timeTba" in s) || s.timeTba is bool)
         && (!("durationMins" in s) || (s.durationMins is int && s.durationMins >= 15 && s.durationMins <= 600))
         && isNumber(s.createdAt)
         && isNumber(s.updatedAt);
