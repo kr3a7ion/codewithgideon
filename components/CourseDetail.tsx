@@ -1,9 +1,24 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { usePageMeta } from "../src/app/usePageMeta";
 import { View } from "../src/App";
 import { IMAGES } from "../assets/images";
-import { ArrowLink, SectionHeader } from "../src/marketing/ui";
+import { ArrowRight, ChevronRight, FolderOpen, MessageSquare, MonitorPlay, Video } from "lucide-react";
+import {
+  ArrowLink,
+  CheckItem,
+  Eyebrow,
+  FaqList,
+  Section,
+  SectionHeader,
+  Tag,
+  WhatsAppIcon,
+  container,
+  mbtn,
+} from "../src/marketing/ui";
+import { JOIN_FAQ, LEARN_FAQ } from "../src/marketing/content";
+import { upcomingCohortLabel, useContactLinks } from "../src/marketing/useContactLinks";
+import { trackCta, trackWhatsApp } from "../src/marketing/analytics";
 import { usePortfolio } from "../src/marketing/useCatalog";
 import { ProjectCard, projectsForCourse } from "../src/marketing/portfolio";
 import {
@@ -173,6 +188,13 @@ const fallbackCourses: DetailCourse[] = [
   },
 ];
 
+const INCLUDED = [
+  { icon: MonitorPlay, title: "Live classes", body: "Taught live with Gideon. Ask questions as we build." },
+  { icon: Video, title: "Every class recorded", body: "Rewatch any class in your dashboard or the app." },
+  { icon: MessageSquare, title: "Mentor chat", body: "Stuck? Send a message and a screenshot of the error." },
+  { icon: FolderOpen, title: "Resources and community", body: "Slides, files and a group with the rest of your cohort." },
+];
+
 const parseWeeks = (course: DetailCourse) => {
   if (Number(course.weeks) > 0) return Math.floor(Number(course.weeks));
   const fromDuration = parseInt(String(course.duration || "").replace(/[^\d]/g, ""), 10);
@@ -273,204 +295,201 @@ const CourseDetail: React.FC<CourseDetailProps> = ({ onNavigate }) => {
       }));
   }, [course]);
 
+  const { whatsapp, nextCohortDate } = useContactLinks();
+  const nextCohort = upcomingCohortLabel(nextCohortDate);
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 py-24">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="h-96 rounded-[2.5rem] bg-slate-200 dark:bg-slate-800 animate-pulse" />
-          <div className="mt-10 grid gap-5 md:grid-cols-3">
-            {[1, 2, 3].map((item) => (
-              <div
-                key={item}
-                className="h-40 rounded-3xl bg-slate-200 dark:bg-slate-800 animate-pulse"
-              />
-            ))}
+      <section className="bg-paper dark:bg-paper-dark" aria-busy="true" aria-label="Loading course">
+        <div className={`${container} grid gap-10 pb-16 pt-10 lg:grid-cols-[minmax(0,1fr)_480px]`}>
+          <div className="space-y-5">
+            <div className="h-6 w-40 animate-pulse rounded-full bg-white dark:bg-slate-800" />
+            <div className="h-16 w-4/5 animate-pulse rounded-2xl bg-white dark:bg-slate-800" />
+            <div className="h-20 w-full animate-pulse rounded-2xl bg-white dark:bg-slate-800" />
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-20 animate-pulse rounded-2xl bg-white dark:bg-slate-800" />
+              ))}
+            </div>
           </div>
+          <div className="aspect-[4/3] animate-pulse rounded-[28px] bg-white dark:bg-slate-800" />
         </div>
-      </div>
+      </section>
     );
   }
 
   if (!course) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 py-24">
-        <div className="mx-auto max-w-3xl px-6 text-center">
-          <p className="mb-4 text-xs font-black uppercase tracking-[0.3em] text-teal-600 dark:text-teal-400">
-            Course not found
-          </p>
-          <h1 className="text-4xl font-black text-blue-950 dark:text-white">
-            This course is not available yet.
+      <Section tone="paper">
+        <div className="mx-auto max-w-[640px] text-center">
+          <Eyebrow tone="learn" className="justify-center">Course not found</Eyebrow>
+          <h1 className="mt-4 font-display text-[34px] font-bold leading-10 tracking-[-0.02em] text-blue-900 dark:text-white sm:text-[44px] sm:leading-[50px]">
+            This course isn&rsquo;t available.
           </h1>
-          <p className="mt-5 text-slate-600 dark:text-slate-300">
-            It may have been unpublished or moved. Explore the current active
-            courses and pick the one that fits your path.
+          <p className="mt-4 text-base leading-[26px] text-slate-600 dark:text-slate-300">
+            It may have been unpublished or moved. Pick one of the current courses.
           </p>
-          <button
-            onClick={() => onNavigate("curriculums")}
-            className="mt-8 rounded-2xl bg-blue-900 px-8 py-4 font-black text-white transition hover:bg-blue-800 dark:bg-teal-600 dark:hover:bg-teal-500"
-          >
-            View Active Courses
-          </button>
+          <Link to="/courses" className={mbtn({ kind: "learn", size: "lg", className: "mt-7" })}>
+            See the courses <ArrowRight className="h-5 w-5" aria-hidden />
+          </Link>
         </div>
-      </div>
+      </Section>
     );
   }
 
   const weeks = parseWeeks(course);
   const weeklyRate = Number(course.pricePerWeek || 0);
-  const priceLabel = weeklyRate > 0 ? `${currency(weeklyRate)}/week` : course.priceLabel;
+  const priceLabel = weeklyRate > 0 ? `${currency(weeklyRate)} / week` : course.priceLabel || "At sign-up";
   const enrolmentKey = course.source === "firestore" ? `cid:${course.id}` : course.title;
+  const related = projectsForCourse(projects, `${course?.title || ""} ${token}`);
+  const join = () => {
+    trackCta("join_cohort", "cohorts");
+    onNavigate("create-account", enrolmentKey);
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 py-24 text-slate-900 dark:text-white">
-      <div className="mx-auto max-w-6xl px-6">
-        <button
-          onClick={() => onNavigate("curriculums")}
-          className="mb-8 inline-flex items-center text-sm font-black uppercase tracking-widest text-slate-500 transition hover:text-blue-900 dark:hover:text-teal-400"
-        >
-          <span className="mr-2">←</span>
-          Back to courses
-        </button>
-
-        {error && (
-          <div className="mb-6 rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-            {error}
-          </div>
-        )}
-
-        <section className="relative overflow-hidden rounded-[2.5rem] bg-blue-950 p-6 shadow-2xl dark:bg-slate-900 md:p-10">
-          <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-teal-400/20 blur-3xl" />
-          <div className="absolute -bottom-32 left-10 h-72 w-72 rounded-full bg-orange-400/20 blur-3xl" />
-
-          <div className="relative grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
-            <div>
-              <div className="mb-5 inline-flex rounded-full border border-white/15 bg-white/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.24em] text-teal-100">
-                {course.level || "Course"} · {weeks} weeks
-              </div>
-              <h1 className="max-w-3xl text-4xl font-black leading-tight text-white md:text-6xl">
-                {course.title}
-              </h1>
-              <p className="mt-6 max-w-2xl text-lg leading-8 text-blue-100/90">
-                {course.description}
-              </p>
-
-              <div className="mt-8 grid gap-3 sm:grid-cols-3">
-                {[
-                  ["Duration", course.duration || `${weeks} Weeks`],
-                  ["Classes", course.sessions || "Live sessions"],
-                  ["Investment", priceLabel || "See enrollment"],
-                ].map(([label, value]) => (
-                  <div
-                    key={label}
-                    className="rounded-3xl border border-white/10 bg-white/10 p-4 backdrop-blur"
-                  >
-                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-100/60">
-                      {label}
-                    </p>
-                    <p className="mt-2 text-sm font-black text-white">{value}</p>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <button
-                  onClick={() => onNavigate("create-account", enrolmentKey)}
-                  className="rounded-2xl bg-teal-500 px-8 py-4 text-sm font-black text-white shadow-xl transition hover:-translate-y-0.5 hover:bg-teal-400"
-                >
-                  Enroll Now
-                </button>
-                <button
-                  onClick={() => {
-                    document
-                      .getElementById("course-syllabus")
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                  }}
-                  className="rounded-2xl border border-white/15 bg-white/10 px-8 py-4 text-sm font-black text-white transition hover:bg-white/15"
-                >
-                  See Weekly Plan
-                </button>
-              </div>
+    <>
+      <section className="bg-paper dark:bg-paper-dark" aria-labelledby="course-title">
+        <div className={`${container} grid items-center gap-10 pb-12 pt-7 sm:pb-16 sm:pt-12 lg:grid-cols-[minmax(0,1fr)_480px] lg:gap-14`}>
+          <div className="space-y-6">
+            <nav aria-label="Breadcrumb">
+              <ol className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
+                <li>
+                  <Link to="/courses" className="hover:text-blue-900 hover:underline dark:hover:text-white">
+                    Courses
+                  </Link>
+                </li>
+                <li aria-hidden>
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </li>
+                <li aria-current="page" className="truncate text-blue-900 dark:text-white">
+                  {course.title}
+                </li>
+              </ol>
+            </nav>
+            <div className="flex flex-wrap gap-2">
+              <Tag tone="learn">Live cohort</Tag>
+              {course.level ? <Tag>{course.level}</Tag> : null}
+              <Tag>{weeks} weeks</Tag>
             </div>
-
-            <div className="relative">
-              <div className="absolute inset-0 translate-x-4 translate-y-4 rounded-[2rem] bg-teal-400/20 blur-sm" />
-              <img
-                src={course.imageUrl || IMAGES.placeholders.courseFlutter}
-                alt={course.title}
-                className="relative h-[340px] w-full rounded-[2rem] object-cover shadow-2xl"
-              />
-            </div>
-          </div>
-        </section>
-
-        <section id="course-syllabus" className="scroll-mt-28 pt-16">
-          <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.3em] text-teal-600 dark:text-teal-400">
-                Curriculum
-              </p>
-              <h2 className="mt-3 text-3xl font-black text-blue-950 dark:text-white">
-                Weekly breakdown
-              </h2>
-            </div>
-            <p className="max-w-xl text-sm leading-7 text-slate-600 dark:text-slate-300">
-              Each week is designed to unlock a practical milestone, not just
-              another lecture. The outline may be adjusted as the cohort
-              progresses.
-            </p>
-          </div>
-
-          {syllabus.length === 0 ? (
-            <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <h3 className="text-xl font-black text-blue-950 dark:text-white">
-                Syllabus coming soon
-              </h3>
-              <p className="mt-3 text-slate-600 dark:text-slate-300">
-                This course is active, but the weekly syllabus has not been
-                published yet.
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-5 md:grid-cols-2">
-              {syllabus.map((week) => (
-                <article
-                  key={`${week.week}-${week.title}`}
-                  className="group rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-xl dark:border-slate-800 dark:bg-slate-900"
-                >
-                  <div className="mb-5 flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-950 text-sm font-black text-white dark:bg-teal-500">
-                      {week.week}
-                    </div>
-                    <h3 className="text-lg font-black text-blue-950 dark:text-white">
-                      {week.title}
-                    </h3>
-                  </div>
-                  <ul className="space-y-3">
-                    {week.topics.length > 0 ? (
-                      week.topics.map((topic) => (
-                        <li
-                          key={topic}
-                          className="flex items-start gap-3 text-sm leading-6 text-slate-600 dark:text-slate-300"
-                        >
-                          <span className="mt-2 h-2 w-2 rounded-full bg-teal-500" />
-                          <span>{topic}</span>
-                        </li>
-                      ))
-                    ) : (
-                      <li className="text-sm text-slate-500 dark:text-slate-400">
-                        Details will be shared before this week starts.
-                      </li>
-                    )}
-                  </ul>
-                </article>
+            <h1
+              id="course-title"
+              className="font-display text-[38px] font-bold leading-[42px] tracking-[-0.02em] text-blue-900 dark:text-white sm:text-[52px] sm:leading-[56px] lg:text-[60px] lg:leading-[64px] lg:tracking-[-0.025em]"
+            >
+              {course.title}
+            </h1>
+            {course.description ? (
+              <p className="max-w-[620px] text-base leading-[26px] text-slate-600 dark:text-slate-300 sm:text-lg sm:leading-7">{course.description}</p>
+            ) : null}
+            <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                ["Length", course.duration || `${weeks} weeks`],
+                ["Classes", course.sessions || "Live online"],
+                ["Price", priceLabel],
+                ["Next cohort", nextCohort ? `Starts ${nextCohort}` : "Enrolling now"],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-2xl border border-line bg-white px-4 py-3 dark:border-line-dark dark:bg-slate-900">
+                  <dt className="text-xs font-semibold text-slate-500 dark:text-slate-400">{label}</dt>
+                  <dd className="mt-1 font-display text-[15px] font-bold leading-5 text-blue-900 dark:text-white">{value}</dd>
+                </div>
               ))}
+            </dl>
+            {weeklyRate > 0 ? (
+              <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                Pay week by week. The whole course is {weeks} × {currency(weeklyRate)} = <strong className="text-blue-900 dark:text-white">{currency(weeks * weeklyRate)}</strong>.
+              </p>
+            ) : null}
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <button type="button" onClick={join} className={mbtn({ kind: "learn", size: "lg" })}>
+                Join the next cohort <ArrowRight className="h-5 w-5" aria-hidden />
+              </button>
+              <a href="#course-syllabus" className={mbtn({ kind: "secondary", size: "lg" })}>
+                See the weekly plan
+              </a>
+              <a href={whatsapp} target="_blank" rel="noopener noreferrer" onClick={() => trackWhatsApp("cohorts")} className={mbtn({ kind: "ghost", size: "lg" })}>
+                <WhatsAppIcon className="h-5 w-5" /> Ask a question
+              </a>
             </div>
-          )}
-        </section>
+          </div>
+          <div className="overflow-hidden rounded-[22px] bg-gradient-to-br from-blue-800 to-teal-700 shadow-lift sm:rounded-[28px]">
+            <img
+              src={course.imageUrl || IMAGES.placeholders.courseFlutter}
+              alt=""
+              className="aspect-[4/3] w-full object-cover"
+              onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")}
+            />
+          </div>
+        </div>
+      </section>
 
-        {/* Projects built with what this course teaches. */}
-        {projectsForCourse(projects, `${course?.title || ""} ${token}`).length ? (
-        <section aria-labelledby="course-build" className="mt-16 rounded-[28px] bg-paper p-5 dark:bg-paper-dark sm:p-8 lg:p-10">
+      {error ? (
+        <div className={`${container} pt-6`}>
+          <p className="rounded-2xl border border-orange-200 bg-orange-50 px-5 py-3 text-sm font-semibold text-orange-900 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-100">
+            {error}
+          </p>
+        </div>
+      ) : null}
+
+      <Section id="course-syllabus" tone="page" labelledBy="syllabus-title" className="scroll-mt-20">
+        <SectionHeader
+          id="syllabus-title"
+          eyebrow="Weekly plan"
+          tone="learn"
+          title="What you'll learn, week by week."
+          description="Each week ends with something working. The plan may shift a little as the cohort goes."
+        />
+        {syllabus.length === 0 ? (
+          <div className="mt-10 rounded-[20px] border border-line bg-paper p-8 text-center dark:border-line-dark dark:bg-paper-dark">
+            <h3 className="font-display text-xl font-semibold text-blue-900 dark:text-white">The weekly plan is coming soon</h3>
+            <p className="mt-2 text-sm font-medium text-slate-600 dark:text-slate-300">Message Gideon on WhatsApp if you&rsquo;d like the outline now.</p>
+          </div>
+        ) : (
+          <ol className="mt-10 grid gap-4 sm:gap-5 md:grid-cols-2">
+            {syllabus.map((week) => (
+              <li key={`${week.week}-${week.title}`} className="rounded-[20px] border border-line bg-white p-6 dark:border-line-dark dark:bg-slate-900">
+                <div className="flex items-center gap-3.5">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 font-display text-base font-bold text-teal-700 dark:bg-teal-950 dark:text-teal-300">
+                    {week.week}
+                  </span>
+                  <h3 className="font-display text-lg font-semibold leading-6 text-blue-900 dark:text-white">
+                    <span className="sr-only">Week {week.week}: </span>
+                    {week.title}
+                  </h3>
+                </div>
+                {week.topics.length ? (
+                  <ul className="mt-4 space-y-2 text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">
+                    {week.topics.map((topic) => (
+                      <CheckItem key={topic} tone="learn">
+                        {topic}
+                      </CheckItem>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">Details are shared before this week starts.</p>
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+      </Section>
+
+      <Section tone="paper" labelledBy="included-title">
+        <SectionHeader id="included-title" eyebrow="What you get" tone="learn" title="Everything you need to keep up." />
+        <ul className="mt-10 grid gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
+          {INCLUDED.map(({ icon: Icon, title, body }) => (
+            <li key={title} className="flex flex-col gap-3 rounded-[20px] border border-line bg-white p-6 dark:border-line-dark dark:bg-slate-900">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-teal-50 dark:bg-teal-950">
+                <Icon className="h-5 w-5 text-teal-700 dark:text-teal-300" aria-hidden />
+              </span>
+              <h3 className="font-display text-lg font-semibold text-blue-900 dark:text-white">{title}</h3>
+              <p className="text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{body}</p>
+            </li>
+          ))}
+        </ul>
+      </Section>
+
+      {related.length ? (
+        <Section tone="page" labelledBy="course-build">
           <SectionHeader
             id="course-build"
             eyebrow="Portfolio"
@@ -478,15 +497,33 @@ const CourseDetail: React.FC<CourseDetailProps> = ({ onNavigate }) => {
             description="Real projects built with the tools this course teaches."
             action={<ArrowLink to="/portfolio">Full portfolio</ArrowLink>}
           />
-          <div className="mt-8 grid gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {projectsForCourse(projects, `${course?.title || ""} ${token}`).map((p) => (
+          <div className="mt-10 grid gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {related.map((p) => (
               <ProjectCard key={p.id} project={p} location="cohorts" />
             ))}
           </div>
-        </section>
-        ) : null}
-      </div>
-    </div>
+        </Section>
+      ) : null}
+
+      <Section tone={related.length ? "paper" : "page"} labelledBy="course-faq">
+        <SectionHeader id="course-faq" eyebrow="FAQ" title="Before you join." />
+        <div className="mt-10 grid gap-3 lg:grid-cols-2 lg:gap-6">
+          <FaqList items={LEARN_FAQ} />
+          <FaqList items={JOIN_FAQ} defaultOpen={-1} />
+        </div>
+        <div className="mt-10 flex flex-col items-start gap-4 rounded-3xl bg-blue-900 p-6 text-white dark:bg-blue-950 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+          <div>
+            <p className="font-display text-[22px] font-semibold leading-7">Ready to start?</p>
+            <p className="mt-1 text-sm text-slate-300">
+              {nextCohort ? `The next cohort starts ${nextCohort}.` : "Sign up now and you'll join the next cohort."} Pay for the first weeks and you&rsquo;re in.
+            </p>
+          </div>
+          <button type="button" onClick={join} className={mbtn({ kind: "learn", size: "lg", className: "shrink-0" })}>
+            Join the next cohort <ArrowRight className="h-5 w-5" aria-hidden />
+          </button>
+        </div>
+      </Section>
+    </>
   );
 };
 
