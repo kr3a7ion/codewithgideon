@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { View } from "../src/App";
 import { IMAGES } from "../assets/images";
-import { ArrowLink, Eyebrow, Section, SectionHeader, Tag, WorkCard, container, mbtn } from "../src/marketing/ui";
-import { WORK } from "../src/marketing/content";
+import { ArrowLink, Eyebrow, Section, SectionHeader, Tag, container, mbtn } from "../src/marketing/ui";
+import { usePortfolio } from "../src/marketing/useCatalog";
+import { ProjectCard, projectsForCourse } from "../src/marketing/portfolio";
 import { trackCta } from "../src/marketing/analytics";
 import {
   registrationStore,
@@ -58,6 +59,7 @@ const safeView = (v: any): View => {
 };
 
 const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
+  const { items: projects } = usePortfolio();
   const emergencyPaths: DisplayPath[] = [
     {
       title: "Flutter & Mobile App Development",
@@ -212,10 +214,10 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
             Pick a path. Every cohort is live with Gideon, recorded after every class, and paid for week by week.
           </p>
           <div className="mt-6 flex flex-wrap gap-x-7 gap-y-3">
-            <ArrowLink to="/work" tone="learn">
-              See what you&rsquo;ll build
+            <ArrowLink to="/portfolio" tone="learn">
+              See what you could build
             </ArrowLink>
-            <ArrowLink to="/#about">Meet your teacher</ArrowLink>
+            <ArrowLink to="/about">Meet your teacher</ArrowLink>
           </div>
         </div>
       </section>
@@ -301,14 +303,14 @@ const Curriculums: React.FC<CurriculumsProps> = ({ onNavigate }) => {
       <Section tone="paper" labelledBy="build-title">
         <SectionHeader
           id="build-title"
-          eyebrow="Work"
-          title="See what you’ll build."
-          description="Sample booking sites for the kind of businesses web cohort learners build for. Try the live demos."
-          action={<ArrowLink to="/work">See all work</ArrowLink>}
+          eyebrow="Portfolio"
+          title="See what you could build."
+          description="Real projects built with the tools you'll learn. Open a case study to see how each one works."
+          action={<ArrowLink to="/portfolio">Full portfolio</ArrowLink>}
         />
-        <div className="mt-10 grid gap-4 sm:gap-6 md:grid-cols-2">
-          {WORK.map((w) => (
-            <WorkCard key={w.slug} work={w} location="cohorts" />
+        <div className="mt-10 grid gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {projectsForCourse(projects).map((p) => (
+            <ProjectCard key={p.id} project={p} location="cohorts" />
           ))}
         </div>
       </Section>

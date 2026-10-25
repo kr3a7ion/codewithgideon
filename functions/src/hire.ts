@@ -15,9 +15,11 @@ import {db} from "./admin.js";
 import {enforceRateLimit, normalizeSpaces} from "./rateLimit.js";
 
 export const HIRE_NEEDS: Record<string, string> = {
-  landing: "Landing page",
-  booking: "Booking site",
-  other: "Something else",
+  "landing": "Landing page",
+  "booking": "Booking site",
+  "mobile-app": "Mobile app",
+  "web-app": "Web app or business system",
+  "other": "Something else",
 };
 
 export const HIRE_BUDGETS: Record<string, string> = {

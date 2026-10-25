@@ -247,6 +247,8 @@ export type CommunitySpaceDoc = {
   description: string;
   cohortId?: string;
   cohortLabel?: string;
+  /** One intake only (e.g. FLUTTER-2026-09). cohortId alone matches every intake of a course. */
+  cohortKey?: string;
   pathId?: string;
   roomUrl?: string;
   ctaLabel?: string;
@@ -280,6 +282,8 @@ export type SessionDoc = {
   recordingUrl?: string;
   durationMins?: number;
   notes?: string;
+  /** The date is set but the time isn't yet. */
+  timeTba?: boolean;
 
   createdAt: number;
   updatedAt: number;
@@ -1311,6 +1315,8 @@ export const registrationStore = {
           ? Math.max(15, Math.floor(Number(input.durationMins)))
           : 60,
       notes: input.notes ? String(input.notes).trim() : "",
+      // Date known, time not yet: students see "time to be announced".
+      timeTba: input.timeTba === true ? true : undefined,
     });
   },
 
@@ -1446,6 +1452,8 @@ export const registrationStore = {
       clean.durationMins = Math.max(15, Math.floor(Number(patch.durationMins)));
     if (patch.notes !== undefined)
       clean.notes = String(patch.notes || "").trim();
+    if ((patch as any).timeTba !== undefined)
+      clean.timeTba = (patch as any).timeTba === true ? true : deleteField();
 
     if (patch.startsAt !== undefined)
       clean.startsAt = this._toTimestamp(patch.startsAt);
@@ -1861,6 +1869,7 @@ export const registrationStore = {
       cohortLabel: input.cohortLabel
         ? String(input.cohortLabel).trim()
         : undefined,
+      cohortKey: input.cohortKey ? String(input.cohortKey).trim() : undefined,
       pathId: input.pathId ? String(input.pathId).trim() : undefined,
       roomUrl: input.roomUrl ? String(input.roomUrl).trim() : undefined,
       ctaLabel: input.ctaLabel ? String(input.ctaLabel).trim() : undefined,
@@ -1905,6 +1914,10 @@ export const registrationStore = {
     if (patch.pathId !== undefined) {
       const value = String(patch.pathId || "").trim();
       cleanPatch.pathId = value ? value : deleteField();
+    }
+    if ((patch as any).cohortKey !== undefined) {
+      const value = String((patch as any).cohortKey || "").trim();
+      cleanPatch.cohortKey = value ? value : deleteField();
     }
     if (patch.roomUrl !== undefined) {
       const value = String(patch.roomUrl || "").trim();

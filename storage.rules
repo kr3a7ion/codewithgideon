@@ -25,6 +25,19 @@ service firebase.storage {
       allow write: if isAdmin() && request.resource.size < 50 * 1024 * 1024;
     }
 
+    // Pictures and videos for the public site (Admin → Site media).
+    // Anyone can view them; only admins upload or delete. Images are shrunk
+    // in the browser first; videos are capped at 50 MB.
+    match /site-media/{file} {
+      allow read: if true;
+      allow create: if isAdmin()
+        && (
+          (request.resource.contentType.matches('image/.*') && request.resource.size < 25 * 1024 * 1024)
+          || (request.resource.contentType.matches('video/(mp4|webm)') && request.resource.size < 50 * 1024 * 1024)
+        );
+      allow delete: if isAdmin();
+    }
+
     match /{everything=**} {
       allow read, write: if false;
     }

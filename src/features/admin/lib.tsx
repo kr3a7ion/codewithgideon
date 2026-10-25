@@ -187,6 +187,8 @@ export type SessionForm = {
   joinUrl: string;
   recordingUrl: string;
   notes: string;
+  /** Date set, time not decided yet. */
+  timeTba: boolean;
 };
 
 export const emptySession: SessionForm = {
@@ -202,6 +204,7 @@ export const emptySession: SessionForm = {
   joinUrl: "",
   recordingUrl: "",
   notes: "",
+  timeTba: false,
 };
 
 export const toLocalDateInput = (ms: number) => {

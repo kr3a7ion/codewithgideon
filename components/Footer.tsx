@@ -33,7 +33,7 @@ const Footer: React.FC<FooterProps> = ({ onNavigate, isAdminLoggedIn }) => {
       title: "Hire",
       dot: "bg-orange-500",
       links: [
-        { label: "Work", to: "/work" },
+        { label: "Portfolio", to: "/portfolio" },
         { label: "Packages", to: "/hire#packages" },
         { label: "Start a project", to: "/hire#enquire" },
       ],
@@ -42,7 +42,7 @@ const Footer: React.FC<FooterProps> = ({ onNavigate, isAdminLoggedIn }) => {
       title: "Company",
       dot: "bg-white",
       links: [
-        { label: "About", to: "/#about" },
+        { label: "About", to: "/about" },
         { label: "Contact", to: "/contact" },
         { label: "Privacy", to: "/privacy" },
         { label: "Terms", to: "/terms" },
@@ -59,7 +59,7 @@ const Footer: React.FC<FooterProps> = ({ onNavigate, isAdminLoggedIn }) => {
             <Link to="/" aria-label="CodeWithGideon home" className="inline-block">
               <Lockup onDark className="h-9" />
             </Link>
-            <p className="text-base leading-[26px] text-slate-400">Live coding classes and websites for businesses, from Abuja.</p>
+            <p className="text-base leading-[26px] text-slate-400">Live coding classes, and websites and apps for businesses, from Abuja.</p>
             <div className="flex flex-col items-start gap-3">
               <a
                 href={whatsapp}

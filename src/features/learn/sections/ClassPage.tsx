@@ -204,7 +204,7 @@ const ClassPage: React.FC<{ sessionId: string }> = ({ sessionId }) => {
               <>
                 <span className="h-2 w-2 animate-pulse rounded-full bg-orange-400 motion-reduce:animate-none" aria-hidden /> Live now
               </>
-            ) : i.hasTime ? (
+            ) : i.hasTime && !i.timeTba ? (
               <>
                 <Clock3 className="h-3.5 w-3.5" aria-hidden /> {i.phase === "soon" ? "Starting soon" : "Upcoming class"}
               </>

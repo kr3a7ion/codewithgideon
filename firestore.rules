@@ -193,7 +193,7 @@ service cloud.firestore {
       return data is map
         && data.keys().hasOnly([
           "title", "description",
-          "cohortId", "cohortLabel",
+          "cohortId", "cohortLabel", "cohortKey",
           "pathId", "roomUrl", "ctaLabel",
           "category", "icon",
           "isPublished", "sortOrder",
@@ -208,6 +208,7 @@ service cloud.firestore {
         && isNumber(data.updatedAt)
         && (!("cohortId" in data) || data.cohortId is string)
         && (!("cohortLabel" in data) || data.cohortLabel is string)
+        && (!("cohortKey" in data) || data.cohortKey is string)
         && (!("pathId" in data) || data.pathId is string)
         && (!("roomUrl" in data) || data.roomUrl is string)
         && (!("ctaLabel" in data) || data.ctaLabel is string)
@@ -224,6 +225,93 @@ service cloud.firestore {
       allow update: if isAdmin()
         && validCommunitySpace(request.resource.data)
         && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+
+    // Site media: pictures and videos on the public pages, chosen in
+    // Admin → Site media. Anyone can read (the pages show them); only admins
+    // change them.
+    function validSiteMedia(d) {
+      return d is map
+        && d.keys().hasOnly(["url", "smUrl", "alt", "kind", "width", "height", "libraryId", "updatedAt", "updatedBy"])
+        && d.url is string && d.url.size() >= 8 && d.url.size() <= 2000
+        && d.url.matches('^https://.*')
+        && d.kind in ["image", "video"]
+        && (!("smUrl" in d) || (d.smUrl is string && d.smUrl.matches('^https://.*')))
+        && (!("alt" in d) || (d.alt is string && d.alt.size() <= 300))
+        && (!("width" in d) || isNumber(d.width))
+        && (!("height" in d) || isNumber(d.height))
+        && (!("libraryId" in d) || d.libraryId is string)
+        && isNumber(d.updatedAt);
+    }
+
+    match /siteMedia/{slotId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && validSiteMedia(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Everything uploaded to Site media (the library). Admins only.
+    match /mediaLibrary/{itemId} {
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          "name", "kind", "url", "path", "smUrl", "smPath",
+          "width", "height", "size", "contentType", "createdAt"
+        ])
+        && request.resource.data.url is string
+        && request.resource.data.path is string
+        && request.resource.data.path.matches('^site-media/.*')
+        && request.resource.data.kind in ["image", "video"]
+        && isNumber(request.resource.data.size)
+        && isNumber(request.resource.data.createdAt);
+    }
+
+    // Portfolio projects and Hire packages (Admin → Portfolio / Packages).
+    // Visitors see published ones; drafts are admin-only.
+    function validProject(d) {
+      return d is map
+        && d.keys().hasOnly([
+          "slug", "title", "kind", "types", "ownership", "status", "summary", "brief",
+          "role", "year", "features", "tech", "links", "cover", "gallery",
+          "packageId", "learnHref", "featured", "published", "order", "updatedAt"
+        ])
+        && d.title is string && d.title.size() >= 2 && d.title.size() <= 120
+        && d.slug is string && d.slug.matches('^[a-z0-9-]{1,60}$')
+        && d.ownership in ["own", "client", "demo"]
+        && d.status in ["live", "building", "demo"]
+        && d.types is list && d.features is list && d.tech is list && d.gallery is list
+        && d.gallery.size() <= 24
+        && d.links is map
+        && d.published is bool && d.featured is bool
+        && isNumber(d.order);
+    }
+
+    match /portfolio/{projectId} {
+      allow read: if resource.data.published == true || isAdmin();
+      allow create, update: if isAdmin() && validProject(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    function validPackage(d) {
+      return d is map
+        && d.keys().hasOnly([
+          "track", "name", "description", "price", "priceMode", "priceNote", "timeline",
+          "includes", "featured", "badge", "cta", "need", "published", "order", "updatedAt"
+        ])
+        && d.track in ["website", "app"]
+        && d.name is string && d.name.size() >= 2 && d.name.size() <= 80
+        && isNumber(d.price) && d.price >= 0
+        && d.priceMode in ["fixed", "from", "quote"]
+        && d.need in ["landing", "booking", "mobile-app", "web-app", "other"]
+        && d.includes is list && d.includes.size() <= 12
+        && d.published is bool && d.featured is bool
+        && isNumber(d.order);
+    }
+
+    match /hirePackages/{packageId} {
+      allow read: if resource.data.published == true || isAdmin();
+      allow create, update: if isAdmin() && validPackage(request.resource.data);
       allow delete: if isAdmin();
     }
 
@@ -461,7 +549,7 @@ service cloud.firestore {
         && s.keys().hasOnly([
           "week", "path", "pathId",
           "isPublished", "title", "startsAt", "endsAt",
-          "joinUrl", "recordingUrl", "durationMins", "notes", "createdAt", "updatedAt"
+          "joinUrl", "recordingUrl", "durationMins", "notes", "timeTba", "createdAt", "updatedAt"
         ])
         && s.week is int && s.week >= 1 && s.week <= 52
         && s.path is string && s.path.size() >= 2
@@ -473,6 +561,7 @@ service cloud.firestore {
         && (!("joinUrl" in s) || s.joinUrl is string)
         && (!("recordingUrl" in s) || s.recordingUrl is string)
         && (!("notes" in s) || s.notes is string)
+        && (!("timeTba" in s) || s.timeTba is bool)
         && (!("durationMins" in s) || (s.durationMins is int && s.durationMins >= 15 && s.durationMins <= 600))
         && isNumber(s.createdAt)
         && isNumber(s.updatedAt);
