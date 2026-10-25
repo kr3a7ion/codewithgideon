@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useMemo } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ErrorBoundary from "../components/ErrorBoundary";
@@ -28,8 +28,13 @@ const CreateAccountPage = lazy(() => import("./features/join/CreateAccountPage")
 const DetailsPage = lazy(() => import("./features/join/DetailsPage"));
 const VerifyEmailView = lazy(() => import("./features/join/VerifyEmailPage"));
 const NotFound = lazy(() => import("./pages/NotFound"));
-const WorkPage = lazy(() => import("./pages/WorkPage"));
-const CaseStudyPage = lazy(() => import("./pages/CaseStudyPage"));
+const WorkRedirect: React.FC = () => {
+  const { slug = "" } = useParams();
+  return <Navigate to={`/portfolio/${encodeURIComponent(slug)}`} replace />;
+};
+const PortfolioPage = lazy(() => import("./pages/PortfolioPage"));
+const ProjectPage = lazy(() => import("./pages/ProjectPage"));
+const AboutPage = lazy(() => import("./pages/AboutPage"));
 const HirePage = lazy(() => import("./pages/HirePage"));
 
 /**
@@ -294,8 +299,12 @@ const AppShell: React.FC = () => {
                 path="courses/:courseSlug"
                 element={<CourseDetail onNavigate={navigateTo} />}
               />
-              <Route path="work" element={<WorkPage />} />
-              <Route path="work/:slug" element={<CaseStudyPage />} />
+              <Route path="portfolio" element={<PortfolioPage />} />
+              <Route path="portfolio/:slug" element={<ProjectPage />} />
+              <Route path="about" element={<AboutPage />} />
+              {/* Old /work links (shared case studies) go to the portfolio */}
+              <Route path="work" element={<Navigate to="/portfolio" replace />} />
+              <Route path="work/:slug" element={<WorkRedirect />} />
               <Route path="hire" element={<HirePage />} />
               <Route
                 path="contact"

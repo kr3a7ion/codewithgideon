@@ -33,7 +33,7 @@ const Footer: React.FC<FooterProps> = ({ onNavigate, isAdminLoggedIn }) => {
       title: "Hire",
       dot: "bg-orange-500",
       links: [
-        { label: "Work", to: "/work" },
+        { label: "Portfolio", to: "/portfolio" },
         { label: "Packages", to: "/hire#packages" },
         { label: "Start a project", to: "/hire#enquire" },
       ],
@@ -42,7 +42,7 @@ const Footer: React.FC<FooterProps> = ({ onNavigate, isAdminLoggedIn }) => {
       title: "Company",
       dot: "bg-white",
       links: [
-        { label: "About", to: "/#about" },
+        { label: "About", to: "/about" },
         { label: "Contact", to: "/contact" },
         { label: "Privacy", to: "/privacy" },
         { label: "Terms", to: "/terms" },
