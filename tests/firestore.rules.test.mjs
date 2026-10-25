@@ -251,6 +251,16 @@ test("admin notes: admins only, students can't read their own", async () => {
   await assertFails(setDoc(doc(db("admin1"), "adminNotes/paid"), {text: "x", extra: true}));
 });
 
+test("site media: everyone reads, only admins change", async () => {
+  const slot = {url: "https://firebasestorage.googleapis.com/v0/b/x/o/site-media%2Fa.webp", kind: "image", alt: "Gideon", updatedAt: 1};
+  await assertSucceeds(setDoc(doc(db("admin1"), "siteMedia/about.portrait"), slot));
+  await assertSucceeds(getDoc(doc(db(), "siteMedia/about.portrait")));
+  await assertFails(setDoc(doc(db("paid"), "siteMedia/about.portrait"), slot));
+  await assertFails(setDoc(doc(db("admin1"), "siteMedia/home.hero"), {...slot, url: "javascript:alert(1)"}));
+  await assertFails(getDoc(doc(db("paid"), "mediaLibrary/x")));
+  await assertSucceeds(setDoc(doc(db("admin1"), "mediaLibrary/x"), {name: "a.jpg", kind: "image", url: slot.url, path: "site-media/a.webp", size: 1000, contentType: "image/webp", createdAt: 1}));
+});
+
 // ---------------- sessions ----------------
 
 test("mobile v1.0.0: paid student lists all sessions in own cohort", async () => {
