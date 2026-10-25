@@ -86,7 +86,7 @@ const HomePage: React.FC = () => {
   const { whatsapp, email, apk } = useContactLinks();
   usePageMeta({
     description:
-      "Learn to code in live cohort classes with Gideon, or hire him to build a website, mobile app or business system. Portfolio, courses and packages, from Abuja, Nigeria.",
+      "Learn to code in live cohort classes with Gideon, or hire him to build a website, mobile app or business system. Portfolio, courses and packages.",
   });
   const { items: projects } = usePortfolio();
   const featuredProjects = sortProjects(projects).slice(0, 3);
@@ -100,7 +100,7 @@ const HomePage: React.FC = () => {
           <div className="flex flex-col gap-6 lg:gap-7">
             <p className="inline-flex w-fit items-center gap-2 rounded-full border border-line bg-white px-3 py-1.5 text-xs font-bold text-slate-600 dark:border-line-dark dark:bg-slate-900 dark:text-slate-300">
               <MapPin className="h-3.5 w-3.5 text-slate-500" aria-hidden />
-              Developer and teacher · Abuja
+              Developer and Tutor · Near you
             </p>
             <h1
               id="hero-title"
@@ -280,7 +280,7 @@ const HomePage: React.FC = () => {
         ) : null}
       </Section>
 
-      {/* Meet your teacher */}
+      {/* Meet your Tutor */}
       <Section id="about" tone="page" labelledBy="about-title">
         <div className="grid items-center gap-8 lg:grid-cols-[440px_minmax(0,1fr)] lg:gap-[72px]">
           <figure className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-800 to-teal-700 lg:rounded-[28px]">
@@ -295,20 +295,20 @@ const HomePage: React.FC = () => {
             </div>
             <figcaption className="absolute bottom-4 left-4 rounded-2xl bg-white/95 px-4 py-3 shadow-card">
               <span className="block font-display text-base font-semibold text-blue-900">Gideon Okanlawon</span>
-              <span className="block text-sm font-medium text-slate-600">Developer and teacher</span>
+              <span className="block text-sm font-medium text-slate-600">Developer and Tutor</span>
             </figcaption>
           </figure>
           <div className="space-y-5">
-            <Eyebrow tone="learn">Meet your teacher</Eyebrow>
+            <Eyebrow tone="learn">Meet your Tutor</Eyebrow>
             <h2 id="about-title" className="font-display text-[30px] font-bold leading-9 tracking-[-0.02em] text-blue-900 dark:text-white sm:text-[40px] sm:leading-[46px]">
               Hi, I&rsquo;m Gideon.
             </h2>
             <p className="max-w-[640px] text-base leading-[26px] text-slate-600 dark:text-slate-300 sm:text-lg sm:leading-7">
-              I&rsquo;m a developer and teacher in Abuja. I build websites, apps and business systems for a living, and I teach every cohort live, so you learn
+              I&rsquo;m a developer and tutor. I build websites, apps and business systems for a living, and I teach every cohort live, so you learn
               how real projects get made.
             </p>
             <ul className="flex flex-wrap gap-2.5">
-              {["Based in Abuja", "Websites, apps and systems", "Teaches every cohort live"].map((f) => (
+              {["Websites, apps and systems", "Teaches every cohort live"].map((f) => (
                 <li key={f} className="rounded-full border border-line bg-paper px-3 py-1.5 text-xs font-bold text-blue-900 dark:border-line-dark dark:bg-paper-dark dark:text-white">
                   {f}
                 </li>
