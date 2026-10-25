@@ -219,7 +219,7 @@ const CaseStudyPage: React.FC = () => {
         {/* Next project */}
         <Link
           to={`/work/${next.slug}`}
-          className="group mt-14 flex items-center gap-4 rounded-[20px] bg-paper p-3 pr-5 transition-colors hover:bg-[#F1ECE3] dark:bg-paper-dark dark:hover:bg-slate-800 sm:mt-20 sm:gap-7 sm:p-4 sm:pr-7"
+          className="group mt-14 flex items-center gap-4 rounded-[20px] bg-paper p-3 pr-5 transition-colors hover:bg-[#DFE7F0] dark:bg-paper-dark dark:hover:bg-slate-800 sm:mt-20 sm:gap-7 sm:p-4 sm:pr-7"
         >
           <img src={next.images.card} alt="" width={800} height={500} loading="lazy" className="aspect-[16/10] w-28 shrink-0 rounded-xl object-cover sm:w-60" />
           <span className="flex-1">
