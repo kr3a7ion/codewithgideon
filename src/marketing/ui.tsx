@@ -6,8 +6,8 @@ import React, { useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, ArrowUpRight, Calendar, Check, Minus, PenTool, Plus } from "lucide-react";
 import { cn } from "../ui";
-import type { Faq, Package, WorkEntry } from "./content";
-import { demoUrl } from "./content";
+import type { Faq } from "./content";
+import { packagePrice, type HirePackage } from "./catalog";
 import { trackCta, trackDemo, type CtaLocation } from "./analytics";
 
 // ---------------------------------------------------------------------------
@@ -222,63 +222,6 @@ export const DoorCard: React.FC<{
   </div>
 );
 
-export const DemoLink: React.FC<{ work: WorkEntry; location: CtaLocation; className?: string; children?: React.ReactNode }> = ({ work, location, className, children }) => (
-  <a
-    href={demoUrl(work)}
-    target="_blank"
-    rel="noopener noreferrer"
-    onClick={() => trackDemo(work.slug, location)}
-    className={className}
-  >
-    {children ?? (
-      <>
-        Live demo <ArrowUpRight className="h-4 w-4" aria-hidden />
-        <span className="sr-only"> of {work.name}</span>
-      </>
-    )}
-    <span className="sr-only"> (opens in a new tab)</span>
-  </a>
-);
-
-export const WorkCard: React.FC<{ work: WorkEntry; location?: CtaLocation; headingLevel?: "h2" | "h3" }> = ({ work, location = "work", headingLevel = "h3" }) => {
-  const H = headingLevel;
-  const href = `/work/${work.slug}`;
-  return (
-    <article className={cn(cardBase, "group flex flex-col overflow-hidden")}>
-      <Link to={href} tabIndex={-1} aria-hidden className="block aspect-[16/10] overflow-hidden bg-paper dark:bg-paper-dark">
-        <img
-          src={work.images.card}
-          alt=""
-          width={800}
-          height={500}
-          loading="lazy"
-          decoding="async"
-          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-        />
-      </Link>
-      <div className="flex flex-1 flex-col gap-3 px-6 pb-5 pt-5">
-        <div className="flex flex-wrap gap-2">
-          <Tag>{work.type}</Tag>
-          <Tag tone="sample">Sample project</Tag>
-        </div>
-        <H className="font-display text-[22px] font-semibold leading-7 tracking-[-0.01em] text-blue-900 dark:text-white">
-          <Link to={href} className="hover:underline">
-            {work.name}
-          </Link>
-        </H>
-        <p className="flex-1 text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{work.result}</p>
-        <div className="mt-1 flex items-center justify-between border-t border-line pt-4 text-sm font-bold text-blue-900 dark:border-line-dark dark:text-white">
-          <DemoLink work={work} location={location} className="inline-flex items-center gap-1.5 hover:underline" />
-          <Link to={href} className="inline-flex items-center gap-1.5 hover:underline">
-            Case study <ArrowRight className="h-4 w-4" aria-hidden />
-            <span className="sr-only">: {work.name}</span>
-          </Link>
-        </div>
-      </div>
-    </article>
-  );
-};
-
 export const HireCtaCard: React.FC<{ location?: CtaLocation }> = ({ location = "work" }) => (
   <div className="flex flex-col items-start gap-3.5 rounded-[20px] border-[1.5px] border-dashed border-orange-400 bg-orange-50 p-7 dark:border-orange-500/60 dark:bg-orange-950/40">
     <span className="rounded-[14px] bg-white p-3 dark:bg-slate-900">
@@ -287,17 +230,19 @@ export const HireCtaCard: React.FC<{ location?: CtaLocation }> = ({ location = "
     <Tag tone="hire">Hire</Tag>
     <h3 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">Your business could be next.</h3>
     <p className="text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">
-      Tell me what you sell and how customers book. I&rsquo;ll design it in Figma first so you see it before I build it.
+      Tell me what you need: a website, an app or a system for your team. I&rsquo;ll design it in Figma first so you see it before I build it.
     </p>
     <Link to="/hire" onClick={() => trackCta("get_website", location)} className={mbtn({ kind: "hire", className: "mt-1" })}>
-      Get a website built <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
+      Start a project <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
     </Link>
   </div>
 );
 
-export const PackageCard: React.FC<{ pkg: Package; location?: CtaLocation; headingLevel?: "h2" | "h3" }> = ({ pkg, location = "packages", headingLevel = "h3" }) => {
+export const PackageCard: React.FC<{ pkg: HirePackage; location?: CtaLocation; headingLevel?: "h2" | "h3" }> = ({ pkg, location = "packages", headingLevel = "h3" }) => {
   const H = headingLevel;
-  const to = pkg.id === "care" ? "/hire?need=other#enquire" : `/hire?need=${pkg.id}#enquire`;
+  const to = `/hire?need=${pkg.need || "other"}#enquire`;
+  const price = packagePrice(pkg);
+  const quote = price === "Custom quote";
   return (
     <div
       className={cn(
@@ -311,16 +256,18 @@ export const PackageCard: React.FC<{ pkg: Package; location?: CtaLocation; headi
         <p className="text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{pkg.description}</p>
       </div>
       <p className="flex items-baseline gap-2">
-        <span className="font-display text-[34px] font-bold leading-none tracking-[-0.02em] text-blue-900 dark:text-white">{pkg.price}</span>
-        <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{pkg.priceNote}</span>
+        <span className={cn("font-display font-bold leading-none tracking-[-0.02em] text-blue-900 dark:text-white", quote ? "text-[26px]" : "text-[34px]")}>{price}</span>
+        {!quote && pkg.priceNote ? <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{pkg.priceNote}</span> : null}
       </p>
-      <p className="flex items-center gap-2 text-sm font-bold text-blue-900 dark:text-white">
-        <Calendar className="h-[18px] w-[18px] text-slate-500" aria-hidden />
-        <span>
-          <span className="sr-only">Timeline: </span>
-          {pkg.timeline}
-        </span>
-      </p>
+      {pkg.timeline ? (
+        <p className="flex items-center gap-2 text-sm font-bold text-blue-900 dark:text-white">
+          <Calendar className="h-[18px] w-[18px] text-slate-500" aria-hidden />
+          <span>
+            <span className="sr-only">Timeline: </span>
+            {pkg.timeline}
+          </span>
+        </p>
+      ) : null}
       <ul className="space-y-2.5 border-t border-line pt-[18px] text-sm font-medium leading-[22px] text-slate-600 dark:border-line-dark dark:text-slate-300">
         {pkg.includes.map((i) => (
           <CheckItem key={i} tone="hire">
@@ -410,8 +357,8 @@ export const FaqList: React.FC<{ items: Faq[]; defaultOpen?: number; headingLeve
 
 export const TwoDoorBand: React.FC<{ location?: CtaLocation; learnTitle?: string; learnBody?: string }> = ({
   location = "band",
-  learnTitle = "Want to build sites like these?",
-  learnBody = "In the web development cohort you learn to build business websites like these, live with Gideon.",
+  learnTitle = "Want to build things like these?",
+  learnBody = "Join a live cohort and learn to build websites and apps, with Gideon and a recording of every class.",
 }) => (
   <div className="grid gap-4 md:grid-cols-2 md:gap-6">
     <div className="flex flex-col items-start gap-3 rounded-3xl bg-teal-50 p-6 dark:bg-teal-950/60 sm:p-8">
@@ -424,10 +371,10 @@ export const TwoDoorBand: React.FC<{ location?: CtaLocation; learnTitle?: string
     </div>
     <div className="flex flex-col items-start gap-3 rounded-3xl bg-orange-50 p-6 dark:bg-orange-950/40 sm:p-8">
       <Tag tone="hire">Hire</Tag>
-      <h2 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">Want one for your business?</h2>
-      <p className="text-base leading-[26px] text-slate-600 dark:text-slate-300">Fixed prices from ₦90,000. The domain and hosting stay in your name.</p>
+      <h2 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">Need one for your business?</h2>
+      <p className="text-base leading-[26px] text-slate-600 dark:text-slate-300">A website, a mobile app or a system for your team. You see the design before anything is built.</p>
       <Link to="/hire" onClick={() => trackCta("get_website", location)} className={mbtn({ kind: "hire", className: "mt-1 w-full sm:w-auto" })}>
-        Get a website built <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
+        Start a project <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
       </Link>
     </div>
   </div>

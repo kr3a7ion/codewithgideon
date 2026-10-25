@@ -262,6 +262,39 @@ test("classes can be 'time to be announced'; spaces can target one intake", asyn
   await assertFails(setDoc(doc(db("admin1"), "communitySpaces/bad"), {...space, cohortKey: 5}));
 });
 
+test("site media: everyone reads, only admins change", async () => {
+  const slot = {url: "https://firebasestorage.googleapis.com/v0/b/x/o/site-media%2Fa.webp", kind: "image", alt: "Gideon", updatedAt: 1};
+  await assertSucceeds(setDoc(doc(db("admin1"), "siteMedia/about.portrait"), slot));
+  await assertSucceeds(getDoc(doc(db(), "siteMedia/about.portrait")));
+  await assertFails(setDoc(doc(db("paid"), "siteMedia/about.portrait"), slot));
+  await assertFails(setDoc(doc(db("admin1"), "siteMedia/home.hero"), {...slot, url: "javascript:alert(1)"}));
+  await assertFails(getDoc(doc(db("paid"), "mediaLibrary/x")));
+  await assertSucceeds(setDoc(doc(db("admin1"), "mediaLibrary/x"), {name: "a.jpg", kind: "image", url: slot.url, path: "site-media/a.webp", size: 1000, contentType: "image/webp", createdAt: 1}));
+});
+
+test("portfolio and packages: visitors see published, admins manage", async () => {
+  const project = {
+    slug: "nexura", title: "Nexura", kind: "Hotel system", types: ["webapp"], ownership: "own", status: "building",
+    summary: "s", brief: "b", role: "r", year: "2026", features: [], tech: [], links: {}, cover: null, gallery: [],
+    featured: true, published: true, order: 1, updatedAt: 1,
+  };
+  await assertSucceeds(setDoc(doc(db("admin1"), "portfolio/nexura"), project));
+  await assertSucceeds(setDoc(doc(db("admin1"), "portfolio/draft"), {...project, slug: "draft", published: false}));
+  await assertSucceeds(getDoc(doc(db(), "portfolio/nexura")));
+  await assertFails(getDoc(doc(db(), "portfolio/draft")));
+  await assertSucceeds(getDocs(query(collection(db(), "portfolio"), where("published", "==", true))));
+  await assertFails(getDocs(collection(db(), "portfolio")));
+  await assertFails(setDoc(doc(db("paid"), "portfolio/x"), project));
+  await assertFails(setDoc(doc(db("admin1"), "portfolio/bad"), {...project, slug: "Bad Slug!"}));
+  const pkg = {
+    track: "app", name: "Mobile app", description: "d", price: 0, priceMode: "quote", priceNote: "", timeline: "t",
+    includes: [], featured: false, badge: "", cta: "Talk", need: "mobile-app", published: true, order: 4, updatedAt: 1,
+  };
+  await assertSucceeds(setDoc(doc(db("admin1"), "hirePackages/mobile-app"), pkg));
+  await assertSucceeds(getDoc(doc(db(), "hirePackages/mobile-app")));
+  await assertFails(setDoc(doc(db("admin1"), "hirePackages/x"), {...pkg, priceMode: "cheap"}));
+});
+
 // ---------------- sessions ----------------
 
 test("mobile v1.0.0: paid student lists all sessions in own cohort", async () => {

@@ -1,11 +1,15 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { ArrowUpRight, CalendarDays, Check, Download, FileText, MapPin, MessageSquare, PlayCircle, TrendingUp, Video } from "lucide-react";
+import { ArrowRight, ArrowUpRight, CalendarDays, Check, Download, FileText, MapPin, MessageSquare, PlayCircle, TrendingUp, Video } from "lucide-react";
 import Courses from "../../components/Courses";
-import { IMAGES } from "../../assets/images";
+import { SlotImage } from "../marketing/SlotImage";
+import { IntroVideoButton } from "../marketing/IntroVideo";
 import { useApp } from "../app/AppContext";
 import { usePageMeta } from "../app/usePageMeta";
-import { HIRE_FAQ, HIRE_TERMS, JOIN_FAQ, LEARN_FAQ, PACKAGES, WORK } from "../marketing/content";
+import { HIRE_FAQ, HIRE_TERMS, JOIN_FAQ, LEARN_FAQ } from "../marketing/content";
+import { usePackages, usePortfolio } from "../marketing/useCatalog";
+import { packagePrice, withLivePrices } from "../marketing/catalog";
+import { ProjectCard, sortProjects } from "../marketing/portfolio";
 import { trackCta, trackWhatsApp } from "../marketing/analytics";
 import { useContactLinks } from "../marketing/useContactLinks";
 import {
@@ -14,7 +18,6 @@ import {
   DoorCard,
   Eyebrow,
   FaqList,
-  HireCtaCard,
   PackageCard,
   Section,
   SectionHeader,
@@ -22,7 +25,6 @@ import {
   Tag,
   TwoDoorBand,
   WhatsAppIcon,
-  WorkCard,
   container,
   mbtn,
 } from "../marketing/ui";
@@ -79,13 +81,16 @@ const PhoneMock: React.FC = () => (
  * Figma: "03 Home" in the rebrand file.
  */
 const HomePage: React.FC = () => {
+  const { items: packages } = usePackages();
   const { navigateTo } = useApp();
   const { whatsapp, email, apk } = useContactLinks();
   usePageMeta({
     description:
-      "Learn to code in live cohort classes with Gideon, or get a website that takes bookings for your business. Web, Flutter and AI-assisted development in Abuja, Nigeria.",
+      "Learn to code in live cohort classes with Gideon, or hire him to build a website, mobile app or business system. Portfolio, courses and packages, from Abuja, Nigeria.",
   });
-  const [itura, adire] = WORK;
+  const { items: projects } = usePortfolio();
+  const featuredProjects = sortProjects(projects).slice(0, 3);
+  const appPackages = packages.filter((p) => p.track === "app");
 
   return (
     <>
@@ -105,7 +110,7 @@ const HomePage: React.FC = () => {
               <span className="text-orange-600 dark:text-orange-400">have it built.</span>
             </h1>
             <p className="max-w-[560px] text-base leading-[26px] text-slate-600 dark:text-slate-300 sm:text-lg sm:leading-7">
-              Join a live cohort and learn to build for the web, or hire Gideon to build a website that takes bookings for your business.
+              Join a live cohort and learn to build for the web and mobile, or hire Gideon to build a website, app or business system.
             </p>
             <div className="grid gap-3.5 sm:grid-cols-2 sm:gap-5">
               <DoorCard
@@ -118,9 +123,9 @@ const HomePage: React.FC = () => {
               />
               <DoorCard
                 door="hire"
-                title="Websites for business"
-                body="Booking sites and WhatsApp-first landing pages from ₦90,000, live in 5 to 14 days."
-                cta="Get a website built"
+                title="Websites and apps for business"
+                body="Booking websites, mobile apps and business systems, designed in Figma before anything is built."
+                cta="Start a project"
                 to="/hire"
                 onClick={() => trackCta("get_website", "hero")}
               />
@@ -137,12 +142,10 @@ const HomePage: React.FC = () => {
 
           {/* Proof: the two demo builds */}
           <div className="relative mx-auto w-full max-w-[520px] lg:h-[540px]">
-            <Link to={`/work/${itura.slug}`} className="block overflow-hidden rounded-[18px] shadow-lift sm:rounded-[20px]" aria-label={`${itura.name} case study`}>
-              <img
-                src={itura.images.cover}
-                srcSet={`${itura.images.cover960} 960w, ${itura.images.cover} 1600w`}
+            <Link to="/portfolio" className="block overflow-hidden rounded-[18px] shadow-lift sm:rounded-[20px]" aria-label="See the portfolio">
+              <SlotImage
+                slot="home.hero"
                 sizes="(min-width: 1024px) 520px, calc(100vw - 40px)"
-                alt={itura.images.alt}
                 width={1600}
                 height={1000}
                 {...{ fetchpriority: "high" }}
@@ -150,19 +153,18 @@ const HomePage: React.FC = () => {
               />
             </Link>
             <Link
-              to={`/work/${adire.slug}`}
+              to="/portfolio"
               className="absolute bottom-0 right-0 hidden w-[65%] overflow-hidden rounded-[20px] shadow-lift lg:block"
-              aria-label={`${adire.name} case study`}
+              aria-label="See the portfolio"
             >
-              <img src={adire.images.cover960} alt={adire.images.alt} width={960} height={600} loading="lazy" className="aspect-[16/10] w-full object-cover" />
+              <SlotImage slot="home.heroSecond" width={960} height={600} loading="lazy" className="aspect-[16/10] w-full object-cover" />
             </Link>
             <Link
-              to="/work"
+              to="/portfolio"
               onClick={() => trackCta("see_work", "hero")}
               className="mt-4 inline-flex items-center gap-2.5 rounded-2xl bg-white px-3.5 py-3 text-[15px] font-bold text-blue-900 shadow-card dark:bg-slate-900 dark:text-white lg:absolute lg:bottom-[120px] lg:left-0 lg:mt-0 lg:shadow-lift"
             >
-              <Tag tone="sample">Sample projects</Tag>
-              Try the live demos
+              See what I&rsquo;ve built
               <ArrowUpRight className="h-4 w-4" aria-hidden />
             </Link>
           </div>
@@ -217,20 +219,19 @@ const HomePage: React.FC = () => {
         </div>
       </Section>
 
-      {/* Hire: sample work */}
+      {/* Portfolio */}
       <Section tone="page" labelledBy="work-title">
         <SectionHeader
           id="work-title"
-          eyebrow="Work"
-          title="Real booking flows you can try."
-          description="Two sample businesses, built end to end. Open a live demo and book a room or a hairstyle yourself."
-          action={<ArrowLink to="/work">See all work</ArrowLink>}
+          eyebrow="Portfolio"
+          title="Things I've built."
+          description="Websites, apps and systems for real businesses, plus demos you can click through."
+          action={<ArrowLink to="/portfolio">Full portfolio</ArrowLink>}
         />
         <div className="mt-10 grid gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {WORK.map((w) => (
-            <WorkCard key={w.slug} work={w} location="work" />
+          {featuredProjects.map((p) => (
+            <ProjectCard key={p.id} project={p} location="work" />
           ))}
-          <HireCtaCard location="work" />
         </div>
       </Section>
 
@@ -240,14 +241,17 @@ const HomePage: React.FC = () => {
           id="biz-title"
           eyebrow="Hire"
           tone="hire"
-          title="Websites for businesses that run on WhatsApp."
-          description="Fixed prices and clear timelines. You see the design in Figma before anything is built."
+          title="Websites and apps for your business."
+          description="Websites have clear prices. Apps and systems are quoted for what you need. You see the design in Figma before anything is built."
           action={<ArrowLink to="/hire" tone="hire">How it works</ArrowLink>}
         />
         <div className="mt-10 grid items-start gap-4 sm:gap-6 lg:grid-cols-3">
-          {PACKAGES.map((p) => (
-            <PackageCard key={p.id} pkg={p} location="packages" />
-          ))}
+          {packages
+            .filter((p) => p.track === "website")
+            .slice(0, 3)
+            .map((p) => (
+              <PackageCard key={p.id} pkg={p} location="packages" />
+            ))}
         </div>
         <ul className="mt-6 flex flex-col gap-2.5 rounded-2xl border border-line bg-white px-5 py-4 text-sm font-medium text-blue-900 dark:border-line-dark dark:bg-slate-900 dark:text-white sm:flex-row sm:flex-wrap sm:gap-x-7">
           {HIRE_TERMS.map((t) => (
@@ -256,22 +260,42 @@ const HomePage: React.FC = () => {
             </CheckItem>
           ))}
         </ul>
+        {appPackages.length ? (
+          <div className="mt-6 flex flex-col gap-5 rounded-[20px] border border-line bg-white p-6 shadow-card dark:border-line-dark dark:bg-slate-900 sm:p-7 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-2">
+              <Tag tone="hire">Apps and systems</Tag>
+              <h3 className="font-display text-[22px] font-semibold leading-7 text-blue-900 dark:text-white">Need a mobile app or a business system?</h3>
+              <ul className="flex flex-col gap-1.5 text-sm font-medium text-slate-600 dark:text-slate-300 sm:flex-row sm:flex-wrap sm:gap-x-6">
+                {appPackages.map((p) => (
+                  <li key={p.id}>
+                    <span className="font-bold text-blue-900 dark:text-white">{p.name}</span> · {packagePrice(p)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <Link to="/hire#packages" onClick={() => trackCta("apps", "packages")} className={mbtn({ kind: "secondary", className: "shrink-0" })}>
+              See app packages <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
+            </Link>
+          </div>
+        ) : null}
       </Section>
 
       {/* Meet your teacher */}
       <Section id="about" tone="page" labelledBy="about-title">
         <div className="grid items-center gap-8 lg:grid-cols-[440px_minmax(0,1fr)] lg:gap-[72px]">
           <figure className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-800 to-teal-700 lg:rounded-[28px]">
-            <img
-              src={IMAGES.instructor.portrait}
-              alt="Gideon Okanlawon"
+            <SlotImage
+              slot="about.portrait"
               loading="lazy"
               decoding="async"
               className="aspect-[4/5] w-full object-cover sm:aspect-[4/3] lg:aspect-[440/500]"
             />
+            <div className="absolute right-4 top-4">
+              <IntroVideoButton />
+            </div>
             <figcaption className="absolute bottom-4 left-4 rounded-2xl bg-white/95 px-4 py-3 shadow-card">
               <span className="block font-display text-base font-semibold text-blue-900">Gideon Okanlawon</span>
-              <span className="block text-sm font-medium text-slate-600">Developer and frontend teacher</span>
+              <span className="block text-sm font-medium text-slate-600">Developer and teacher</span>
             </figcaption>
           </figure>
           <div className="space-y-5">
@@ -280,11 +304,11 @@ const HomePage: React.FC = () => {
               Hi, I&rsquo;m Gideon.
             </h2>
             <p className="max-w-[640px] text-base leading-[26px] text-slate-600 dark:text-slate-300 sm:text-lg sm:leading-7">
-              I&rsquo;m a developer and frontend teacher in Abuja. I build websites and apps for a living, and I teach every cohort live, so you learn how real
-              projects get made.
+              I&rsquo;m a developer and teacher in Abuja. I build websites, apps and business systems for a living, and I teach every cohort live, so you learn
+              how real projects get made.
             </p>
             <ul className="flex flex-wrap gap-2.5">
-              {["Based in Abuja", "Frontend developer", "Teaches every cohort live"].map((f) => (
+              {["Based in Abuja", "Websites, apps and systems", "Teaches every cohort live"].map((f) => (
                 <li key={f} className="rounded-full border border-line bg-paper px-3 py-1.5 text-xs font-bold text-blue-900 dark:border-line-dark dark:bg-paper-dark dark:text-white">
                   {f}
                 </li>
@@ -294,9 +318,9 @@ const HomePage: React.FC = () => {
               <a href={whatsapp} target="_blank" rel="noopener noreferrer" onClick={() => trackWhatsApp("about")} className={mbtn({ kind: "learn", size: "lg" })}>
                 <WhatsAppIcon className="h-5 w-5" /> Chat on WhatsApp
               </a>
-              <a href={`mailto:${email}`} className={mbtn({ kind: "secondary", size: "lg" })}>
-                Email Gideon
-              </a>
+              <Link to="/about" onClick={() => trackCta("about", "about")} className={mbtn({ kind: "secondary", size: "lg" })}>
+                More about me <ArrowRight className="h-5 w-5" aria-hidden />
+              </Link>
             </div>
           </div>
         </div>
@@ -327,9 +351,9 @@ const HomePage: React.FC = () => {
           </div>
           <div>
             <h3 className="mb-4 flex items-center gap-2 font-display text-lg font-semibold text-blue-900 dark:text-white">
-              <span className="h-2 w-2 rounded-full bg-orange-500" aria-hidden /> About websites
+              <span className="h-2 w-2 rounded-full bg-orange-500" aria-hidden /> About websites and apps
             </h3>
-            <FaqList items={WEBSITES_FAQ} headingLevel="h4" />
+            <FaqList items={withLivePrices(WEBSITES_FAQ, packages)} headingLevel="h4" />
           </div>
         </div>
       </Section>
