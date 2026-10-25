@@ -8,6 +8,7 @@ import { Avatar, Card, Notice, naira, plural } from "../../shared/ui";
 import { useStudent } from "../StudentDataContext";
 import { HomeHero } from "../HomeHero";
 import { RowsBone } from "../Skeleton";
+import { GettingStarted } from "../components/GettingStarted";
 import { EmptyCard, LockedRow, RecordingCard, ResourceRow, SectionHead, SessionRow, UpdateRow } from "../ui";
 import { ago, greeting, sessionInfo } from "../time";
 import { clock, thumbFor } from "../video";
@@ -307,6 +308,9 @@ const Home: React.FC = () => {
           {resourcesBlock ? <div className="order-4">{resourcesBlock}</div> : null}
         </div>
         <div className="contents lg:flex lg:flex-col lg:gap-6">
+          <div className="order-2 empty:hidden">
+            <GettingStarted />
+          </div>
           {weeksCard ? <div className="order-2">{weeksCard}</div> : null}
           <div className="order-5">{mentorCard}</div>
           <div className="order-6">{updatesBlock}</div>

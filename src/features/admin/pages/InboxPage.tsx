@@ -123,7 +123,17 @@ const StudentChat: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                       : "rounded-bl-md bg-white text-slate-800 dark:bg-slate-800 dark:text-slate-100",
                   )}
                 >
-                  <p className="whitespace-pre-wrap break-words">{msg.body}</p>
+                  {!mine && msg.sessionTitle ? <p className="mb-1 text-[11px] font-bold text-teal-700 dark:text-teal-300">About {msg.sessionTitle}</p> : null}
+                  {msg.attachments?.length ? (
+                    <div className="mb-1.5 grid gap-1.5">
+                      {msg.attachments.map((a) => (
+                        <a key={a.url} href={a.url} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-xl">
+                          <img src={a.url} alt={a.name} loading="lazy" className="max-h-60 w-full object-cover" />
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                  {msg.body && !(msg.attachments?.length && msg.body === "Sent a screenshot") ? <p className="whitespace-pre-wrap break-words">{msg.body}</p> : null}
                   <p className={cn("mt-1 text-[11px]", mine ? "text-white/70 dark:text-slate-900/70" : "text-slate-400")}>
                     {mine ? "You" : msg.senderName} · {relativeTime(toDateMs(msg.createdAt))}
                   </p>

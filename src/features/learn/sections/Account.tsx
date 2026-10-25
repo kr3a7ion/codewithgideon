@@ -8,6 +8,7 @@ import { useStudent } from "../StudentDataContext";
 import { WeekTrack } from "../HomeHero";
 import { StudentPageHeader } from "../StudentPageHeader";
 import { CourseCardBone, PaymentRowsBone } from "../Skeleton";
+import { SecurityCard } from "../components/SecurityCard";
 import { ReceiptDialog, statusLabel } from "../components/ReceiptDialog";
 import { channelLabel, type PaymentRecord } from "../usePayments";
 import { dateLabel } from "../time";
@@ -294,6 +295,8 @@ const Account: React.FC = () => {
               </button>
             </form>
           </Card>
+
+          <SecurityCard />
 
           {s.onToggleTheme ? (
             <Card className="p-2">

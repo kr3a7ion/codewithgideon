@@ -69,6 +69,10 @@ export type InboxThreadMessage = {
   senderEmail?: string;
   createdAt?: any;
   source?: string;
+  /** The class the student asked about. */
+  sessionTitle?: string;
+  /** Screenshots the student attached. */
+  attachments?: { url: string; name: string }[];
 };
 
 export const formatSessionCountdown = (ms: number) => {
@@ -364,6 +368,10 @@ export const normalizeInboxThreadMessage = (
     senderEmail: getInboxEmail(raw) || undefined,
     createdAt: raw?.createdAt || raw?.sentAt || raw?.timestamp || null,
     source: raw?.source,
+    sessionTitle: raw?.sessionId && !["general", "web-student-chat"].includes(String(raw.sessionId)) ? String(raw?.sessionTitle || "") : "",
+    attachments: Array.isArray(raw?.attachments)
+      ? raw.attachments.filter((a: any) => a && /^https:\/\//.test(String(a.url || ""))).map((a: any) => ({ url: String(a.url), name: String(a.name || "Screenshot") }))
+      : [],
   };
 };
 

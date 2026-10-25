@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronRight, Lock, PlayCircle, Send, Users, X } from "lucide-react";
+import { Check, ChevronRight, ImagePlus, Lock, PlayCircle, Send, Users, X } from "lucide-react";
+import { MessageText } from "../components/MessageText";
 import { mbtn } from "../../../marketing/ui";
 import { useContactLinks } from "../../../marketing/useContactLinks";
 import { cn } from "../../../ui";
@@ -54,6 +55,18 @@ const MentorChat: React.FC = () => {
   const s = useStudent();
   const { responseTime } = useContactLinks();
   const [draft, setDraft] = useState("");
+  const [images, setImages] = useState<{ file: File; url: string }[]>([]);
+  const [imageError, setImageError] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const addImages = (files: File[]) => {
+    setImageError("");
+    const ok = files.filter((f) => /^image\/(png|jpeg|gif|webp)$/.test(f.type));
+    if (ok.length < files.length) setImageError("Only PNG, JPG, GIF or WebP images can be sent.");
+    const small = ok.filter((f) => f.size <= 5 * 1024 * 1024);
+    if (small.length < ok.length) setImageError("Each image must be under 5 MB.");
+    setImages((prev) => [...prev, ...small.map((file) => ({ file, url: URL.createObjectURL(file) }))].slice(0, 3));
+  };
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const locked = s.paymentState !== "active";
@@ -87,9 +100,11 @@ const MentorChat: React.FC = () => {
   }, [context]);
 
   const send = async () => {
-    const ok = await s.sendMentorMessage(draft, context);
+    const ok = await s.sendMentorMessage(draft, context, images.map((i) => i.file));
     if (ok) {
       setDraft("");
+      images.forEach((i) => URL.revokeObjectURL(i.url));
+      setImages([]);
       s.setChatContext(null);
     }
   };
@@ -191,9 +206,20 @@ const MentorChat: React.FC = () => {
                       )}
                     >
                       {mine ? <span className="sr-only">You: </span> : (
-                        <p className="mb-0.5 text-xs font-bold text-teal-700 dark:text-teal-300">{m.senderName || "Gideon"} · Mentor</p>
+                        <p className="mb-0.5 text-xs font-bold text-teal-700 dark:text-teal-300">
+                          {m.senderName || "Gideon"} · Mentor{m.sessionTitle ? ` · about ${m.sessionTitle}` : ""}
+                        </p>
                       )}
-                      <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                      {m.attachments?.length ? (
+                        <div className={cn("mb-1.5 grid gap-1.5", m.attachments.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+                          {m.attachments.map((a) => (
+                            <a key={a.url} href={a.url} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-xl bg-black/10">
+                              <img src={a.url} alt={a.name || "Screenshot"} loading="lazy" className="max-h-56 w-full object-cover" />
+                            </a>
+                          ))}
+                        </div>
+                      ) : null}
+                      {m.body && !(m.attachments?.length && m.body === "Sent a screenshot") ? <MessageText text={m.body} mine={mine} /> : null}
                       {ms ? <p className={cn("mt-1 text-[11px] font-semibold", mine ? "text-white/70" : "text-slate-500 dark:text-slate-400")}>{timeFmt(ms)}</p> : null}
                     </div>
                   </div>
@@ -244,15 +270,65 @@ const MentorChat: React.FC = () => {
                 </label>
               ) : null}
             </div>
+            {images.length || imageError ? (
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                {images.map((img, idx) => (
+                  <span key={img.url} className="relative">
+                    <img src={img.url} alt={`Screenshot ${idx + 1}`} className="h-16 w-16 rounded-xl object-cover ring-1 ring-line dark:ring-line-dark" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        URL.revokeObjectURL(img.url);
+                        setImages((prev) => prev.filter((x) => x !== img));
+                      }}
+                      className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-blue-900 text-white ring-2 ring-white dark:ring-slate-900"
+                      aria-label={`Remove screenshot ${idx + 1}`}
+                    >
+                      <X className="h-3.5 w-3.5" aria-hidden />
+                    </button>
+                  </span>
+                ))}
+                {imageError ? <span className="text-xs font-semibold text-red-700 dark:text-red-300">{imageError}</span> : null}
+              </div>
+            ) : null}
             <label htmlFor="mentor-draft" className="sr-only">
               Message to Gideon
             </label>
             <div className="flex items-end gap-2.5">
+              <input
+                ref={fileRef}
+                id="mentor-image"
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                multiple
+                className="sr-only"
+                onChange={(e) => {
+                  addImages(Array.from(e.target.files || []));
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={images.length >= 3}
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-slate-600 ring-1 ring-inset ring-line-strong hover:bg-paper disabled:opacity-40 dark:text-slate-300 dark:ring-slate-600 dark:hover:bg-slate-800"
+                aria-label="Add a screenshot"
+                title="Add a screenshot"
+              >
+                <ImagePlus className="h-5 w-5" aria-hidden />
+              </button>
               <textarea
                 id="mentor-draft"
                 ref={inputRef}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
+                onPaste={(e) => {
+                  const files = Array.from(e.clipboardData.files || []).filter((f) => f.type.startsWith("image/"));
+                  if (files.length) {
+                    e.preventDefault();
+                    addImages(files);
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();
@@ -266,14 +342,14 @@ const MentorChat: React.FC = () => {
               />
               <button
                 type="submit"
-                disabled={s.mentorSending || draft.trim().length < 5}
+                disabled={s.mentorSending || (draft.trim().length < 5 && !images.length)}
                 className={mbtn({ kind: "learn", className: "h-12 w-12 shrink-0 !px-0 sm:w-auto sm:!px-5" })}
               >
                 {s.mentorSending ? <Spinner /> : <Send className="h-[18px] w-[18px]" aria-hidden />}
                 <span className="sr-only sm:not-sr-only">Send</span>
               </button>
             </div>
-            <p className="mt-1.5 hidden text-xs font-medium text-slate-500 dark:text-slate-400 sm:block">Text only for now. Ctrl + Enter sends.</p>
+            <p className="mt-1.5 hidden text-xs font-medium text-slate-500 dark:text-slate-400 sm:block">Add or paste a screenshot of the error. Wrap code in ``` to keep its spacing. Ctrl + Enter sends.</p>
           </form>
         </Card>
 

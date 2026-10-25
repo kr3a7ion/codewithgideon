@@ -42,6 +42,8 @@ export type MentorChatMessage = {
   senderName?: string;
   senderEmail?: string;
   createdAt?: any;
+  /** Screenshots sent with the message. */
+  attachments?: { url: string; name: string; contentType: string }[];
   /** The class the student asked about (sent with the message). */
   sessionId?: string;
   sessionTitle?: string;
@@ -484,6 +486,11 @@ export const useStudentData = (
               senderName: String(data.senderName || "").trim(),
               senderEmail: String(data.senderEmail || "").trim(),
               createdAt: data.createdAt,
+              attachments: Array.isArray(data.attachments)
+                ? data.attachments
+                    .filter((a: any) => a && typeof a.url === "string" && /^(https:|blob:)/.test(a.url))
+                    .map((a: any) => ({ url: String(a.url), name: String(a.name || "Screenshot"), contentType: String(a.contentType || "image/png") }))
+                : [],
               sessionId: String(data.sessionId || "").trim(),
               sessionTitle:
                 String(data.sessionId || "").trim() === GENERAL_CHAT_ID
@@ -491,7 +498,7 @@ export const useStudentData = (
                   : String(data.sessionTitle || "").trim(),
             } as MentorChatMessage;
           })
-          .filter((m) => m.body);
+          .filter((m) => m.body || m.attachments?.length);
         setMentorMessages(list);
         setMentorLoading(false);
       },
@@ -544,17 +551,23 @@ export const useStudentData = (
   }, [mentorMessages]);
 
   const sendMentorMessage = useCallback(
-    async (text: string, context?: MentorContext | null): Promise<boolean> => {
+    async (text: string, context?: MentorContext | null, images: File[] = []): Promise<boolean> => {
       if (!profile || isLocked) return false;
       const body = text.trim();
-      if (body.length < 5) {
+      if (body.length < 5 && !images.length) {
         setMentorError("Add a little more detail so your mentor can help.");
         return false;
       }
       setMentorSending(true);
       setMentorError("");
       try {
+        let attachments: unknown[] = [];
+        if (images.length) {
+          const { uploadChatImage } = await import("../../../services/storage");
+          attachments = await Promise.all(images.slice(0, 3).map((f) => uploadChatImage(profile.uid, f)));
+        }
         await httpsCallable(functions, "sendMentorRequest")({
+          attachments,
           name: profile.fullName,
           email: profile.email,
           studentPhone: profile.phone,
