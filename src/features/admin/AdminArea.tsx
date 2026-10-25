@@ -18,6 +18,8 @@ import ResourcesPage from "./pages/ResourcesPage";
 import CommunityPage from "./pages/CommunityPage";
 import SettingsPage from "./pages/SettingsPage";
 import MediaPage from "./pages/MediaPage";
+import PortfolioPage from "./pages/PortfolioPage";
+import PackagesPage from "./pages/PackagesPage";
 
 type Props = AdminWorkspaceProps & {
   isDark?: boolean;
@@ -48,6 +50,8 @@ const AdminArea: React.FC<Props> = ({ isDark, onToggleTheme, ...props }) => {
           <Route path="resources" element={<ResourcesPage />} />
           <Route path="community" element={<CommunityPage />} />
           <Route path="media" element={<MediaPage />} />
+          <Route path="portfolio" element={<PortfolioPage />} />
+          <Route path="packages" element={<PackagesPage />} />
           <Route path="settings" element={<SettingsPage />} />
           {Object.entries(LEGACY_ADMIN_REDIRECTS).map(([from, to]) => (
             <Route key={from} path={from} element={<Navigate to={to} replace />} />

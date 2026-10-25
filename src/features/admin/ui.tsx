@@ -199,7 +199,7 @@ export const Toggle: React.FC<{
   return (
     <div className="flex items-start justify-between gap-4">
       <div className="min-w-0">
-        <label htmlFor={id} className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+        <label htmlFor={id} className="whitespace-nowrap text-sm font-semibold text-slate-800 dark:text-slate-100">
           {label}
         </label>
         {description ? <p className="text-xs text-slate-500 dark:text-slate-400">{description}</p> : null}

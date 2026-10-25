@@ -266,6 +266,54 @@ service cloud.firestore {
         && isNumber(request.resource.data.createdAt);
     }
 
+    // Portfolio projects and Hire packages (Admin → Portfolio / Packages).
+    // Visitors see published ones; drafts are admin-only.
+    function validProject(d) {
+      return d is map
+        && d.keys().hasOnly([
+          "slug", "title", "kind", "types", "ownership", "status", "summary", "brief",
+          "role", "year", "features", "tech", "links", "cover", "gallery",
+          "packageId", "learnHref", "featured", "published", "order", "updatedAt"
+        ])
+        && d.title is string && d.title.size() >= 2 && d.title.size() <= 120
+        && d.slug is string && d.slug.matches('^[a-z0-9-]{1,60}$')
+        && d.ownership in ["own", "client", "demo"]
+        && d.status in ["live", "building", "demo"]
+        && d.types is list && d.features is list && d.tech is list && d.gallery is list
+        && d.gallery.size() <= 24
+        && d.links is map
+        && d.published is bool && d.featured is bool
+        && isNumber(d.order);
+    }
+
+    match /portfolio/{projectId} {
+      allow read: if resource.data.published == true || isAdmin();
+      allow create, update: if isAdmin() && validProject(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    function validPackage(d) {
+      return d is map
+        && d.keys().hasOnly([
+          "track", "name", "description", "price", "priceMode", "priceNote", "timeline",
+          "includes", "featured", "badge", "cta", "need", "published", "order", "updatedAt"
+        ])
+        && d.track in ["website", "app"]
+        && d.name is string && d.name.size() >= 2 && d.name.size() <= 80
+        && isNumber(d.price) && d.price >= 0
+        && d.priceMode in ["fixed", "from", "quote"]
+        && d.need in ["landing", "booking", "mobile-app", "web-app", "other"]
+        && d.includes is list && d.includes.size() <= 12
+        && d.published is bool && d.featured is bool
+        && isNumber(d.order);
+    }
+
+    match /hirePackages/{packageId} {
+      allow read: if resource.data.published == true || isAdmin();
+      allow create, update: if isAdmin() && validPackage(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
     match /config/{docId} {
       allow read: if true;
       allow write: if isAdmin();

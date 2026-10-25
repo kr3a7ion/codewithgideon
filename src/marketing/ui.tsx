@@ -6,7 +6,8 @@ import React, { useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, ArrowUpRight, Calendar, Check, Minus, PenTool, Plus } from "lucide-react";
 import { cn } from "../ui";
-import type { Faq, Package, WorkEntry } from "./content";
+import type { Faq, WorkEntry } from "./content";
+import { packagePrice, type HirePackage } from "./catalog";
 import { demoUrl } from "./content";
 import { trackCta, trackDemo, type CtaLocation } from "./analytics";
 
@@ -295,9 +296,11 @@ export const HireCtaCard: React.FC<{ location?: CtaLocation }> = ({ location = "
   </div>
 );
 
-export const PackageCard: React.FC<{ pkg: Package; location?: CtaLocation; headingLevel?: "h2" | "h3" }> = ({ pkg, location = "packages", headingLevel = "h3" }) => {
+export const PackageCard: React.FC<{ pkg: HirePackage; location?: CtaLocation; headingLevel?: "h2" | "h3" }> = ({ pkg, location = "packages", headingLevel = "h3" }) => {
   const H = headingLevel;
-  const to = pkg.id === "care" ? "/hire?need=other#enquire" : `/hire?need=${pkg.id}#enquire`;
+  const to = `/hire?need=${pkg.need || "other"}#enquire`;
+  const price = packagePrice(pkg);
+  const quote = price === "Custom quote";
   return (
     <div
       className={cn(
@@ -311,16 +314,18 @@ export const PackageCard: React.FC<{ pkg: Package; location?: CtaLocation; headi
         <p className="text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{pkg.description}</p>
       </div>
       <p className="flex items-baseline gap-2">
-        <span className="font-display text-[34px] font-bold leading-none tracking-[-0.02em] text-blue-900 dark:text-white">{pkg.price}</span>
-        <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{pkg.priceNote}</span>
+        <span className={cn("font-display font-bold leading-none tracking-[-0.02em] text-blue-900 dark:text-white", quote ? "text-[26px]" : "text-[34px]")}>{price}</span>
+        {!quote && pkg.priceNote ? <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{pkg.priceNote}</span> : null}
       </p>
-      <p className="flex items-center gap-2 text-sm font-bold text-blue-900 dark:text-white">
-        <Calendar className="h-[18px] w-[18px] text-slate-500" aria-hidden />
-        <span>
-          <span className="sr-only">Timeline: </span>
-          {pkg.timeline}
-        </span>
-      </p>
+      {pkg.timeline ? (
+        <p className="flex items-center gap-2 text-sm font-bold text-blue-900 dark:text-white">
+          <Calendar className="h-[18px] w-[18px] text-slate-500" aria-hidden />
+          <span>
+            <span className="sr-only">Timeline: </span>
+            {pkg.timeline}
+          </span>
+        </p>
+      ) : null}
       <ul className="space-y-2.5 border-t border-line pt-[18px] text-sm font-medium leading-[22px] text-slate-600 dark:border-line-dark dark:text-slate-300">
         {pkg.includes.map((i) => (
           <CheckItem key={i} tone="hire">

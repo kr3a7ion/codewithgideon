@@ -158,11 +158,13 @@ export const demoUrl = (w: WorkEntry) => `${DEMOS_BASE_URL}/${w.demoPath}`;
 // Hire
 // ---------------------------------------------------------------------------
 
-export type HireNeed = "landing" | "booking" | "other";
+export type HireNeed = "landing" | "booking" | "mobile-app" | "web-app" | "other";
 
 export const HIRE_NEEDS: { value: HireNeed; label: string }[] = [
   { value: "landing", label: "Landing page" },
   { value: "booking", label: "Booking site" },
+  { value: "mobile-app", label: "Mobile app" },
+  { value: "web-app", label: "Web app / system" },
   { value: "other", label: "Something else" },
 ];
 
@@ -265,7 +267,7 @@ export const JOIN_FAQ: Faq[] = [
 ];
 
 export const HIRE_FAQ: Faq[] = [
-  { q: "How much does a website cost?", a: "₦90,000 for a WhatsApp-first landing page and ₦180,000 for a booking website. Care after launch is ₦15,000 a month." },
+  { q: "How much does a website or app cost?", a: "₦90,000 for a WhatsApp-first landing page and ₦180,000 for a booking website. Care after launch is ₦15,000 a month." },
   { q: "How long does it take?", a: "About 5 days for a landing page and 10 to 14 days for a booking site, counted from when you approve the design." },
   { q: "How do I pay?", a: "60% to start and 40% before the site goes live." },
   { q: "Who owns the domain and hosting?", a: "You do. Both are registered in your name, so you can move them any time." },
