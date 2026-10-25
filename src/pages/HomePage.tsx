@@ -2,7 +2,8 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { ArrowUpRight, CalendarDays, Check, Download, FileText, MapPin, MessageSquare, PlayCircle, TrendingUp, Video } from "lucide-react";
 import Courses from "../../components/Courses";
-import { IMAGES } from "../../assets/images";
+import { SlotImage } from "../marketing/SlotImage";
+import { IntroVideoButton } from "../marketing/IntroVideo";
 import { useApp } from "../app/AppContext";
 import { usePageMeta } from "../app/usePageMeta";
 import { HIRE_FAQ, HIRE_TERMS, JOIN_FAQ, LEARN_FAQ, PACKAGES, WORK } from "../marketing/content";
@@ -138,11 +139,9 @@ const HomePage: React.FC = () => {
           {/* Proof: the two demo builds */}
           <div className="relative mx-auto w-full max-w-[520px] lg:h-[540px]">
             <Link to={`/work/${itura.slug}`} className="block overflow-hidden rounded-[18px] shadow-lift sm:rounded-[20px]" aria-label={`${itura.name} case study`}>
-              <img
-                src={itura.images.cover}
-                srcSet={`${itura.images.cover960} 960w, ${itura.images.cover} 1600w`}
+              <SlotImage
+                slot="home.hero"
                 sizes="(min-width: 1024px) 520px, calc(100vw - 40px)"
-                alt={itura.images.alt}
                 width={1600}
                 height={1000}
                 {...{ fetchpriority: "high" }}
@@ -154,7 +153,7 @@ const HomePage: React.FC = () => {
               className="absolute bottom-0 right-0 hidden w-[65%] overflow-hidden rounded-[20px] shadow-lift lg:block"
               aria-label={`${adire.name} case study`}
             >
-              <img src={adire.images.cover960} alt={adire.images.alt} width={960} height={600} loading="lazy" className="aspect-[16/10] w-full object-cover" />
+              <SlotImage slot="home.heroSecond" width={960} height={600} loading="lazy" className="aspect-[16/10] w-full object-cover" />
             </Link>
             <Link
               to="/work"
@@ -262,13 +261,15 @@ const HomePage: React.FC = () => {
       <Section id="about" tone="page" labelledBy="about-title">
         <div className="grid items-center gap-8 lg:grid-cols-[440px_minmax(0,1fr)] lg:gap-[72px]">
           <figure className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-800 to-teal-700 lg:rounded-[28px]">
-            <img
-              src={IMAGES.instructor.portrait}
-              alt="Gideon Okanlawon"
+            <SlotImage
+              slot="about.portrait"
               loading="lazy"
               decoding="async"
               className="aspect-[4/5] w-full object-cover sm:aspect-[4/3] lg:aspect-[440/500]"
             />
+            <div className="absolute right-4 top-4">
+              <IntroVideoButton />
+            </div>
             <figcaption className="absolute bottom-4 left-4 rounded-2xl bg-white/95 px-4 py-3 shadow-card">
               <span className="block font-display text-base font-semibold text-blue-900">Gideon Okanlawon</span>
               <span className="block text-sm font-medium text-slate-600">Developer and frontend teacher</span>

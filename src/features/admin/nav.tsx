@@ -5,6 +5,7 @@ import {
   CreditCard,
   FolderOpen,
   Home,
+  Image,
   Inbox,
   Megaphone,
   Settings,
@@ -25,6 +26,7 @@ export type AdminPageKey =
   | "courses"
   | "resources"
   | "community"
+  | "media"
   | "settings";
 
 export type AdminNavGroup = "Overview" | "People" | "Teaching" | "Content" | "System";
@@ -50,6 +52,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { key: "courses", label: "Courses & paths", path: "/admin/courses", icon: BookOpen, group: "Content" },
   { key: "resources", label: "Resources", path: "/admin/resources", icon: FolderOpen, group: "Content" },
   { key: "community", label: "Community", path: "/admin/community", icon: Layers, group: "Content" },
+  { key: "media", label: "Site media", path: "/admin/media", icon: Image, group: "Content" },
   { key: "settings", label: "Settings", path: "/admin/settings", icon: Settings, group: "System" },
 ];
 

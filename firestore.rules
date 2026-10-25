@@ -227,6 +227,45 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Site media: pictures and videos on the public pages, chosen in
+    // Admin → Site media. Anyone can read (the pages show them); only admins
+    // change them.
+    function validSiteMedia(d) {
+      return d is map
+        && d.keys().hasOnly(["url", "smUrl", "alt", "kind", "width", "height", "libraryId", "updatedAt", "updatedBy"])
+        && d.url is string && d.url.size() >= 8 && d.url.size() <= 2000
+        && d.url.matches('^https://.*')
+        && d.kind in ["image", "video"]
+        && (!("smUrl" in d) || (d.smUrl is string && d.smUrl.matches('^https://.*')))
+        && (!("alt" in d) || (d.alt is string && d.alt.size() <= 300))
+        && (!("width" in d) || isNumber(d.width))
+        && (!("height" in d) || isNumber(d.height))
+        && (!("libraryId" in d) || d.libraryId is string)
+        && isNumber(d.updatedAt);
+    }
+
+    match /siteMedia/{slotId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && validSiteMedia(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Everything uploaded to Site media (the library). Admins only.
+    match /mediaLibrary/{itemId} {
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          "name", "kind", "url", "path", "smUrl", "smPath",
+          "width", "height", "size", "contentType", "createdAt"
+        ])
+        && request.resource.data.url is string
+        && request.resource.data.path is string
+        && request.resource.data.path.matches('^site-media/.*')
+        && request.resource.data.kind in ["image", "video"]
+        && isNumber(request.resource.data.size)
+        && isNumber(request.resource.data.createdAt);
+    }
+
     match /config/{docId} {
       allow read: if true;
       allow write: if isAdmin();

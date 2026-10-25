@@ -12,6 +12,8 @@ import VerifyEmailPage from "../src/features/join/VerifyEmailPage";
 import DetailsPage from "../src/features/join/DetailsPage";
 import PaymentPage from "../src/features/join/PaymentPage";
 import { previewProfile } from "./mocks/data";
+import HomePage from "../src/pages/HomePage";
+import HirePage from "../src/pages/HirePage";
 import { BadgeMedal, type MedalState } from "../src/features/learn/BadgeMedal";
 import { getBadgesForLength } from "../src/features/learn/lib";
 
@@ -137,6 +139,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route path="/student/register" element={<DetailsPage onNavigate={log("navigate")} selectedPath="" onGoogleAuth={noGoogle} />} />
         <Route path="/student/payment" element={<Payment />} />
         <Route path="/badges-gallery" element={<BadgeGallery />} />
+        {/* Public pages, for checking Site media changes */}
+        <Route path="/site/home" element={<HomePage />} />
+        <Route path="/site/hire" element={<HirePage />} />
         <Route path="/student/classes/:sessionId" element={<Student />} />
         <Route path="/student/*" element={<Student />} />
         <Route

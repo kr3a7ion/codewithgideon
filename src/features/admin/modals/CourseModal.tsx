@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { Button, Field, inputClass } from "../../../ui";
 import { useAdmin } from "../AdminWorkspaceContext";
+import { MediaPickerButton } from "../media/MediaBits";
 import { Dialog, Toggle, naira } from "../ui";
 
 const LEVELS = ["Beginner", "Intermediate", "Advanced", "All levels"];
@@ -260,15 +261,18 @@ const CourseModal: React.FC = () => {
         </section>
 
         <section className="space-y-4">
-          <Field label="Cover image link (optional)" htmlFor="course-img">
-            <input
-              id="course-img"
-              type="url"
-              value={courseForm.imageUrl}
-              onChange={(e) => set({ imageUrl: e.target.value })}
-              placeholder="https://..."
-              className={inputClass}
-            />
+          <Field label="Cover picture (optional)" htmlFor="course-img" hint="Upload one, pick from Site media, or paste a link.">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                id="course-img"
+                type="url"
+                value={courseForm.imageUrl}
+                onChange={(e) => set({ imageUrl: e.target.value })}
+                placeholder="https://..."
+                className={inputClass}
+              />
+              <MediaPickerButton label="Choose picture" onPick={(i) => set({ imageUrl: i.url })} />
+            </div>
           </Field>
           {courseForm.imageUrl?.trim() ? (
             <img

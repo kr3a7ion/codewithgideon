@@ -52,12 +52,29 @@ export const onSnapshot = (ref: Ref, next: (s: any) => void) => {
 };
 export const getDoc = async (ref: Ref) => snapFor(ref.path);
 export const getDocs = async (ref: Ref) => snapFor(ref.path);
-export const setDoc = async () => undefined;
+// Writes land in the in-memory data so the preview reflects them.
+const splitDoc = (path: string) => {
+  const parts = path.split("/");
+  return { coll: parts.slice(0, -1).join("/"), id: parts[parts.length - 1] };
+};
+export const setDoc = async (ref: Ref, data: any = {}) => {
+  const { coll, id } = splitDoc(ref.path);
+  if (!coll || (previewDb[coll] != null && !Array.isArray(previewDb[coll]))) return;
+  const list: any[] = (previewDb[coll] ||= []);
+  const i = list.findIndex((d) => d.id === id);
+  const row = { ...data, id };
+  if (i >= 0) list[i] = row;
+  else list.push(row);
+};
 // Profile edits made from the admin preview show up in the student list.
 export const updateDoc = async (ref: Ref, patch: any = {}) => {
   const m = /^users\/([^/]+)$/.exec(ref.path);
   if (m) (globalThis as any).__previewPatchStudent?.(m[1], patch);
 };
 export const addDoc = async () => ({ id: "new" });
-export const deleteDoc = async () => undefined;
+export const deleteDoc = async (ref: Ref) => {
+  const { coll, id } = splitDoc(ref.path);
+  const list = previewDb[coll];
+  if (Array.isArray(list)) previewDb[coll] = list.filter((d: any) => d.id !== id);
+};
 export const runTransaction = async (_db: unknown, fn: any) => fn({ get: getDoc, set() {}, update() {} });

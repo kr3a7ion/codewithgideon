@@ -4,6 +4,7 @@ import { httpsCallable } from "firebase/functions";
 import { ArrowRight, ArrowUpRight, CalendarDays, CheckCircle2 } from "lucide-react";
 import { functions } from "../../services/firebase";
 import { usePageMeta } from "../app/usePageMeta";
+import { SlotImage } from "../marketing/SlotImage";
 import {
   BOOKING_URL,
   HIRE_BUDGETS,
@@ -366,11 +367,9 @@ const HirePage: React.FC = () => {
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Reply time: {responseTime.toLowerCase()}.</p>
           </div>
           <Link to={`/work/${adire.slug}`} className="block overflow-hidden rounded-[18px] shadow-lift sm:rounded-[20px]" aria-label={`${adire.name} case study`}>
-            <img
-              src={adire.images.cover}
-              srcSet={`${adire.images.cover960} 960w, ${adire.images.cover} 1600w`}
+            <SlotImage
+              slot="hire.hero"
               sizes="(min-width: 1024px) 524px, calc(100vw - 40px)"
-              alt={adire.images.alt}
               width={1600}
               height={1000}
               className="aspect-[16/10] w-full object-cover"
