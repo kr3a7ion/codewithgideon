@@ -19,7 +19,7 @@ export const Dialog: React.FC<{
   className?: string;
   /** Element to focus first (defaults to the first focusable). */
   initialFocus?: React.RefObject<HTMLElement>;
-  size?: "sm" | "md";
+  size?: "sm" | "md" | "lg";
 }> = ({ open, onClose, title, description, children, className, initialFocus, size = "sm" }) => {
   const titleId = useId();
   const descId = useId();
@@ -78,7 +78,7 @@ export const Dialog: React.FC<{
         tabIndex={-1}
         className={cn(
           "max-h-[92vh] w-full overflow-y-auto rounded-t-[28px] bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-lift outline-none dark:bg-slate-900 sm:rounded-3xl sm:p-6",
-          size === "md" ? "sm:max-w-[560px]" : "sm:max-w-[440px]",
+          size === "lg" ? "sm:max-w-[980px]" : size === "md" ? "sm:max-w-[560px]" : "sm:max-w-[440px]",
           className,
         )}
       >

@@ -65,7 +65,10 @@ const usePreloadSections = (enabled: boolean) => {
     if (!enabled) return;
     const saveData = Boolean((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData);
     if (saveData) return;
-    const run = () => (Object.keys(loaders) as StudentSection[]).forEach(preloadSection);
+    const run = () => {
+      (Object.keys(loaders) as StudentSection[]).forEach(preloadSection);
+      import("./sections/ClassPage").catch(() => undefined);
+    };
     const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
     if (w.requestIdleCallback) {
       const id = w.requestIdleCallback(run, { timeout: 2500 });

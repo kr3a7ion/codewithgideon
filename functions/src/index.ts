@@ -5,6 +5,7 @@ import {logger} from "firebase-functions";
 import {FieldValue} from "firebase-admin/firestore";
 import {db} from "./admin.js";
 import {enforceRateLimit, normalizeSpaces} from "./rateLimit.js";
+import {cleanAttachments} from "./attachments.js";
 
 // Payments live in their own module; names and URLs are unchanged.
 export {
@@ -160,7 +161,10 @@ export const sendMentorRequest = onCall(
 
     const name = normalizeSpaces(String(data.name ?? ""));
     const email = normalizeSpaces(String(data.email ?? "")).toLowerCase();
-    const message = normalizeSpaces(String(data.message ?? ""));
+    const attachments = cleanAttachments(request.auth.uid, (data as any).attachments);
+    const typed = normalizeSpaces(String(data.message ?? ""));
+    // A screenshot can be sent on its own.
+    const message = typed || (attachments.length ? "Sent a screenshot" : "");
     const clientMessageId = normalizeSpaces(String(data.clientMessageId ?? ""));
     const contextType = normalizeSpaces(String(data.contextType ?? "")).toLowerCase();
     const sessionId = normalizeSpaces(String(data.sessionId ?? ""));
@@ -180,7 +184,7 @@ export const sendMentorRequest = onCall(
     if (!email || !isValidEmail(email)) {
       throw new HttpsError("invalid-argument", "A valid email is required.");
     }
-    if (!message || message.length < 5) {
+    if (!attachments.length && (!message || message.length < 5)) {
       throw new HttpsError(
         "invalid-argument",
         "Message must be at least 5 characters.",
@@ -279,6 +283,7 @@ export const sendMentorRequest = onCall(
           cohortId,
           cohortLabel,
           createdAt: now,
+          ...(attachments.length ? {attachments} : {}),
           ...(clientMessageId ? {clientMessageId} : {}),
         });
       });

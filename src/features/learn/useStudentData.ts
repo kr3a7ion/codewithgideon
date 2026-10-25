@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
   doc,
@@ -42,6 +42,8 @@ export type MentorChatMessage = {
   senderName?: string;
   senderEmail?: string;
   createdAt?: any;
+  /** Screenshots sent with the message. */
+  attachments?: { url: string; name: string; contentType: string }[];
   /** The class the student asked about (sent with the message). */
   sessionId?: string;
   sessionTitle?: string;
@@ -49,6 +51,20 @@ export type MentorChatMessage = {
 
 /** What a mentor message is about, shown as a small pill above it. */
 export type MentorContext = { sessionId: string; sessionTitle: string };
+
+/** How much of a recording the student has watched (users/{uid}/progress). */
+export type WatchProgress = {
+  sessionId: string;
+  /** Seconds into the recording. */
+  position: number;
+  /** Length of the recording in seconds (0 when unknown). */
+  duration: number;
+  completed: boolean;
+  updatedAtMs: number;
+};
+
+/** A recording counts as watched once 90% of it has played. */
+export const WATCHED_AT = 0.9;
 
 /** The placeholder session id the web used before messages had a context. */
 const GENERAL_CHAT_ID = "web-student-chat";
@@ -470,6 +486,11 @@ export const useStudentData = (
               senderName: String(data.senderName || "").trim(),
               senderEmail: String(data.senderEmail || "").trim(),
               createdAt: data.createdAt,
+              attachments: Array.isArray(data.attachments)
+                ? data.attachments
+                    .filter((a: any) => a && typeof a.url === "string" && /^(https:|blob:)/.test(a.url))
+                    .map((a: any) => ({ url: String(a.url), name: String(a.name || "Screenshot"), contentType: String(a.contentType || "image/png") }))
+                : [],
               sessionId: String(data.sessionId || "").trim(),
               sessionTitle:
                 String(data.sessionId || "").trim() === GENERAL_CHAT_ID
@@ -477,7 +498,7 @@ export const useStudentData = (
                   : String(data.sessionTitle || "").trim(),
             } as MentorChatMessage;
           })
-          .filter((m) => m.body);
+          .filter((m) => m.body || m.attachments?.length);
         setMentorMessages(list);
         setMentorLoading(false);
       },
@@ -530,17 +551,23 @@ export const useStudentData = (
   }, [mentorMessages]);
 
   const sendMentorMessage = useCallback(
-    async (text: string, context?: MentorContext | null): Promise<boolean> => {
+    async (text: string, context?: MentorContext | null, images: File[] = []): Promise<boolean> => {
       if (!profile || isLocked) return false;
       const body = text.trim();
-      if (body.length < 5) {
+      if (body.length < 5 && !images.length) {
         setMentorError("Add a little more detail so your mentor can help.");
         return false;
       }
       setMentorSending(true);
       setMentorError("");
       try {
+        let attachments: unknown[] = [];
+        if (images.length) {
+          const { uploadChatImage } = await import("../../../services/storage");
+          attachments = await Promise.all(images.slice(0, 3).map((f) => uploadChatImage(profile.uid, f)));
+        }
         await httpsCallable(functions, "sendMentorRequest")({
+          attachments,
           name: profile.fullName,
           email: profile.email,
           studentPhone: profile.phone,
@@ -611,6 +638,69 @@ export const useStudentData = (
     };
   }, [sessions, isLocked]);
 
+  // ---------------- watch progress ----------------
+  const [progress, setProgress] = useState<Record<string, WatchProgress>>({});
+  const progressRef = useRef(progress);
+  progressRef.current = progress;
+
+  useEffect(() => {
+    if (!profile?.uid || isLocked) {
+      setProgress({});
+      return;
+    }
+    return onSnapshot(
+      collection(db, "users", profile.uid, "progress"),
+      (snap) => {
+        const next: Record<string, WatchProgress> = {};
+        snap.docs.forEach((d) => {
+          const v = d.data() as any;
+          next[d.id] = {
+            sessionId: d.id,
+            position: Number(v.position) || 0,
+            duration: Number(v.duration) || 0,
+            completed: Boolean(v.completed),
+            updatedAtMs: toMs(v.updatedAt) || 0,
+          };
+        });
+        setProgress(next);
+      },
+      () => setProgress({}),
+    );
+  }, [profile?.uid, isLocked]);
+
+  /** Save where the student is in a recording. Once watched, it stays
+   *  watched unless the student unmarks it. */
+  const saveProgress = useCallback(
+    async (sessionId: string, u: { position: number; duration: number; completed?: boolean }) => {
+      if (!profile?.uid || !sessionId) return;
+      const prev = progressRef.current[sessionId];
+      const duration = Math.max(0, Math.round(u.duration || prev?.duration || 0));
+      const position = Math.max(0, Math.min(Math.round(u.position || 0), duration || 86400));
+      const completed = u.completed ?? (Boolean(prev?.completed) || (duration > 0 && position / duration >= WATCHED_AT));
+      setProgress((p) => ({ ...p, [sessionId]: { sessionId, position, duration, completed, updatedAtMs: Date.now() } }));
+      try {
+        await setDoc(doc(db, "users", profile.uid, "progress", sessionId), {
+          sessionId,
+          position,
+          duration,
+          completed,
+          updatedAt: serverTimestamp(),
+        });
+      } catch {
+        /* offline or not allowed: the local copy still shows */
+      }
+    },
+    [profile?.uid],
+  );
+
+  const setWatched = useCallback(
+    (sessionId: string, watched: boolean) => {
+      const prev = progressRef.current[sessionId];
+      return saveProgress(sessionId, { position: watched ? prev?.duration || prev?.position || 0 : 0, duration: prev?.duration || 0, completed: watched });
+    },
+    [saveProgress],
+  );
+
   // ---------------- profile edits ----------------
   const updateProfileDetails = useCallback(
     async (changes: { fullName: string; phone: string }) => {
@@ -675,6 +765,13 @@ export const useStudentData = (
     pastSessions,
     currentWeek,
     completedWeeks,
+    /** Paid, but not placed in an intake yet (e.g. credited by hand), so
+     *  the classes can't load. Gideon has to place them. */
+    notPlaced: profile?.status === "Complete" && !String(profile?.cohortKey || "").trim() && !String(profile?.cohortId || "").trim(),
+    // watch progress
+    progress,
+    saveProgress,
+    setWatched,
     resources,
     resourcesLoading,
     communitySpaces,

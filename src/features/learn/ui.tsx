@@ -7,9 +7,11 @@ import {
   Bell,
   CalendarDays,
   CalendarPlus,
+  Check,
   ChevronRight,
   Clock3,
   ExternalLink,
+  Eye,
   FileText,
   Link2,
   Lock,
@@ -26,6 +28,11 @@ import { cn } from "../../ui";
 import { Card, IconTile, naira, plural, Progress } from "../shared/ui";
 import { addToCalendar } from "./calendar";
 import { sessionInfo, startsIn } from "./time";
+import { thumbFor, viewFor } from "./video";
+import { ResourceViewer } from "./components/ResourceViewer";
+import type { WatchProgress } from "./useStudentData";
+
+const classPath = (id: string) => `/student/classes/${encodeURIComponent(id)}`;
 
 // ---------------------------------------------------------------------------
 // Headings
@@ -227,7 +234,7 @@ const WeekTile: React.FC<{ week: number; muted?: boolean; locked?: boolean; live
   </span>
 );
 
-export const SessionRow: React.FC<{ session: SessionDoc; courseTitle: string; onAsk?: () => void }> = ({ session, courseTitle, onAsk }) => {
+export const SessionRow: React.FC<{ session: SessionDoc; courseTitle: string; onAsk?: () => void; progress?: WatchProgress }> = ({ session, courseTitle, onAsk, progress }) => {
   const i = sessionInfo(session);
   const ended = i.phase === "ended";
   const live = i.phase === "live";
@@ -241,8 +248,19 @@ export const SessionRow: React.FC<{ session: SessionDoc; courseTitle: string; on
     >
       <WeekTile week={i.week} muted={ended} live={live} />
       <div className="min-w-0 flex-1">
-        <p className="text-[15px] font-bold leading-[22px] text-blue-900 dark:text-white sm:text-base">{i.title}</p>
-        <p className="text-[13px] font-medium leading-5 text-slate-500 dark:text-slate-400 sm:text-sm">{meta}</p>
+        <Link to={classPath(String((session as any).id))} className="block text-[15px] font-bold leading-[22px] text-blue-900 hover:underline dark:text-white sm:text-base">
+          {i.title}
+        </Link>
+        <p className="text-[13px] font-medium leading-5 text-slate-500 dark:text-slate-400 sm:text-sm">
+          {meta}
+          {ended && progress?.completed ? (
+            <span className="ml-1.5 inline-flex items-center gap-1 font-bold text-teal-700 dark:text-teal-300">
+              · <Check className="h-3.5 w-3.5" strokeWidth={3} aria-hidden /> Watched
+            </span>
+          ) : ended && progress && progress.duration > 0 && progress.position > 10 ? (
+            <span className="ml-1.5 font-bold text-teal-700 dark:text-teal-300">· {Math.round((progress.position / progress.duration) * 100)}% watched</span>
+          ) : null}
+        </p>
       </div>
       <div className="flex shrink-0 items-center gap-2.5">
         {live && !i.canJoin ? <Tag tone="hire">Live now</Tag> : null}
@@ -271,11 +289,11 @@ export const SessionRow: React.FC<{ session: SessionDoc; courseTitle: string; on
           </>
         ) : null}
         {ended && i.recordingUrl ? (
-          <a href={i.recordingUrl} target="_blank" rel="noopener noreferrer" className={mbtn({ kind: "secondary", size: "sm" })}>
-            <PlayCircle className="h-4 w-4" aria-hidden /> <span className="sm:hidden">Watch</span>
-            <span className="hidden sm:inline">Watch recording</span>
+          <Link to={classPath(String((session as any).id))} className={mbtn({ kind: "secondary", size: "sm" })}>
+            <PlayCircle className="h-4 w-4" aria-hidden /> <span className="sm:hidden">{progress?.completed ? "Rewatch" : "Watch"}</span>
+            <span className="hidden sm:inline">{progress?.completed ? "Watch again" : progress && progress.position > 10 ? "Resume" : "Watch recording"}</span>
             <span className="sr-only">: {i.title}</span>
-          </a>
+          </Link>
         ) : null}
         {ended && i.recordingSoon ? <Tag tone="neutral">Recording soon</Tag> : null}
         {onAsk ? (
@@ -396,19 +414,20 @@ export const WeeksCard: React.FC<{
 // Recording and resource cards
 // ---------------------------------------------------------------------------
 
-export const RecordingCard: React.FC<{ session: SessionDoc; className?: string }> = ({ session, className }) => {
+export const RecordingCard: React.FC<{ session: SessionDoc; className?: string; progress?: WatchProgress }> = ({ session, className, progress }) => {
   const i = sessionInfo(session);
+  const thumb = thumbFor(i.recordingUrl);
+  const pct = progress?.completed ? 100 : progress?.duration ? Math.round((progress.position / progress.duration) * 100) : 0;
   return (
-    <a
-      href={i.recordingUrl}
-      target="_blank"
-      rel="noopener noreferrer"
+    <Link
+      to={classPath(String((session as any).id))}
       className={cn(
         "group flex flex-col overflow-hidden rounded-[18px] border border-line bg-white transition-shadow hover:shadow-card dark:border-line-dark dark:bg-slate-900",
         className,
       )}
     >
       <span className="relative flex h-[124px] items-center justify-center overflow-hidden bg-blue-900 sm:h-[130px]">
+        {thumb ? <img src={thumb} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover opacity-60" onError={(e) => (e.currentTarget.style.display = "none")} /> : null}
         {/* The week number, set large, is the thumbnail's only graphic. */}
         {i.week ? (
           <span aria-hidden className="pointer-events-none absolute -bottom-3 left-3 select-none font-display text-[72px] font-bold leading-none tracking-[-0.05em] text-teal-400/20">
@@ -419,15 +438,29 @@ export const RecordingCard: React.FC<{ session: SessionDoc; className?: string }
           <PlayCircle className="h-6 w-6" aria-hidden />
         </span>
         <span className="absolute bottom-2.5 right-2.5 rounded-lg bg-slate-950/75 px-2 py-0.5 text-xs font-bold text-white">{i.durationMins} min</span>
+        {progress?.completed ? (
+          <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-lg bg-teal-500 px-2 py-0.5 text-xs font-bold text-white">
+            <Check className="h-3.5 w-3.5" strokeWidth={3} aria-hidden /> Watched
+          </span>
+        ) : null}
+        {pct > 0 && pct < 100 ? (
+          <span className="absolute inset-x-0 bottom-0 h-1 bg-white/25" aria-hidden>
+            <span className="block h-full bg-teal-400" style={{ width: `${pct}%` }} />
+          </span>
+        ) : null}
       </span>
       <span className="flex flex-1 flex-col gap-1 px-4 pb-4 pt-3.5">
         <span className="text-xs font-extrabold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
           {i.week ? `Week ${i.week} · ` : ""}Recording
         </span>
         <span className="text-base font-bold leading-[22px] text-blue-900 dark:text-white">{i.title}</span>
-        {i.hasTime ? <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Recorded {i.day}</span> : null}
+        {pct > 0 && pct < 100 ? (
+          <span className="text-sm font-bold text-teal-700 dark:text-teal-300">{pct}% watched · Resume</span>
+        ) : i.hasTime ? (
+          <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Recorded {i.day}</span>
+        ) : null}
       </span>
-    </a>
+    </Link>
   );
 };
 
@@ -438,8 +471,10 @@ const resourceIcon = (r: ResourceDoc): LucideIcon => {
   return FileText;
 };
 
-export const ResourceRow: React.FC<{ resource: ResourceDoc }> = ({ resource: r }) => {
+export const ResourceRow: React.FC<{ resource: ResourceDoc; classLink?: { to: string; title: string } | null }> = ({ resource: r, classLink }) => {
   const anyR = r as any;
+  const [viewing, setViewing] = React.useState(false);
+  const viewable = Boolean(viewFor(anyR.url));
   const meta = [Number(anyR.sessionWeek) > 0 ? `Week ${anyR.sessionWeek}` : anyR.folder, anyR.type, anyR.size].filter(Boolean).join(" · ");
   const Icon = resourceIcon(r);
   const body = (
@@ -449,9 +484,27 @@ export const ResourceRow: React.FC<{ resource: ResourceDoc }> = ({ resource: r }
         <span className="block text-[15px] font-bold leading-5 text-blue-900 dark:text-white">{anyR.name || "Resource"}</span>
         {meta ? <span className="mt-0.5 block text-sm font-medium text-slate-500 dark:text-slate-400">{meta}</span> : null}
         {anyR.description ? <span className="mt-1 line-clamp-2 text-sm font-medium leading-[22px] text-slate-600 dark:text-slate-300">{anyR.description}</span> : null}
+        {classLink ? <span className="mt-1 block truncate text-[13px] font-semibold text-teal-700 dark:text-teal-300">From: {classLink.title}</span> : null}
       </span>
     </>
   );
+  if (viewable) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setViewing(true)}
+          className="flex w-full items-center gap-3.5 rounded-[14px] border border-line bg-white px-3.5 py-3 text-left transition-colors hover:border-line-strong dark:border-line-dark dark:bg-slate-900"
+        >
+          {body}
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-bold text-teal-700 dark:text-teal-300">
+            View <Eye className="h-4 w-4" aria-hidden />
+          </span>
+        </button>
+        <ResourceViewer resource={viewing ? r : null} onClose={() => setViewing(false)} classLink={classLink} />
+      </>
+    );
+  }
   return anyR.url ? (
     <a
       href={anyR.url}

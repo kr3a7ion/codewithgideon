@@ -1,14 +1,51 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { BookOpen, Lock, MessageSquare, PlayCircle, Plus } from "lucide-react";
+import type { SessionDoc } from "../../../../services/registrationStore";
 import { mbtn, Tag, WhatsAppIcon } from "../../../marketing/ui";
 import { upcomingCohortLabel, useContactLinks } from "../../../marketing/useContactLinks";
 import { Avatar, Card, Notice, naira, plural } from "../../shared/ui";
 import { useStudent } from "../StudentDataContext";
 import { HomeHero } from "../HomeHero";
 import { RowsBone } from "../Skeleton";
+import { GettingStarted } from "../components/GettingStarted";
 import { EmptyCard, LockedRow, RecordingCard, ResourceRow, SectionHead, SessionRow, UpdateRow } from "../ui";
-import { ago, greeting } from "../time";
+import { ago, greeting, sessionInfo } from "../time";
+import { clock, thumbFor } from "../video";
 import { toMs } from "../lib";
+
+/** "Continue watching": the recording the student left part-way. */
+const ContinueCard: React.FC<{ session: SessionDoc; position: number; duration: number }> = ({ session, position, duration }) => {
+  const i = sessionInfo(session);
+  const thumb = thumbFor(i.recordingUrl);
+  const pct = duration ? Math.min(99, Math.round((position / duration) * 100)) : 0;
+  return (
+    <Link
+      to={`/student/classes/${encodeURIComponent(String((session as any).id))}`}
+      className="group flex items-center gap-4 rounded-[18px] border border-line bg-white p-3 pr-4 transition-shadow hover:shadow-card dark:border-line-dark dark:bg-slate-900"
+    >
+      <span className="relative flex h-[72px] w-[120px] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-blue-900 sm:h-[84px] sm:w-[150px]">
+        {thumb ? <img src={thumb} alt="" className="absolute inset-0 h-full w-full object-cover opacity-70" onError={(e) => (e.currentTarget.style.display = "none")} /> : null}
+        <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-teal-400 text-blue-950 transition-transform group-hover:scale-105">
+          <PlayCircle className="h-5 w-5" aria-hidden />
+        </span>
+        <span className="absolute inset-x-0 bottom-0 h-1 bg-white/25" aria-hidden>
+          <span className="block h-full bg-teal-400" style={{ width: `${pct}%` }} />
+        </span>
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs font-extrabold uppercase tracking-[0.1em] text-teal-700 dark:text-teal-300">
+          Continue watching{i.week ? ` · Week ${i.week}` : ""}
+        </span>
+        <span className="mt-0.5 block truncate text-[15px] font-bold text-blue-900 dark:text-white sm:text-base">{i.title}</span>
+        <span className="block text-sm font-medium text-slate-500 dark:text-slate-400">
+          Resume from {clock(position)}
+          {duration ? ` of ${clock(duration)}` : ""}
+        </span>
+      </span>
+    </Link>
+  );
+};
 
 const shortDate = (ms: number) => (ms ? new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "");
 
@@ -27,7 +64,18 @@ const Home: React.FC = () => {
 
   const heroSession = s.liveSession || s.nextSession;
   const comingUp = s.upcomingSessions.filter((x) => x !== heroSession).slice(0, 2);
-  const recordings = s.pastSessions.filter((x) => String((x as any).recordingUrl || "").trim()).slice(0, 3);
+  const allRecordings = s.pastSessions.filter((x) => String((x as any).recordingUrl || "").trim());
+  // The recording the student stopped part-way through most recently.
+  const resume = allRecordings
+    .map((x) => ({ x, p: s.progress[String((x as any).id)] }))
+    .filter(({ p }) => p && !p.completed && p.position > 10)
+    .sort((a, b) => (b.p!.updatedAtMs || 0) - (a.p!.updatedAtMs || 0))[0];
+  // Unwatched recordings first, newest first.
+  const recordings = [...allRecordings]
+    .filter((x) => x !== resume?.x)
+    .sort((a, b) => Number(Boolean(s.progress[String((a as any).id)]?.completed)) - Number(Boolean(s.progress[String((b as any).id)]?.completed)))
+    .slice(0, resume ? 2 : 3);
+  const watchedCount = allRecordings.filter((x) => s.progress[String((x as any).id)]?.completed).length;
   const weekResources = s.resources.filter((r: any) => s.currentWeek && Number(r.sessionWeek) === s.currentWeek);
   const homeResources = (weekResources.length ? weekResources : s.resources).slice(0, 3);
   const updates = s.cohortMessages.slice(0, 2);
@@ -42,6 +90,21 @@ const Home: React.FC = () => {
   // ---- blocks ----
   // Pending and checking are explained in the hero; a top-up being checked
   // gets its own notice because the student can still use their classes.
+  const notPlacedNotice = s.notPlaced ? (
+    <Notice
+      tone="review"
+      role="status"
+      title="Gideon is adding you to your class group"
+      action={
+        <a href={whatsapp} target="_blank" rel="noopener noreferrer" className={mbtn({ kind: "secondary" })}>
+          Message Gideon <WhatsAppIcon className="h-[18px] w-[18px]" />
+        </a>
+      }
+    >
+      Your payment is in, but you haven't been placed in an intake yet, so your classes can't show. This is usually sorted the same day.
+    </Notice>
+  ) : null;
+
   const topUpNotice =
     state === "active" && review ? (
       <Notice
@@ -81,6 +144,7 @@ const Home: React.FC = () => {
       unreadUpdates={s.unreadNotificationCount > 0}
       progressLoading={s.courseWeeksLoading}
       onPay={s.continuePayment}
+      onAddWeeks={s.canTopUp && !s.topUpInReview ? s.openTopUp : undefined}
     />
   );
 
@@ -106,12 +170,16 @@ const Home: React.FC = () => {
         Every class you've paid for is recorded and shows up here, so you can catch up any time.
       </EmptyCard>
     </section>
-  ) : recordings.length ? (
+  ) : recordings.length || resume ? (
     <section aria-labelledby="home-catch-up" className="space-y-3">
       <SectionHead title="Catch up" id="home-catch-up" action={{ label: "All recordings", onClick: () => s.goTo("classes") }} />
+      <p className="-mt-1 text-sm font-medium text-slate-500 dark:text-slate-400">
+        {watchedCount} of {allRecordings.length} recordings watched
+      </p>
+      {resume ? <ContinueCard session={resume.x} position={resume.p!.position} duration={resume.p!.duration} /> : null}
       <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0">
         {recordings.map((x) => (
-          <RecordingCard key={(x as any).id} session={x} className="w-[230px] shrink-0 snap-start sm:w-auto" />
+          <RecordingCard key={(x as any).id} session={x} progress={s.progress[String((x as any).id)]} className="w-[230px] shrink-0 snap-start sm:w-auto" />
         ))}
       </div>
     </section>
@@ -229,6 +297,7 @@ const Home: React.FC = () => {
   return (
     <div className="space-y-6 lg:space-y-7">
       {hero}
+      {notPlacedNotice}
       {topUpNotice}
       {/* Phones: one column, with the weeks card after Coming up. Desktop:
           classes on the left; weeks, mentor and updates on the right. */}
@@ -239,6 +308,9 @@ const Home: React.FC = () => {
           {resourcesBlock ? <div className="order-4">{resourcesBlock}</div> : null}
         </div>
         <div className="contents lg:flex lg:flex-col lg:gap-6">
+          <div className="order-2 empty:hidden">
+            <GettingStarted />
+          </div>
           {weeksCard ? <div className="order-2">{weeksCard}</div> : null}
           <div className="order-5">{mentorCard}</div>
           <div className="order-6">{updatesBlock}</div>
