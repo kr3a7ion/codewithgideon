@@ -22,7 +22,7 @@ export const JoinLayout: React.FC<{
 }> = ({ step, aside, mobileTop, bottomBar, width = "medium", children }) => {
   const { whatsapp } = useContactLinks();
   return (
-    <div className="flex min-h-screen flex-col bg-paper dark:bg-paper-dark">
+    <div className="student-app flex min-h-screen flex-col bg-mist dark:bg-paper-dark">
       <header className="sticky top-0 z-30 border-b border-line bg-white/95 backdrop-blur dark:border-line-dark dark:bg-slate-950/95">
         <div className="mx-auto flex h-14 w-full max-w-[1360px] items-center justify-between px-4 sm:h-[72px] sm:px-10">
           <Link to="/" aria-label="CodeWithGideon home" className="shrink-0">

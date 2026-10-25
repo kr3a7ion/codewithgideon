@@ -49,12 +49,12 @@ export const Panel: React.FC<{
   <section
     id={id}
     className={cn(
-      "rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900",
+      "rounded-2xl border border-line bg-white shadow-card dark:border-line-dark dark:bg-slate-900",
       className,
     )}
   >
     {title || actions ? (
-      <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3.5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+      <div className="flex flex-col gap-2 border-b border-line px-4 py-3.5 dark:border-line-dark sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <div className="min-w-0">
           {title ? (
             <h2 className="text-base font-bold text-blue-900 dark:text-white">{title}</h2>
@@ -83,7 +83,7 @@ export const StatTile: React.FC<{
       type={onClick ? "button" : undefined}
       onClick={onClick}
       className={cn(
-        "rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm dark:border-slate-800 dark:bg-slate-900",
+        "rounded-2xl border border-line bg-white px-4 py-3 text-left shadow-card dark:border-line-dark dark:bg-slate-900",
         onClick && "transition hover:border-teal-300 dark:hover:border-teal-700",
       )}
     >

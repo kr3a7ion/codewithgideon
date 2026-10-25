@@ -161,9 +161,9 @@ export const AdminLayout: React.FC<Props> = ({ children, isDark, onToggleTheme }
   const moreActive = !!current && !current.tab;
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+    <div className="student-app min-h-screen bg-mist dark:bg-paper-dark">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-line bg-white dark:border-line-dark dark:bg-slate-950 lg:flex">
         <div className="px-5 py-5">
           <Brand />
         </div>
@@ -227,7 +227,7 @@ export const AdminLayout: React.FC<Props> = ({ children, isDark, onToggleTheme }
 
       <div className="lg:pl-64">
         {/* Top bar */}
-        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
+        <header className="sticky top-0 z-20 border-b border-line bg-white/95 backdrop-blur dark:border-line-dark dark:bg-slate-950/95">
           <div className="flex h-14 items-center gap-2 px-4 sm:px-6 lg:px-8">
             <div className="flex min-w-0 items-center gap-2.5 lg:hidden">
               <Brand compact />
@@ -251,7 +251,7 @@ export const AdminLayout: React.FC<Props> = ({ children, isDark, onToggleTheme }
       {/* Phone bottom tabs */}
       <nav
         aria-label="Admin"
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-line-dark dark:bg-slate-950/95 lg:hidden"
       >
         <ul className="grid grid-cols-5">
           {tabItems.map((item) => (

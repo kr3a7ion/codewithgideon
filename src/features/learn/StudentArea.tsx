@@ -318,7 +318,7 @@ const StudentArea: React.FC<Props> = ({ profile, onNavigate, onLogout, isDark, o
 
   if (!profile) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-paper px-5 py-16 dark:bg-paper-dark">
+      <div className="student-app flex min-h-screen items-center justify-center bg-mist px-5 py-16 dark:bg-paper-dark">
         <Card className="w-full max-w-md space-y-5 p-6 text-center sm:p-8">
           <div className="flex justify-center">
             <IconTile icon={UserRoundX} size="lg" tone="hire" />

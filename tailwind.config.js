@@ -92,23 +92,21 @@ export default {
           teal: "#1698A0",
           orange: "#FF7A45",
         },
-        // Rebrand neutrals for the public site (Figma: "CodeWithGideon —
-        // Rebrand"). Paper is the warm section background; line is the
-        // matching border. Teal = Learn, orange = Hire, navy = the brand.
+        // Site neutrals. Paper is the light-blue section background; line is
+        // the matching border. Teal = Learn, orange = Hire, navy = the brand.
         //
-        // Paper and line read CSS variables so an area can retune them: the
-        // student app (.student-app in index.css) uses cool greys instead of
-        // the warm marketing tones. Defaults are the marketing values.
+        // Paper and line read CSS variables (index.css) so app areas
+        // (.student-app) can use a lighter inner surface on the blue canvas.
         paper: {
-          DEFAULT: "rgb(var(--cwg-paper, 247 244 238) / <alpha-value>)",
+          DEFAULT: "rgb(var(--cwg-paper, 234 240 246) / <alpha-value>)",
           dark: "#0D1728",
         },
         line: {
-          DEFAULT: "rgb(var(--cwg-line, 228 223 213) / <alpha-value>)",
-          strong: "rgb(var(--cwg-line-strong, 201 194 180) / <alpha-value>)",
+          DEFAULT: "rgb(var(--cwg-line, 219 227 238) / <alpha-value>)",
+          strong: "rgb(var(--cwg-line-strong, 194 205 220) / <alpha-value>)",
           dark: "#1B2940",
         },
-        // Student app canvas: a cool, light blue-grey so white cards stand out.
+        // App canvas (student dashboard, sign-up, admin): light blue so white cards stand out.
         mist: "#EAF0F6",
       },
       fontFamily: {
