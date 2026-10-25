@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import React from "react";
 import { ArrowRight, Bell, CheckCheck, ExternalLink } from "lucide-react";
 import type { CohortMessageDoc } from "../../../../services/registrationStore";
@@ -8,6 +9,17 @@ import { StudentPageHeader } from "../StudentPageHeader";
 import { RowsBone } from "../Skeleton";
 import { ago } from "../time";
 import { EmptyCard, UpdateRow } from "../ui";
+
+/** Links to this site's student area open in the app, not a new tab. */
+const internalPath = (url: string) => {
+  try {
+    const u = new URL(url, window.location.origin);
+    const ours = u.origin === window.location.origin || /(^|\.)codewithgideon\.com$/.test(u.hostname);
+    return ours && u.pathname.startsWith("/student/") ? `${u.pathname}${u.search}` : null;
+  } catch {
+    return null;
+  }
+};
 
 /** Updates (/student/notifications): announcements and mentor replies. */
 const Updates: React.FC = () => {
@@ -27,7 +39,11 @@ const Updates: React.FC = () => {
       action={
         m.ctaUrl || unread ? (
           <>
-            {m.ctaUrl ? (
+            {m.ctaUrl && internalPath(m.ctaUrl) ? (
+              <Link to={internalPath(m.ctaUrl)!} onClick={() => void s.markCohortMessageRead(m)} className={mbtn({ kind: "secondary", size: "sm" })}>
+                {m.ctaLabel || "Open"}
+              </Link>
+            ) : m.ctaUrl ? (
               <a
                 href={m.ctaUrl}
                 target="_blank"

@@ -26,8 +26,14 @@ const sessions = [1, 2, 3, 4, 5].map((week) => ({
   startsAt: Timestamp.fromMillis(now + (week - 3) * 7 * day + (week === 3 ? -20 * 60_000 : 0)),
   durationMins: 90,
   joinUrl: week >= 3 ? "https://meet.google.com/abc-defg-hij" : "",
-  recordingUrl: week < 3 ? "https://youtube.com/watch?v=preview" : "",
-  notes: week === 3 ? "Bring questions from last week's exercise. We'll build a todo app live." : "",
+  recordingUrl: week === 1 ? "https://youtu.be/Wq2Ck5sXqEA" : week === 2 ? "https://www.youtube.com/watch?v=Kx9vT3mLpQ0" : "",
+  notes: [
+    "We installed Flutter, wrote Dart functions and classes, and built a counter app.\nHomework: finish exercise 3 in the starter repo before week 2.",
+    "Rows, columns, Expanded and LayoutBuilder. Slides and the finished layout are in Resources.\nTry the profile screen challenge and post a screenshot in the WhatsApp group.",
+    "Bring questions from last week's exercise. We'll build a todo app live.",
+    "",
+    "",
+  ][week - 1],
 }));
 
 export const previewProfile: any = {
@@ -63,6 +69,7 @@ export const previewResources = empty
   : [
       { id: "r1", name: "Week 1 slides", type: "PDF", size: "2.4 MB", folder: "Week 1", url: "https://example.com", description: "Dart basics, variables, functions and classes.", sessionWeek: 1, isPublished: true, updatedAt: now },
       { id: "r2", name: "Riverpod cheat sheet", type: "Link", size: "", folder: "References", url: "https://example.com", description: "Providers, notifiers and when to use each.", isPublished: true, updatedAt: now },
+      { id: "r4", name: "Layouts slides", type: "Slides", size: "", folder: "Week 2", url: "https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOp/edit", description: "Rows, columns, Expanded and LayoutBuilder.", sessionId: "W02", sessionWeek: 2, isPublished: true, updatedAt: now },
       { id: "r3", name: "Starter project", type: "GitHub", size: "", folder: "Week 3", url: "https://example.com", sessionWeek: 3, isPublished: true, updatedAt: now },
     ];
 export const previewSpaces = empty
@@ -115,6 +122,10 @@ export const previewDb: Record<string, any> = {
   ],
   "automation/payments": { lastRunAt: Timestamp.fromMillis(now - 12 * 60_000), checked: 2, credited: 1, cleared: 0, waiting: 1, errors: 0 },
   "automation/classReminders": { lastRunAt: Timestamp.fromMillis(now - 6 * 60_000), lastSent: 0, totalSent: 14 },
+  "users/student_1/progress": [
+    { id: "W01", sessionId: "W01", position: 5400, duration: 5400, completed: true, updatedAt: Timestamp.fromMillis(now - 10 * day) },
+    { id: "W02", sessionId: "W02", position: 1840, duration: 5320, completed: false, updatedAt: Timestamp.fromMillis(now - 2 * day) },
+  ],
   "users/student_1/notificationReads": [{ id: "FLUTTER-2026-09_m2", readAt: new Date() }],
   "cohorts/FLUTTER-2026-09/messages": empty
     ? []

@@ -1,4 +1,5 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { Suspense, lazy, useMemo, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
 import { CalendarDays, CalendarPlus, Lock, Plus } from "lucide-react";
 import type { SessionDoc } from "../../../../services/registrationStore";
 import { mbtn, Tag } from "../../../marketing/ui";
@@ -11,6 +12,8 @@ import { RowsBone } from "../Skeleton";
 import { addToCalendar } from "../calendar";
 import { sessionInfo } from "../time";
 import { EmptyCard, LockedRow, RecordingCard, SessionRow } from "../ui";
+
+const ClassPage = lazy(() => import("./ClassPage"));
 
 type Tab = "upcoming" | "recordings" | "all";
 
@@ -28,7 +31,20 @@ const byWeek = (list: SessionDoc[]) => {
   return groups;
 };
 
+/** /student/classes lists classes; /student/classes/:id opens one. */
 const Classes: React.FC = () => {
+  const { sessionId } = useParams();
+  if (sessionId) {
+    return (
+      <Suspense fallback={<RowsBone count={2} />}>
+        <ClassPage sessionId={sessionId} />
+      </Suspense>
+    );
+  }
+  return <ClassList />;
+};
+
+const ClassList: React.FC = () => {
   const s = useStudent();
   const { nextCohortDate } = useContactLinks();
   const nextCohort = upcomingCohortLabel(nextCohortDate);
@@ -114,13 +130,13 @@ const Classes: React.FC = () => {
         {asCards ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {g.items.map((x) => (
-              <RecordingCard key={(x as any).id} session={x} />
+              <RecordingCard key={(x as any).id} session={x} progress={s.progress[String((x as any).id)]} />
             ))}
           </div>
         ) : (
           <ul className="space-y-2.5">
             {g.items.map((x) => (
-              <SessionRow key={(x as any).id} session={x} courseTitle={course} onAsk={() => askAbout(x)} />
+              <SessionRow key={(x as any).id} session={x} courseTitle={course} onAsk={() => askAbout(x)} progress={s.progress[String((x as any).id)]} />
             ))}
           </ul>
         )}
@@ -175,6 +191,10 @@ const Classes: React.FC = () => {
             </ul>
           </section>
         </div>
+      ) : s.notPlaced ? (
+        <Notice tone="review" title="Gideon is adding you to your class group" role="status">
+          Your payment is in, but you haven't been placed in an intake yet. Your classes show here as soon as you are.
+        </Notice>
       ) : s.sessionsLoading ? (
         <RowsBone count={3} />
       ) : !s.sessions.length ? (

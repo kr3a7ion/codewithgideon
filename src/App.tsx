@@ -346,6 +346,16 @@ const AppShell: React.FC = () => {
                 }
               />
               <Route path="student" element={<Navigate to="/student/dashboard" replace />} />
+              <Route
+                path="student/classes/:sessionId"
+                element={
+                  <PageMeta title="Class" {...privateMeta}>
+                    <RequireStudent>
+                      <StudentDashboardPage />
+                    </RequireStudent>
+                  </PageMeta>
+                }
+              />
               {STUDENT_SECTIONS.map((section) => (
                 <Route
                   key={section}
