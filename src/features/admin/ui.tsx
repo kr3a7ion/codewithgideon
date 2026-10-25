@@ -123,8 +123,21 @@ export function Segmented<T extends string>({
   label: string;
   className?: string;
 }) {
+  const stripRef = useRef<HTMLDivElement>(null);
+  // Keep the chosen tab visible when the strip scrolls sideways (phones, or a
+  // filter opened from a link).
+  useEffect(() => {
+    const strip = stripRef.current;
+    const tab = strip?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!strip || !tab) return;
+    const left = tab.offsetLeft - strip.offsetLeft;
+    if (left < strip.scrollLeft || left + tab.offsetWidth > strip.scrollLeft + strip.clientWidth) {
+      strip.scrollLeft = Math.max(0, left - 16);
+    }
+  }, [value, options.length]);
   return (
     <div
+      ref={stripRef}
       role="tablist"
       aria-label={label}
       className={cn(

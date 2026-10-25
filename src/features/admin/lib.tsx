@@ -329,8 +329,12 @@ export const isMentorContactMessage = (message: any) => {
   );
 };
 
+/**
+ * "Needs reply": the student sent the last message and the chat isn't marked
+ * done. Opening a chat doesn't change this; replying (or "Mark as done") does.
+ */
 export const isUnreadLearnerChat = (message: any) =>
-  String(message?.status || "new").toLowerCase() === "new" &&
+  String(message?.status || "new").toLowerCase() !== "resolved" &&
   !isAdminInboxMessage(message);
 
 export const getInboxThreadCollection = (message: ContactMessageDoc | null) =>

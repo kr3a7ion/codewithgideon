@@ -95,6 +95,20 @@ export const useAdminInsights = () => {
 
     const liveNow = published.filter((o) => sessionStart(o) <= now && sessionEnd(o) > now);
 
+    // Paid students whose next class (within a week) is in a week they
+    // haven't paid for yet: remind them to add weeks before they're locked out.
+    const weeksRunningOut = registrations
+      .filter((r: any) => r.status === "Complete" && r.cohortKey)
+      .map((r: any) => {
+        const paid = Number(r.weeksToCommit || 0);
+        const total = Number(r.courseDurationWeeks || 0);
+        const next = upcoming.find((o) => o.cohortId === r.cohortKey && sessionStart(o) - now <= 7 * DAY);
+        const nextWeek = next ? Number((next.session as any).week || 0) : 0;
+        return { reg: r as RegistrationEntry, paid, total, nextWeek, nextAt: next ? sessionStart(next) : 0 };
+      })
+      .filter((x) => x.nextWeek > x.paid && (!x.total || x.paid < x.total))
+      .sort((a, b) => a.nextAt - b.nextAt);
+
     // Current intake per path, and whether it has classes coming up.
     const intakes = paths
       .filter((p) => p.isActive !== false)
@@ -131,6 +145,7 @@ export const useAdminInsights = () => {
       (unreadInboxCount ? 1 : 0) +
       (unreadSupportCount ? 1 : 0) +
       (missingRecordings.length ? 1 : 0) +
+      (weeksRunningOut.length ? 1 : 0) +
       intakesWithoutClasses.length +
       pathsWithoutIntake.length;
 
@@ -147,6 +162,7 @@ export const useAdminInsights = () => {
       needsReview,
       newSignups,
       missingRecordings,
+      weeksRunningOut,
       todaysClasses,
       nextClass,
       liveNow,

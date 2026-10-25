@@ -52,7 +52,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { key: "inbox", label: "Inbox", path: "/admin/inbox", icon: Inbox, group: "People", tab: true },
   { key: "classes", label: "Classes", path: "/admin/classes", icon: CalendarDays, group: "Teaching", tab: true },
   { key: "cohorts", label: "Cohorts", path: "/admin/cohorts", icon: UsersRound, group: "Teaching" },
-  { key: "announcements", label: "Announcements", path: "/admin/announcements", icon: Megaphone, group: "Teaching" },
+  { key: "announcements", label: "Updates", path: "/admin/announcements", icon: Megaphone, group: "Teaching" },
   { key: "courses", label: "Courses & paths", path: "/admin/courses", icon: BookOpen, group: "Content" },
   { key: "resources", label: "Resources", path: "/admin/resources", icon: FolderOpen, group: "Content" },
   { key: "community", label: "Community", path: "/admin/community", icon: Layers, group: "Content" },

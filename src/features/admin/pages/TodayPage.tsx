@@ -8,6 +8,8 @@ import {
   CheckCircle2,
   CreditCard,
   ExternalLink,
+  Hourglass,
+  Megaphone,
   Inbox,
   Mail,
   Radio,
@@ -133,6 +135,26 @@ const TodayPage: React.FC = () => {
       ),
     });
   }
+  if (i.weeksRunningOut.length) {
+    const names = i.weeksRunningOut.slice(0, 3).map((x) => x.reg.fullName.split(" ")[0]).join(", ");
+    tasks.push({
+      key: "weeks",
+      icon: <Hourglass className="h-5 w-5" aria-hidden />,
+      tone: "orange",
+      title: `${i.weeksRunningOut.length} student${i.weeksRunningOut.length === 1 ? "" : "s"} about to run out of paid weeks`,
+      detail: (
+        <>
+          {names}
+          {i.weeksRunningOut.length > 3 ? ` and ${i.weeksRunningOut.length - 3} more` : ""}: their next class is in a week they haven&rsquo;t paid for.
+        </>
+      ),
+      action: (
+        <Button size="sm" variant="secondary" onClick={() => navigate("/admin/students?status=running-out")}>
+          See who
+        </Button>
+      ),
+    });
+  }
   i.intakesWithoutClasses.forEach((intake) => {
     tasks.push({
       key: `noclasses-${intake.path.id}`,
@@ -175,6 +197,11 @@ const TodayPage: React.FC = () => {
     <AdminPage
       title={greeting()}
       description={new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
+      actions={
+        <Button size="sm" variant="secondary" leftIcon={<Megaphone className="h-4 w-4" />} onClick={() => navigate("/admin/announcements")}>
+          Post an update
+        </Button>
+      }
     >
       {i.soon ? (
         <div className="flex flex-col gap-3 rounded-2xl bg-blue-900 p-4 text-white shadow-card dark:bg-teal-500 dark:text-slate-950 sm:flex-row sm:items-center sm:p-5">

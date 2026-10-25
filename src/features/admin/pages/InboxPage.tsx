@@ -1,7 +1,7 @@
 /* Inbox: student chats (app + website) and website contact messages. */
 import React, { useEffect, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
-import { ArrowLeft, CheckCheck, Inbox, Mail, MailOpen, Send, Trash2 } from "lucide-react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { ArrowLeft, CheckCheck, Inbox, Mail, MailOpen, Send, Trash2, UserRound } from "lucide-react";
 import { Button, cn } from "../../../ui";
 import { useAdmin } from "../AdminWorkspaceContext";
 import {
@@ -72,6 +72,7 @@ const StudentChat: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     deleteInboxMessage,
   } = useAdmin();
   const endRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -94,9 +95,20 @@ const StudentChat: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           <p className="truncate font-semibold text-slate-900 dark:text-white">{getInboxDisplayName(m)}</p>
           <p className="truncate text-xs text-slate-500">{[getInboxEmail(m), context].filter(Boolean).join(" · ")}</p>
         </div>
-        {status === "resolved" ? <Pill tone="success">Done</Pill> : null}
+        {status === "resolved" ? <Pill tone="success">Done</Pill> : isUnreadLearnerChat(m) ? <Pill tone="orange">Needs reply</Pill> : null}
+        {m.studentUid ? (
+          <Link
+            to={`/admin/students/${encodeURIComponent(m.studentUid)}`}
+            className="hidden items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-teal-700 hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-500/10 sm:inline-flex"
+          >
+            <UserRound className="h-3.5 w-3.5" aria-hidden /> Student
+          </Link>
+        ) : null}
         <OverflowMenu
           items={[
+            ...(m.studentUid
+              ? [{ label: "Open student page", icon: <UserRound className="h-4 w-4" />, onSelect: () => navigate(`/admin/students/${encodeURIComponent(m.studentUid)}`) }]
+              : []),
             status === "resolved"
               ? { label: "Mark as needs reply", icon: <MailOpen className="h-4 w-4" />, onSelect: () => markInboxStatus(m.id, "new") }
               : { label: "Mark as done", icon: <CheckCheck className="h-4 w-4" />, onSelect: () => markInboxStatus(m.id, "resolved") },
@@ -300,7 +312,6 @@ const InboxPage: React.FC = () => {
 
   const openChat = (m: any) => {
     setSelectedInboxId(m.id);
-    if (isUnreadLearnerChat(m)) markInboxStatus(m.id, "read");
     setParam({ thread: m.id });
   };
   const openSupport = (m: any) => {
