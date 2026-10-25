@@ -409,3 +409,11 @@ export const mergeInboxThreadEntries = (
       );
     })
     .sort((a, b) => toDateMs(a.createdAt) - toDateMs(b.createdAt));
+
+/** wa.me link for a Nigerian or international number, or "". */
+export const whatsappLink = (phone: string) => {
+  let digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("0")) digits = `234${digits.slice(1)}`;
+  return `https://wa.me/${digits}`;
+};
