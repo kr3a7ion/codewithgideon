@@ -7,11 +7,12 @@ import { Button } from "../../../ui";
 import { useAdmin } from "../AdminWorkspaceContext";
 import { AddStudentDialog } from "../parts/AddStudentDialog";
 import { whatsappLink } from "../lib";
+import { useAdminInsights } from "../insights";
 
 export { whatsappLink };
 import { AdminPage, EmptyHint, Panel, Pill, SearchInput, Segmented, Spinner, relativeTime } from "../ui";
 
-type StatusFilter = "all" | "paid" | "pending" | "new";
+type StatusFilter = "all" | "paid" | "pending" | "new" | "running-out";
 
 const DAY = 86_400_000;
 
@@ -55,15 +56,18 @@ const StudentsPage: React.FC = () => {
   };
 
   const now = Date.now();
+  const insights = useAdminInsights();
+  const runningOut = useMemo(() => new Map(insights.weeksRunningOut.map((x) => [x.reg.uid, x])), [insights.weeksRunningOut]);
   const counts = useMemo(
     () => ({
       all: registrations.length,
       paid: registrations.filter((r) => r.status === "Complete").length,
       pending: registrations.filter((r) => r.status !== "Complete").length,
       new: registrations.filter((r) => now - Number(r.timestamp || 0) < 7 * DAY).length,
+      runningOut: runningOut.size,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [registrations],
+    [registrations, runningOut],
   );
 
   const rows = useMemo(() => {
@@ -73,6 +77,7 @@ const StudentsPage: React.FC = () => {
         if (status === "paid") return r.status === "Complete";
         if (status === "pending") return r.status !== "Complete";
         if (status === "new") return now - Number(r.timestamp || 0) < 7 * DAY;
+        if (status === "running-out") return runningOut.has(r.uid);
         return true;
       })
       .filter((r) => pathFilter === "all" || String((r as any).pathId || "") === pathFilter || r.path === pathFilter)
@@ -83,7 +88,17 @@ const StudentsPage: React.FC = () => {
       )
       .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [registrations, status, pathFilter, search]);
+  }, [registrations, status, pathFilter, search, runningOut]);
+
+  /** WhatsApp nudge for a student whose paid weeks are about to run out. */
+  const remindLink = (r: any) => {
+    const x = runningOut.get(r.uid);
+    const wa = whatsappLink(r.phone);
+    if (!x || !wa) return "";
+    const first = String(r.fullName || "").split(" ")[0];
+    const text = `Hi ${first}, it's Gideon. Your next class (week ${x.nextWeek}) is coming up, and you've paid up to week ${x.paid}. Add weeks here so you don't miss it: https://codewithgideon.com/student/payment?mode=topup`;
+    return `${wa}?text=${encodeURIComponent(text)}`;
+  };
 
   const [adding, setAdding] = useState(false);
   const open = (uid: string) => navigate(`/admin/students/${encodeURIComponent(uid)}`);
@@ -125,6 +140,7 @@ const StudentsPage: React.FC = () => {
             { value: "paid", label: "Paid", count: counts.paid },
             { value: "pending", label: "Waiting to pay", count: counts.pending },
             { value: "new", label: "New this week", count: counts.new },
+            ...(counts.runningOut || status === "running-out" ? [{ value: "running-out" as StatusFilter, label: "Weeks running out", count: counts.runningOut }] : []),
           ]}
         />
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -182,6 +198,17 @@ const StudentsPage: React.FC = () => {
                       >
                         <span className="block font-semibold text-slate-900 dark:text-white">{r.fullName}</span>
                         <span className="block text-xs text-slate-500">{r.email}</span>
+                        {status === "running-out" && remindLink(r) ? (
+                          <a
+                            href={remindLink(r)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="mt-1 inline-block text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
+                          >
+                            Remind on WhatsApp
+                          </a>
+                        ) : null}
                       </button>
                     </td>
                     <td className="px-3 py-3">
@@ -209,7 +236,11 @@ const StudentsPage: React.FC = () => {
                       <span className="flex items-center gap-2">
                         <span className="truncate font-semibold text-slate-900 dark:text-white">{r.fullName}</span>
                       </span>
-                      <span className="mt-0.5 block truncate text-xs text-slate-500">{r.path}</span>
+                      <span className="mt-0.5 block truncate text-xs text-slate-500">
+                        {status === "running-out" && runningOut.get(r.uid)
+                          ? `Paid to week ${runningOut.get(r.uid)!.paid} · next class is week ${runningOut.get(r.uid)!.nextWeek}`
+                          : r.path}
+                      </span>
                       <span className="mt-1.5 flex flex-wrap items-center gap-2">
                         <StatusPill reg={r} />
                         <span className="text-xs text-slate-500">{weeksLabel(r)}</span>
@@ -217,6 +248,16 @@ const StudentsPage: React.FC = () => {
                     </span>
                     <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
                   </button>
+                  {status === "running-out" && remindLink(r) ? (
+                    <a
+                      href={remindLink(r)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="-mt-1 mb-3 ml-4 inline-block rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                    >
+                      Remind on WhatsApp
+                    </a>
+                  ) : null}
                 </li>
               ))}
             </ul>

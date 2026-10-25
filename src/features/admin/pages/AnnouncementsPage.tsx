@@ -1,10 +1,14 @@
-/* Announcements: send a message to everyone in a cohort. */
-import React from "react";
+/* Updates (announcements): send a message to one cohort, every cohort of a
+   course, or every running cohort. Students see them under Updates. */
+import React, { useState } from "react";
+import { registrationStore } from "../../../../services/registrationStore";
 import { BellRing, Megaphone, Pencil, Send, Trash2, Zap } from "lucide-react";
 import { Button, Field, inputClass } from "../../../ui";
 import { useAdmin } from "../AdminWorkspaceContext";
 import { toDateMs } from "../lib";
-import { AdminPage, EmptyHint, OverflowMenu, Panel, Pill, Spinner, relativeTime } from "../ui";
+import { AdminPage, EmptyHint, OverflowMenu, Panel, Pill, Segmented, Spinner, relativeTime } from "../ui";
+
+type Audience = "cohort" | "course" | "all";
 
 const AnnouncementsPage: React.FC = () => {
   const {
@@ -26,7 +30,50 @@ const AnnouncementsPage: React.FC = () => {
     busy,
     messageBusyId,
     activeByPath,
+    notify,
+    handleRefreshAll,
   } = useAdmin();
+  const [audience, setAudience] = useState<Audience>("cohort");
+  const [coursePath, setCoursePath] = useState("");
+  const [fanOutBusy, setFanOutBusy] = useState(false);
+  const [fanOutError, setFanOutError] = useState("");
+
+  // Running cohorts: not marked finished (Cohort page) and not switched off.
+  const running = cohorts.filter((c: any) => c.status !== "finished" && c.isActive !== false);
+  const pathForCourse = coursePath || String((cohorts.find((c) => c.id === selectedCohortId) as any)?.pathId || paths[0]?.id || "");
+  const targets =
+    audience === "all" ? running : audience === "course" ? running.filter((c: any) => c.pathId === pathForCourse) : [];
+
+  const sendToMany = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFanOutError("");
+    const title = messageForm.title.trim();
+    const body = messageForm.body.trim();
+    if (title.length < 3) return setFanOutError("Give it a title of at least 3 characters.");
+    if (body.length < 5) return setFanOutError("Write a message of at least 5 characters.");
+    if (!targets.length) return setFanOutError("There are no running cohorts to send to.");
+    setFanOutBusy(true);
+    try {
+      for (const c of targets) {
+        await registrationStore.sendCohortMessage({
+          cohortId: c.id,
+          cohortLabel: c.label,
+          title,
+          body,
+          ctaLabel: messageForm.ctaLabel.trim(),
+          ctaUrl: messageForm.ctaUrl.trim(),
+          sentBy: "admin",
+        } as any);
+      }
+      setMessageForm({ title: "", body: "", ctaLabel: "", ctaUrl: "" });
+      await handleRefreshAll();
+      notify("success", `Sent to ${targets.length} cohort${targets.length === 1 ? "" : "s"}.`);
+    } catch (err: any) {
+      setFanOutError(err?.message || "Couldn't send to every cohort. Check Sent to see which ones got it.");
+    } finally {
+      setFanOutBusy(false);
+    }
+  };
 
   const cohort = cohorts.find((c) => c.id === selectedCohortId);
   const openKeys = new Set(Object.values(activeByPath).map((a) => String(a?.cohortKey || "")));
@@ -34,8 +81,8 @@ const AnnouncementsPage: React.FC = () => {
 
   return (
     <AdminPage
-      title="Announcements"
-      description="Messages for everyone in a cohort. Students see them in the app and on the website under Notifications."
+      title="Updates"
+      description="Announcements for your students. They see them under Updates on the website and in the app."
     >
       <div className="sm:w-96">
         <label htmlFor="ann-cohort" className="mb-1.5 block text-sm font-semibold text-slate-700 dark:text-slate-200">Cohort</label>
@@ -68,10 +115,41 @@ const AnnouncementsPage: React.FC = () => {
 
       <div className="grid gap-5 lg:grid-cols-[1fr_1.1fr] lg:gap-6">
         <Panel
-          title={editingMessageId ? "Edit announcement" : "New announcement"}
-          description={cohort ? `To everyone in ${cohort.label}` : undefined}
+          title={editingMessageId ? "Edit update" : "New update"}
+          description={
+            editingMessageId || audience === "cohort"
+              ? cohort ? `To everyone in ${cohort.label}` : undefined
+              : `To ${targets.length} running cohort${targets.length === 1 ? "" : "s"}: ${targets.map((c) => c.label).join(", ") || "none"}`
+          }
         >
-          <form onSubmit={editingMessageId ? updateMessage : sendMessageToCohort} className="space-y-4">
+          <form onSubmit={editingMessageId ? updateMessage : audience === "cohort" ? sendMessageToCohort : sendToMany} className="space-y-4">
+            {!editingMessageId ? (
+              <div>
+                <p className="mb-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">Send to</p>
+                <Segmented
+                  label="Send to"
+                  value={audience}
+                  onChange={(v) => setAudience(v as Audience)}
+                  options={[
+                    { value: "cohort", label: "The cohort above" },
+                    { value: "course", label: "A whole course" },
+                    { value: "all", label: "All students" },
+                  ]}
+                />
+                {audience === "course" ? (
+                  <select
+                    aria-label="Course"
+                    value={pathForCourse}
+                    onChange={(e) => setCoursePath(e.target.value)}
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  >
+                    {paths.map((p) => (
+                      <option key={p.id} value={p.id}>{p.title}</option>
+                    ))}
+                  </select>
+                ) : null}
+              </div>
+            ) : null}
             <Field label="Title" htmlFor="ann-title">
               <input id="ann-title" value={messageForm.title} onChange={(e) => set({ title: e.target.value })} placeholder="e.g. Class moved to 7pm this Thursday" className={inputClass} />
             </Field>
@@ -89,15 +167,15 @@ const AnnouncementsPage: React.FC = () => {
                 </Field>
               </div>
             </details>
-            {messageError ? <p className="text-sm font-semibold text-red-600">{messageError}</p> : null}
+            {messageError || fanOutError ? <p className="text-sm font-semibold text-red-600">{fanOutError || messageError}</p> : null}
             <div className="flex flex-wrap gap-2">
               <Button
                 type="submit"
-                loading={editingMessageId ? messageBusyId === editingMessageId : !!busy.sendCohortMessage}
+                loading={editingMessageId ? messageBusyId === editingMessageId : !!busy.sendCohortMessage || fanOutBusy}
                 leftIcon={<Send className="h-4 w-4" />}
-                disabled={!cohort}
+                disabled={audience === "cohort" || editingMessageId ? !cohort : !targets.length}
               >
-                {editingMessageId ? "Save changes" : "Send announcement"}
+                {editingMessageId ? "Save changes" : audience === "cohort" ? "Send update" : `Send to ${targets.length} cohort${targets.length === 1 ? "" : "s"}`}
               </Button>
               {editingMessageId ? (
                 <Button variant="secondary" onClick={cancelEditMessage}>Cancel</Button>
@@ -114,7 +192,7 @@ const AnnouncementsPage: React.FC = () => {
             </p>
           </div>
 
-          <Panel title="Sent" padded={false}>
+          <Panel title="Sent" description={cohort ? `To ${cohort.label}` : undefined} padded={false}>
             {messagesLoading && cohortMessages.length === 0 ? (
               <Spinner label="Loading announcements" />
             ) : cohortMessages.length === 0 ? (

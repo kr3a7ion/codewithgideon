@@ -1,7 +1,7 @@
 /* Payments: unfinished checkouts (checked with Paystack), review queue, history. */
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, BadgeCheck, CreditCard, Eraser, HandCoins, Zap } from "lucide-react";
+import { AlertTriangle, BadgeCheck, CreditCard, Download, Eraser, HandCoins, Zap } from "lucide-react";
 import { Button, cn } from "../../../ui";
 import { useAdmin } from "../AdminWorkspaceContext";
 import { useAdminInsights } from "../insights";
@@ -62,10 +62,51 @@ const PaymentsPage: React.FC = () => {
 
   const lastAuto = toDateMs(automationStatus.payments?.lastRunAt);
 
+  /** Every payment record as a spreadsheet, for accounts and tax. */
+  const exportCsv = () => {
+    const esc = (v: unknown) => {
+      const t = String(v ?? "");
+      return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+    };
+    const header = ["Date", "Student", "Email", "Course", "Kind", "Weeks", "Amount (NGN)", "Method", "Status", "Resolution", "Reference", "Note"];
+    const rows = [...paymentRecords]
+      .sort((a: any, b: any) => (toDateMs(b.verifiedAt) || Number(b.timestamp || 0)) - (toDateMs(a.verifiedAt) || Number(a.timestamp || 0)))
+      .map((p: any) => {
+        const reg: any = registrationsByUid.get(p.userId);
+        const when = toDateMs(p.verifiedAt) || Number(p.timestamp || 0);
+        return [
+          when ? new Date(when).toISOString().slice(0, 10) : "",
+          reg?.fullName || "",
+          p.email || reg?.email || "",
+          p.path || reg?.path || "",
+          p.kind === "topup" ? "Top-up" : "First payment",
+          Number(p.weeks || 0),
+          paymentRecordAmount(p),
+          p.method || p.paystack?.channel || (p.source === "admin" ? "manual" : "paystack"),
+          p.status || "",
+          p.resolution || "",
+          p.reference || p.id,
+          p.note || "",
+        ];
+      });
+    const csv = [header, ...rows].map((r) => r.map(esc).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `codewithgideon-payments-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <AdminPage
       title="Payments"
       description="Paystack confirms most payments on its own. This page is for the few that need a look."
+      actions={
+        <Button variant="secondary" size="sm" leftIcon={<Download className="h-4 w-4" />} onClick={exportCsv} disabled={!paymentRecords.length}>
+          Export CSV
+        </Button>
+      }
     >
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="This month" value={naira(i.revenueThisMonth)} tone="teal" />
