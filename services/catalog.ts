@@ -45,6 +45,16 @@ const seed = async <T extends { id: string }>(coll: string, starters: T[]) => {
   return missing.length;
 };
 
+/** Turns a Firestore error into something an admin can act on. */
+export const catalogError = (err: any, fallback: string) => {
+  const code = String(err?.code || "");
+  if (code.includes("permission-denied")) {
+    return "Firebase refused the change. Deploy the latest database rules (firebase deploy --only firestore:rules), then try again.";
+  }
+  if (code.includes("unavailable")) return "You seem to be offline. Check your connection and try again.";
+  return err?.message || fallback;
+};
+
 export const catalog = {
   slugify,
   listProjects: () => list<Project>("portfolio"),

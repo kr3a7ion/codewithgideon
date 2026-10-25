@@ -1,8 +1,8 @@
 /* Packages: what's on the Hire page (websites, apps and systems) and what it
    costs. Changes show on the site straight away. */
 import React, { useCallback, useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, Download, Pencil, Plus, Tag as TagIcon, Trash2 } from "lucide-react";
-import { catalog } from "../../../../services/catalog";
+import { AlertTriangle, ArrowDown, ArrowUp, Download, Pencil, Plus, RotateCw, Tag as TagIcon, Trash2 } from "lucide-react";
+import { catalog, catalogError } from "../../../../services/catalog";
 import { PACKAGE_STARTERS, packagePrice, type HirePackage, type PackageNeed, type PriceMode } from "../../../marketing/catalog";
 import { refreshCatalog } from "../../../marketing/useCatalog";
 import { Button, Field, inputClass } from "../../../ui";
@@ -87,7 +87,7 @@ const PackageDialog: React.FC<{
       onSaved();
       onClose();
     } catch (err: any) {
-      setError(err?.message || "Couldn't save the package.");
+      setError(catalogError(err, "Couldn't save the package."));
     } finally {
       setSaving(false);
     }
@@ -153,7 +153,7 @@ const PackageDialog: React.FC<{
                   type="number"
                   inputMode="numeric"
                   min={0}
-                  step={500}
+                  step={100}
                   value={f.price || ""}
                   onChange={(e) => set({ price: Number(e.target.value) })}
                   className={inputClass}
@@ -203,51 +203,77 @@ const PackagesPage: React.FC = () => {
   const [items, setItems] = useState<HirePackage[] | null>(null);
   const [editing, setEditing] = useState<HirePackage | null>(null);
   const [importing, setImporting] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   const load = useCallback(async () => {
     try {
-      setItems(await catalog.listPackages());
+      const list = await catalog.listPackages();
+      setItems(list);
+      setLoadError("");
+      return list;
     } catch (err: any) {
-      notify("error", err?.message || "Couldn't load packages.");
-      setItems([]);
+      setLoadError(catalogError(err, "Couldn't load packages."));
+      return null;
     }
-  }, [notify]);
+  }, []);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const importStarters = async () => {
+  const empty = items !== null && items.length === 0;
+  const shown = empty ? PACKAGE_STARTERS : items || [];
+
+  /** The Hire page shows the built-in packages until they're saved here, so
+   *  the first change saves them all; nothing disappears from the site. */
+  const ensureImported = async (): Promise<HirePackage[]> => {
+    if (!empty) return items || [];
     setImporting(true);
     try {
-      const n = await catalog.seedPackages();
-      await Promise.all([load(), refreshCatalog()]);
-      notify("success", n ? `Imported ${n} package${n === 1 ? "" : "s"}. You can edit them now.` : "Everything was already imported.");
-    } catch (err: any) {
-      notify("error", err?.message || "Couldn't import.");
+      await catalog.seedPackages();
+      const list = (await load()) || [];
+      await refreshCatalog();
+      return list;
     } finally {
       setImporting(false);
     }
   };
 
-  const move = async (track: HirePackage["track"], id: string, dir: -1 | 1) => {
-    const all = [...(items || [])];
-    const list = all.filter((p) => p.track === track);
-    const i = list.findIndex((p) => p.id === id);
-    const j = i + dir;
-    if (j < 0 || j >= list.length) return;
-    [list[i], list[j]] = [list[j], list[i]];
-    const others = all.filter((p) => p.track !== track);
-    const ordered = track === "website" ? [...list, ...others] : [...others, ...list];
-    setItems(ordered.map((p, k) => ({ ...p, order: k + 1 })));
-    await catalog.reorder("hirePackages", ordered);
-    await refreshCatalog();
+  const run = async (fn: (list: HirePackage[]) => Promise<void> | void, fallback = "Couldn't save the change.") => {
+    try {
+      await fn(await ensureImported());
+    } catch (err: any) {
+      notify("error", catalogError(err, fallback));
+      load();
+    }
   };
+  const find = (list: HirePackage[], p: HirePackage) => list.find((x) => x.id === p.id) || p;
 
-  const togglePublished = async (p: HirePackage) => {
-    await catalog.savePackage({ ...p, published: !p.published });
-    await Promise.all([load(), refreshCatalog()]);
-  };
+  const importStarters = () => run(() => notify("success", "Packages imported. You can edit them now."), "Couldn't import.");
+  const edit = (p: HirePackage) => run((list) => setEditing(find(list, p)));
+  const add = (track: HirePackage["track"] = "website") =>
+    run((list) => setEditing({ ...blank(list.length + 1), track }));
+
+  const move = (track: HirePackage["track"], id: string, dir: -1 | 1) =>
+    run(async (all) => {
+      const list = all.filter((p) => p.track === track);
+      const i = list.findIndex((p) => p.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= list.length) return;
+      [list[i], list[j]] = [list[j], list[i]];
+      const others = all.filter((p) => p.track !== track);
+      const ordered = track === "website" ? [...list, ...others] : [...others, ...list];
+      setItems(ordered.map((p, k) => ({ ...p, order: k + 1 })));
+      await catalog.reorder("hirePackages", ordered);
+      await refreshCatalog();
+    });
+
+  const togglePublished = (p: HirePackage) =>
+    run(async (list) => {
+      const cur = find(list, p);
+      await catalog.savePackage({ ...cur, published: !cur.published });
+      await Promise.all([load(), refreshCatalog()]);
+    });
 
   const remove = async (p: HirePackage) => {
     const ok = await confirmAction({
@@ -257,34 +283,44 @@ const PackagesPage: React.FC = () => {
       tone: "danger",
     });
     if (!ok) return;
-    await catalog.removePackage(p.id);
-    await Promise.all([load(), refreshCatalog()]);
-    notify("success", "Package deleted.");
+    await run(async () => {
+      await catalog.removePackage(p.id);
+      await Promise.all([load(), refreshCatalog()]);
+      notify("success", "Package deleted.");
+    }, "Couldn't delete the package.");
   };
-
-  const empty = items !== null && items.length === 0;
-  const shown = empty ? PACKAGE_STARTERS : items || [];
 
   return (
     <AdminPage
       title="Packages"
       description="What's on the Hire page and what it costs. Changes go live straight away."
       actions={
-        !empty ? (
-          <Button size="sm" leftIcon={<Plus className="h-4 w-4" />} onClick={() => setEditing(blank((items?.length || 0) + 1))}>
+        items !== null ? (
+          <Button size="sm" leftIcon={<Plus className="h-4 w-4" />} disabled={importing} onClick={() => add()}>
             Add package
           </Button>
         ) : null
       }
     >
+      {loadError ? (
+        <div role="alert" className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 sm:flex-row sm:items-center sm:justify-between">
+          <p className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            {loadError}
+          </p>
+          <Button size="sm" variant="secondary" leftIcon={<RotateCw className="h-4 w-4" />} onClick={load}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
       {items === null ? (
-        <Spinner label="Loading packages" />
+        loadError ? null : <Spinner label="Loading packages" />
       ) : (
         <>
           {empty ? (
             <div className="flex flex-col gap-3 rounded-2xl border border-teal-200 bg-teal-50/70 p-4 text-sm text-teal-900 dark:border-teal-500/30 dark:bg-teal-500/10 dark:text-teal-100 sm:flex-row sm:items-center sm:justify-between">
-              <p>The Hire page is showing the built-in packages below. Import them to change prices and wording here.</p>
-              <Button size="sm" leftIcon={<Download className="h-4 w-4" />} loading={importing} onClick={importStarters}>
+              <p>The Hire page is showing these built-in packages. Change prices and wording, hide, reorder or delete any of them, or add your own; the first change saves them all here.</p>
+              <Button size="sm" className="shrink-0 whitespace-nowrap" leftIcon={<Download className="h-4 w-4" />} loading={importing} onClick={importStarters}>
                 Import packages
               </Button>
             </div>
@@ -292,7 +328,16 @@ const PackagesPage: React.FC = () => {
           {(["website", "app"] as const).map((track) => {
             const list = shown.filter((p) => p.track === track);
             return (
-              <Panel key={track} title={track === "website" ? "Websites" : "Apps and business systems"} padded={false}>
+              <Panel
+                key={track}
+                title={track === "website" ? "Websites" : "Apps and business systems"}
+                padded={false}
+                actions={
+                  <Button size="sm" variant="secondary" leftIcon={<Plus className="h-4 w-4" />} disabled={importing} onClick={() => add(track)}>
+                    Add
+                  </Button>
+                }
+              >
                 {list.length === 0 ? (
                   <EmptyHint icon={<TagIcon className="h-5 w-5" />} title="No packages here yet" />
                 ) : (
@@ -311,7 +356,6 @@ const PackagesPage: React.FC = () => {
                             {p.timeline ? ` · ${p.timeline}` : ""}
                           </p>
                         </div>
-                        {!empty ? (
                           <div className="flex items-center gap-1">
                             <div className="w-28">
                               <Toggle checked={p.published} onChange={() => togglePublished(p)} label="On site" />
@@ -322,12 +366,11 @@ const PackagesPage: React.FC = () => {
                             <IconButton label="Move down" disabled={i === list.length - 1} onClick={() => move(track, p.id, 1)}>
                               <ArrowDown className="h-4 w-4" aria-hidden />
                             </IconButton>
-                            <IconButton label={`Edit ${p.name}`} onClick={() => setEditing(p)}>
+                            <IconButton label={`Edit ${p.name}`} disabled={importing} onClick={() => edit(p)}>
                               <Pencil className="h-4 w-4" aria-hidden />
                             </IconButton>
                             <OverflowMenu items={[{ label: "Delete", icon: <Trash2 className="h-4 w-4" />, danger: true, onSelect: () => remove(p) }]} />
                           </div>
-                        ) : null}
                       </li>
                     ))}
                   </ul>

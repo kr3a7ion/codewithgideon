@@ -1,8 +1,8 @@
 /* Portfolio: every project shown on the public Portfolio page — your own
    products, client work and sample demos — with pictures from Site media. */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Briefcase, Download, ImageOff, Pencil, Plus, Star, Trash2, X } from "lucide-react";
-import { catalog } from "../../../../services/catalog";
+import { AlertTriangle, ArrowDown, ArrowUp, Briefcase, Download, ImageOff, Pencil, Plus, RotateCw, Star, Trash2, X } from "lucide-react";
+import { catalog, catalogError } from "../../../../services/catalog";
 import {
   OWNERSHIP_LABEL,
   PROJECT_STARTERS,
@@ -136,7 +136,7 @@ const ProjectDialog: React.FC<{
       onSaved();
       onClose();
     } catch (err: any) {
-      setError(err?.message || "Couldn't save the project.");
+      setError(catalogError(err, "Couldn't save the project."));
     } finally {
       setSaving(false);
     }
@@ -358,15 +358,19 @@ const PortfolioPage: React.FC = () => {
   const [items, setItems] = useState<Project[] | null>(null);
   const [editing, setEditing] = useState<Project | null>(null);
   const [importing, setImporting] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   const load = useCallback(async () => {
     try {
-      setItems(await catalog.listProjects());
+      const list = await catalog.listProjects();
+      setItems(list);
+      setLoadError("");
+      return list;
     } catch (err: any) {
-      notify("error", err?.message || "Couldn't load the portfolio.");
-      setItems([]);
+      setLoadError(catalogError(err, "Couldn't load the portfolio."));
+      return null;
     }
-  }, [notify]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -375,34 +379,54 @@ const PortfolioPage: React.FC = () => {
   const empty = items !== null && items.length === 0;
   const shown = useMemo(() => (empty ? PROJECT_STARTERS : items || []), [empty, items]);
 
-  const importStarters = async () => {
+  /** The site shows the built-in projects until they're saved here, so the
+   *  first change saves them all; nothing disappears from the public page. */
+  const ensureImported = async (): Promise<Project[]> => {
+    if (!empty) return items || [];
     setImporting(true);
     try {
-      const n = await catalog.seedProjects();
-      await Promise.all([load(), refreshCatalog()]);
-      notify("success", n ? `Imported ${n} project${n === 1 ? "" : "s"}. Add pictures to each one next.` : "Everything was already imported.");
-    } catch (err: any) {
-      notify("error", err?.message || "Couldn't import.");
+      await catalog.seedProjects();
+      const list = (await load()) || [];
+      await refreshCatalog();
+      return list;
     } finally {
       setImporting(false);
     }
   };
 
-  const update = async (p: Project, patch: Partial<Project>) => {
-    await catalog.saveProject({ ...p, ...patch });
-    await Promise.all([load(), refreshCatalog()]);
+  const run = async (fn: (list: Project[]) => Promise<void> | void, fallback = "Couldn't save the change.") => {
+    try {
+      await fn(await ensureImported());
+    } catch (err: any) {
+      notify("error", catalogError(err, fallback));
+      load();
+    }
   };
+  const find = (list: Project[], p: Project) => list.find((x) => x.id === p.id) || p;
 
-  const move = async (id: string, dir: -1 | 1) => {
-    const list = [...(items || [])];
-    const i = list.findIndex((p) => p.id === id);
-    const j = i + dir;
-    if (j < 0 || j >= list.length) return;
-    [list[i], list[j]] = [list[j], list[i]];
-    setItems(list.map((p, k) => ({ ...p, order: k + 1 })));
-    await catalog.reorder("portfolio", list);
-    await refreshCatalog();
-  };
+  const importStarters = () =>
+    run(() => notify("success", "Projects imported. Add pictures to each one next."), "Couldn't import.");
+
+  const edit = (p: Project) => run((list) => setEditing(find(list, p)));
+  const add = () => run((list) => setEditing(blank(list.length + 1)));
+
+  const update = (p: Project, patch: Partial<Project>) =>
+    run(async (list) => {
+      await catalog.saveProject({ ...find(list, p), ...patch });
+      await Promise.all([load(), refreshCatalog()]);
+    });
+
+  const move = (id: string, dir: -1 | 1) =>
+    run(async (current) => {
+      const list = [...current];
+      const i = list.findIndex((p) => p.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= list.length) return;
+      [list[i], list[j]] = [list[j], list[i]];
+      setItems(list.map((p, k) => ({ ...p, order: k + 1 })));
+      await catalog.reorder("portfolio", list);
+      await refreshCatalog();
+    });
 
   const remove = async (p: Project) => {
     const ok = await confirmAction({
@@ -412,9 +436,11 @@ const PortfolioPage: React.FC = () => {
       tone: "danger",
     });
     if (!ok) return;
-    await catalog.removeProject(p.id);
-    await Promise.all([load(), refreshCatalog()]);
-    notify("success", "Project deleted.");
+    await run(async () => {
+      await catalog.removeProject(p.id);
+      await Promise.all([load(), refreshCatalog()]);
+      notify("success", "Project deleted.");
+    }, "Couldn't delete the project.");
   };
 
   const live = shown.filter((p) => p.published).length;
@@ -424,23 +450,34 @@ const PortfolioPage: React.FC = () => {
       title="Portfolio"
       description="Your projects on the public Portfolio page: your own products, client work and demos."
       actions={
-        !empty ? (
-          <Button size="sm" leftIcon={<Plus className="h-4 w-4" />} onClick={() => setEditing(blank((items?.length || 0) + 1))}>
+        items !== null ? (
+          <Button size="sm" leftIcon={<Plus className="h-4 w-4" />} disabled={importing} onClick={add}>
             Add project
           </Button>
         ) : null
       }
     >
+      {loadError ? (
+        <div role="alert" className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 sm:flex-row sm:items-center sm:justify-between">
+          <p className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            {loadError}
+          </p>
+          <Button size="sm" variant="secondary" leftIcon={<RotateCw className="h-4 w-4" />} onClick={load}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
       {items === null ? (
-        <Spinner label="Loading the portfolio" />
+        loadError ? null : <Spinner label="Loading the portfolio" />
       ) : (
         <>
           {empty ? (
             <div className="flex flex-col gap-3 rounded-2xl border border-teal-200 bg-teal-50/70 p-4 text-sm text-teal-900 dark:border-teal-500/30 dark:bg-teal-500/10 dark:text-teal-100 sm:flex-row sm:items-center sm:justify-between">
               <p>
-                These are the starter projects. Import them to edit, add screenshots and links. FacilityFlow and Day Book come in as hidden drafts.
+                The site is showing these built-in projects. Edit, hide, reorder or delete any of them, or add your own; the first change saves them all here. FacilityFlow and Day Book come in as hidden drafts.
               </p>
-              <Button size="sm" leftIcon={<Download className="h-4 w-4" />} loading={importing} onClick={importStarters}>
+              <Button size="sm" className="shrink-0 whitespace-nowrap" leftIcon={<Download className="h-4 w-4" />} loading={importing} onClick={importStarters}>
                 Import projects
               </Button>
             </div>
@@ -471,8 +508,7 @@ const PortfolioPage: React.FC = () => {
                         {p.kind || p.types.map(projectTypeLabel).join(", ")} · {OWNERSHIP_LABEL[p.ownership]} · {STATUS_LABEL[p.status]}
                       </p>
                     </div>
-                    {!empty ? (
-                      <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1">
                         <div className="w-28">
                           <Toggle checked={p.published} onChange={(v) => update(p, { published: v })} label="On site" />
                         </div>
@@ -482,7 +518,7 @@ const PortfolioPage: React.FC = () => {
                         <IconButton label="Move down" disabled={i === shown.length - 1} onClick={() => move(p.id, 1)}>
                           <ArrowDown className="h-4 w-4" aria-hidden />
                         </IconButton>
-                        <IconButton label={`Edit ${p.title}`} onClick={() => setEditing(p)}>
+                        <IconButton label={`Edit ${p.title}`} disabled={importing} onClick={() => edit(p)}>
                           <Pencil className="h-4 w-4" aria-hidden />
                         </IconButton>
                         <OverflowMenu
@@ -492,7 +528,6 @@ const PortfolioPage: React.FC = () => {
                           ]}
                         />
                       </div>
-                    ) : null}
                   </li>
                 ))}
               </ul>
